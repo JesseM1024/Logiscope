@@ -45,6 +45,10 @@
 `VISION.md`（方向与边界）/ `GOALS.md`（G0–G6 分目标）/ `ARCHITECTURE.md`
 （分层 + 7 条关键路径 + **已核实的 API 清单**）/ `PROGRESS.md`（本文）/ `BACKUP.md`
 
+### 版本控制 `[x]`
+- git 仓库已初始化，首次提交 `2a57a81`，标签 `g0-skeleton`（27 个文件）
+- `.gitignore` 已验证：`build/`、`.gradle/`、`run/`、`.idea/` 均未入库
+
 ---
 
 ## 三、进行中 `[~]`
