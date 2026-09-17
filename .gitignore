@@ -1,0 +1,19 @@
+# Gradle
+.gradle/
+build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# 开发运行实例（存档、日志、配置，体积很大）
+run/
+run-data/
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# 系统
+.DS_Store
+Thumbs.db

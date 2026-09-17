@@ -1,0 +1,35 @@
+# 构建时 ${} 占位符会被 gradle.properties 的值替换。
+# 最终产物在 build/generated/sources/modMetadata/META-INF/neoforge.mods.toml
+
+modLoader="javafml" #mandatory
+loaderVersion="${loader_version_range}" #mandatory
+license="${mod_license}"
+
+[[mods]] #mandatory
+modId="${mod_id}" #mandatory
+version="${mod_version}" #mandatory
+displayName="${mod_name}" #mandatory
+description='''
+纯客户端物流探测示波器。
+
+在任意模组设备的容器 GUI 中按下快捷键，即可呼出示波器，
+把某个容器格接到探头上，逐游戏刻记录其中物品的种类与数量变化。
+
+全程只读客户端已同步的数据，不发送任何网络包，不需要服务端安装。
+'''
+
+# 纯客户端模组：依赖只在客户端校验。
+# 服务端即使没装这个模组也不会报错（配合主类上的 @Mod(dist = Dist.CLIENT)）。
+[[dependencies.${mod_id}]]
+    modId="neoforge"
+    type="required"
+    versionRange="[${neo_version},)"
+    ordering="NONE"
+    side="CLIENT"
+
+[[dependencies.${mod_id}]]
+    modId="minecraft"
+    type="required"
+    versionRange="${minecraft_version_range}"
+    ordering="NONE"
+    side="CLIENT"
