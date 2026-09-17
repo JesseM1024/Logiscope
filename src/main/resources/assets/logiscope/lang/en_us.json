@@ -1,0 +1,12 @@
+{
+  "key.categories.logiscope": "LogiScope",
+  "logiscope.key.open_scope": "Open LogiScope",
+  "logiscope.title": "LogiScope",
+  "logiscope.slot.empty": "(empty)",
+  "logiscope.status.idle": "No probe attached",
+  "logiscope.status.armed": "Armed - pick a slot",
+  "logiscope.status.recording": "Recording",
+  "logiscope.status.paused": "Paused",
+  "logiscope.hint.pick_slot": "Click a slot below to attach the probe",
+  "logiscope.hint.close": "ESC to close"
+}

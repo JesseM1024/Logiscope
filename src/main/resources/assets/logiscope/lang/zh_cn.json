@@ -1,0 +1,12 @@
+{
+  "key.categories.logiscope": "物流示波器",
+  "logiscope.key.open_scope": "打开物流示波器",
+  "logiscope.title": "物流示波器",
+  "logiscope.slot.empty": "（空）",
+  "logiscope.status.idle": "未连接探头",
+  "logiscope.status.armed": "待选格 - 请点击一个容器格",
+  "logiscope.status.recording": "记录中",
+  "logiscope.status.paused": "已暂停",
+  "logiscope.hint.pick_slot": "点击下方任一容器格，把探头接上去",
+  "logiscope.hint.close": "ESC 关闭"
+}
