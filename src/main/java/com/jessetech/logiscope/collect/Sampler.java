@@ -39,6 +39,11 @@ import org.jetbrains.annotations.Nullable;
  * 【PAUSED 的两种来源，行为不同】
  *   manualPause = true   用户按了「暂停」→ 不自动恢复，只能手动继续
  *   manualPause = false  数据源自己失效了 → 一旦数据源回来（重开同一台设备）自动恢复
+ *
+ * 【时间轴连续性：RECORDING → FOLLOWING 的接缝】
+ *   关界面的那一 tick 记的是 lastKnown（上一 tick 的观测值），并把它垫进 WorldProbe 缓存，
+ *   于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
+ *   真读不到的时候才会记 no_data —— 该断的地方照样断。
  */
 public final class Sampler {
 
@@ -65,6 +70,18 @@ public final class Sampler {
 
     /** 暂停是不是用户主动按的（决定能否自动恢复） */
     private boolean manualPause;
+
+    /**
+     * 最近一次真正读到的值。
+     *
+     * 只为一件事存在：**补住"关掉容器界面的那一 tick"**。
+     * 那一 tick 菜单已经不在了（读不到），而世界侧的异步读取又还没回来，
+     * 于是时间轴上会凭空出现一个空洞 + 一条假 no_data。
+     * 手里这个值最多 1 tick（50 ms）旧，拿它续上比记"无数据"诚实得多。
+     * 详见 WorldProbe#seed 的注释。
+     */
+    @Nullable
+    private ContainerAccess.SlotView lastKnown;
 
     /** 上一次给玩家发动作栏提示的 tick，用于去抖 */
     private long lastNotifyTick = Long.MIN_VALUE / 2;
@@ -116,6 +133,7 @@ public final class Sampler {
         this.watchedContainerId = ContainerAccess.currentContainerId();
         this.store.clear();
         this.manualPause = false;
+        this.lastKnown = null;
         WorldProbe.reset();
         this.state = State.RECORDING;
     }
@@ -125,6 +143,7 @@ public final class Sampler {
         this.target = null;
         this.watchedContainerId = -1;
         this.manualPause = false;
+        this.lastKnown = null;
         WorldProbe.reset();
         this.state = State.IDLE;
     }
@@ -216,6 +235,8 @@ public final class Sampler {
 
     private void enterFollowing() {
         WorldProbe.reset();
+        // 把最后一次已知值垫进缓存，抹掉异步管道的启动延迟（见 WorldProbe#seed）
+        WorldProbe.seed(lastKnown, tick);
         state = State.FOLLOWING;
         notifyPlayer("logiscope.msg.following");
     }
@@ -274,6 +295,13 @@ public final class Sampler {
         if (!ContainerAccess.hasForeignContainerOpen()) {
             // 玩家关掉界面了
             if (followAfterClose && target.hasPersistentId()) {
+                // ★ 先补住"关界面的这一 tick"★
+                // 这一 tick 菜单已经没了，但上一 tick 读到的值还在手上（最多 1 tick 旧）。
+                // 不补的话时间轴在这里断一格，而下一 tick 又会因为异步读取还没回来
+                // 记一条 no_data —— 合起来就是实机反馈的"关界面时冒出 1t 的 no-data"。
+                if (lastKnown != null) {
+                    store.add(new Sample(tick, lastKnown.itemId(), lastKnown.count()));
+                }
                 enterFollowing();
             } else {
                 pauseAuto();
@@ -294,6 +322,7 @@ public final class Sampler {
             return;
         }
 
+        lastKnown = view;
         store.add(new Sample(tick, view.itemId(), view.count()));
     }
 
@@ -315,9 +344,12 @@ public final class Sampler {
 
         WorldProbe.request(target, tick);
         ContainerAccess.SlotView view = WorldProbe.latest(tick, WORLD_READ_MAX_AGE);
-        store.add(view == null
-                ? Sample.noData(tick)
-                : new Sample(tick, view.itemId(), view.count()));
+        if (view == null) {
+            store.add(Sample.noData(tick));
+        } else {
+            lastKnown = view;
+            store.add(new Sample(tick, view.itemId(), view.count()));
+        }
     }
 
     /** 暂停中：只有"自动暂停"才允许数据源自己回来时恢复 */

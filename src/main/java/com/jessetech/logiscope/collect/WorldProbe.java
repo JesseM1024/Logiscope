@@ -46,6 +46,31 @@ public final class WorldProbe {
     }
 
     /**
+     * ★ 用"最后一次已知值"垫一下，专治"刚关掉界面那 1 tick 的假 no_data" ★
+     *
+     * 问题出在时序上，不是读取失败：
+     *   第 N   tick  客户端发现界面关了 → 提交不了请求（这一 tick 还没进 FOLLOWING）
+     *   第 N+1 tick  WorldProbe.request() 把任务丢给服务端线程，
+     *               而**同一 tick 内** latest() 立刻就要取值 —— 服务端线程还没轮到
+     *               → 必然返回 null → 记下一条 no_data
+     * 所以那条 no_data 是"异步管道的启动延迟"，不是"这台机器读不到"，纯属误导。
+     *
+     * 修法：进入 FOLLOWING 时把上一 tick 刚读到的值（最多 50 ms 旧）当作一次快照塞进缓存，
+     * 让时间轴续上；真正的异步结果在 1–2 tick 内到达并覆盖它。
+     * 若确实读不到（多人 / 区块卸载 / 方块被拆），这个垫值会在 maxAge 之后自然过期，
+     * 之后照样记 no_data —— 该断的地方还是会断。
+     *
+     * @param tick 这次垫值算作哪一 tick 的观测（一般传当前 tick）
+     */
+    public static void seed(@Nullable ContainerAccess.SlotView view, long tick) {
+        if (view == null) {
+            return;
+        }
+        cached = new Snapshot(view, tick);
+        // 刻意不动 pending：垫值只是"缓一下"，不该阻止真正的异步请求发出去
+    }
+
+    /**
      * 请求一次世界侧读取。**每 tick 调一次即可**，不要在同一 tick 里反复调。
      * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
      */

@@ -22,12 +22,15 @@
 │         collect/WorldProbe       读方块实体（★ 界面关了时的数据源）│
 │         collect/Sampler          每 tick 产出 Sample，状态机      │
 ├───────────────────────────────────────────────────────────────┤
-│ 存储层  store/SampleStore      环形缓冲，时间序列                │
+│ 存储层  store/SampleStore      环形缓冲 + version，唯一真相       │
 │         store/Sample           最小可序列化单元（含 no_data 哨兵）│
 ├───────────────────────────────────────────────────────────────┤
-│ 分析层  analysis/Analyzer      纯函数：差值 / 摘要 / 事件         │
+│ 分析层  analysis/Analyzer      纯函数：摘要 / 逐 tick 差值        │
+│         analysis/ChartData     纯函数：扁平序列 → 按物品分组的数据线│
+│         analysis/Series(Pt)    数据线的形状（含断点标记）         │
 ├───────────────────────────────────────────────────────────────┤
-│ 呈现层  ui/ScopeScreen         只读，可拖动的浮层面板             │
+│ 呈现层  ui/ScopeScreen         只读：布局 / 交互 / 视图状态       │
+│         ui/ChartRenderer       只读：坐标轴 / 波形 / 框选 / 准线   │
 ├───────────────────────────────────────────────────────────────┤
 │ (规划)  持久层  export/*       CSV / JSON 导出                  │
 └───────────────────────────────────────────────────────────────┘
@@ -39,17 +42,20 @@
 |---|---|---|
 | C1 | `Sampler` 不认识任何 UI / 渲染类 | 界面崩了会连带采样一起挂 |
 | C2 | `SampleStore` 只存 `(tick, itemId, count)`，不持有 `ItemStack` | 无法离线分析、无法导出、容易泄漏世界引用 |
-| C3 | `Analyzer` 是纯函数，不持有状态 | 无法单元测试，图表和导出会算出不同结果 |
-| C4 | `ScopeScreen` 只读，绝不直接改采样数据 | 界面刷新时机不可控，容易写出竞态 |
+| C3 | `Analyzer` / `ChartData` 是纯函数，不持有状态 | 无法单元测试，图表和导出会算出不同结果 |
+| C4 | `ui/*` 只读，绝不直接改采样数据 | 界面刷新时机不可控，容易写出竞态 |
 | C5 | 只有一个采样器实例：`LogiScopeMod.sampler()` | 多处 `new Sampler()` 会导致数据分裂 |
 | C6 | `WorldProbe#readNow` **只能在服务端线程跑** | 跨线程读 ServerLevel 是数据竞争 |
-| C7 | `no_data` 样本不进统计（`Analyzer` 负责过滤） | 断档会被算成"数量掉到 0"，净流量全错 |
+| C7 | `no_data` 样本不进统计（`Analyzer` / `ChartData` 负责过滤，但要让它**占时间轴**） | 断档会被算成"数量掉到 0"，净流量全错；反过来丢掉时间轴会让图上的断档消失 |
+| C8 | **`analysis/` 与 `store/` 不 import 任何 `net.minecraft` / `net.neoforged`** | 一旦引入游戏类，`dev-check/` 的离线断言就跑不了，只能靠进游戏肉眼看 |
 
 **一句话总结数据流**：
 
 ```
 按键盘 → KeyBindings → (界面开着?) ContainerAccess : WorldProbe
-                     → Sampler 状态机 → SampleStore → Analyzer → ScopeScreen 画
+                     → Sampler 状态机 → SampleStore(version)
+                     → ChartData/Analyzer（version 变了才重算）
+                     → ChartRenderer 画到 ScopeScreen 上
 ```
 
 ---
@@ -77,7 +83,7 @@ vanilla 的 `KeyMapping` 只在**没有界面打开**时才会被 tick 消费
 
 事件的实际发出点不在 `Screen#keyPressed` 里，在 `KeyboardHandler#keyPress`：
 
-```java
+``` java
 if (screen != null) {
     if (action == 1 || action == 2) {                 // ← 按下 和 长按连发 都进这里
         handled[0] = ClientHooks.onScreenKeyPressedPre(screen, key, scanCode, modifiers);
@@ -130,7 +136,7 @@ if (screen != null) {
 
 第 3 层的原理来自对 `KeyboardHandler#charTyped` 的核实：
 
-```java
+``` java
 if (ClientHooks.onScreenCharTypedPre(screen, (char)codepoint, mods)) return;  // 被 cancel → 不发 Post
 if (screen.charTyped((char)codepoint, mods)) return;                          // 被控件吃掉 → 不发 Post
 ClientHooks.onScreenCharTypedPost(screen, (char)codepoint, mods);             // 只有没人接手才发 Post
@@ -143,7 +149,7 @@ ClientHooks.onScreenCharTypedPost(screen, (char)codepoint, mods);             //
 
 只记**上一个**字符事件的结果（一个布尔量），**绝对不要用累计计数**：
 
-```java
+``` java
 // ✅ 对：一个字符事件结束时，它恰好等于"这个字符有没有被吃掉"
 public static void onCharTypedPre(...)  { lastCharConsumed = true;  }
 public static void onCharTypedPost(...) { lastCharConsumed = false; }
@@ -228,13 +234,28 @@ RECORDING ──界面关了，且用户开了"继续检测"且拿得到坐标�
 |---|---|
 | 环形缓冲 | 固定容量 36000（半小时），写满覆盖最旧，内存可预测 |
 | 只在需要时读槽位 | `IDLE`/`ARMED` 只走一次整数比较 |
-| 火花线按列取峰值 | 采样点远多于像素时，不做逐点绘制 |
+| **派生数据按 `version` 缓存** | 数据没变就不重算：全量遍历从 60 次/秒 降到 20 次/秒（CP12） |
+| **波形按列聚合** | 采样点远多于像素时不做逐点绘制；每帧复杂度 = O(窗口内采样点数)（CP11） |
+| **二分定位窗口起点** | `lowerBound` 找起点，"全览 30 分钟"时不必从第一个点开始扫（CP11） |
+| **列聚合数组复用** | 按图表宽度分配一次，不为每帧 new（CP11） |
 | 世界侧读值异步化 | `server.execute` 提交任务 + volatile 缓存，不在渲染/客户端线程读服务端对象 |
 | 不引入图表库 | 只用 `GuiGraphics#fill` + `drawString` |
 
-**待补**：`ScopeScreen.render` 里每次调用 `store.toList()` 会新建一个 List，
-面板还每 tick 调 `ContainerAccess.snapshot()` 再建一个。样本多时是每秒 60 次的分配。
-G2 阶段要改成按需读取区间。
+**已修的旧问题**：上一版 `ScopeScreen.render` **每帧**调 `store.toList()` 并
+`Analyzer.summarize(samples)`，样本多时是 60 次/秒的全量遍历 + List 分配。
+现在两者都进了 `rebuildIfNeeded`，只在 `SampleStore#version` 变化后跑一次（20 次/秒）。
+
+**仍未消除的小分配**（都已评估为可忽略，不再优化）：
+
+| 位置 | 频率 | 量级 |
+|---|---|---|
+| `SampleStore.toList()` 复制 | 20 次/秒（仅面板开着时） | ≈290 KB/次，年轻代 |
+| `layout()` 里的 `wrap`/`place` | 1 次/帧 | 几个小 ArrayList |
+| `window()` 返回 `long[2]` | 1 次/帧 | 32 字节 |
+| `ChartRenderer` 的读数字符串拼接 | 1 次/帧（鼠标在图上时） | 一个 StringBuilder |
+
+> 判断标准：**每帧的常驻分配为零**，只留下与"数据变化频率"和"用户操作"同阶的分配。
+> 真要做帧时间实测，用 `VERIFY.md` 的 N12 挂机 10 分钟观察。
 
 ### CP7 · 纯客户端成立性　风险：低
 
@@ -255,7 +276,7 @@ G2 阶段要改成按需读取区间。
 
 源码证据（`net/neoforged/neoforge/client/ClientHooks.java`）：
 
-```java
+``` java
 /** Contains the *extra* GUI layers.
  *  The current top layer stays in Minecraft#currentScreen,
  *  and the rest serve as a background for it. */
@@ -275,7 +296,7 @@ public static void popGuiLayer(Minecraft minecraft) {
 
 渲染侧（`ClientHooks#drawScreen`，由 `GameRenderer` 在 `screen != null` 时调用）：
 
-```java
+``` java
 guiLayers.forEach(layer -> {
     drawScreenInternal(layer, gui, Integer.MAX_VALUE, Integer.MAX_VALUE, partialTick);
     guiGraphics.pose().translate(0, 0, 10000);      // 每层往后推，保证层级
@@ -317,7 +338,7 @@ drawScreenInternal(screen, gui, mouseX, mouseY, partialTick);   // 最顶层用�
 传进来的鼠标坐标算 `hoveredSlot` 的，而背景层拿到的是 `MAX_VALUE`。
 我们在最顶层、手里有真实坐标，所以自己补画一遍。需要的全是公开 API（已核实）：
 
-```java
+``` java
 AbstractContainerScreen<?> bg = ...;
 int left = bg.getGuiLeft(), top = bg.getGuiTop();          // public（Neo 加的访问器）
 for (Slot slot : bg.getMenu().slots) {
@@ -360,7 +381,7 @@ GUI scale 调大时逻辑分辨率可能只有 320 宽，而面板固定 272 宽
 
 两样都在最顶层自己补画：
 
-```java
+``` java
 // 手持物品：复刻 vanilla 的 renderFloatingItem（它是 private，只能照着写）
 ItemStack carried = bg.getMenu().getCarried();          // public
 if (!carried.isEmpty()) {
@@ -422,9 +443,197 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 结果写进 volatile 缓存，客户端下一 tick 取用。缓存还带"提交时的 tick"，
 超过 5 tick 就算过期（服务端卡顿时不要把陈旧值当成新值写进序列）。
 
+#### CP9 之一：接缝处那条**假的** no_data（已修）
+
+曾经有一段"关掉界面必定记 1 tick no_data"的现象。它不是读取失败，
+而是**异步管道的启动延迟**：
+
+```
+第 N   tick  客户端发现界面关了（菜单已失效，读不到）→ 这一 tick 什么也没记
+第 N+1 tick  WorldProbe.request() 把任务丢给服务端线程，
+             而**同一 tick 内** latest() 立刻就要取值 —— 服务端线程还没轮到
+             → 必然返回 null → 记下一条 no_data
+```
+
+两个毛病叠在一起：时间轴上断了一格，外加一条**误导性的"无数据"**
+（玩家会以为"这台机器读不到"，其实只是还没排上队）。
+
+修法两件事同时做：
+
+| 位置 | 做法 |
+|---|---|
+| 过渡那一 tick | `Sampler` 持有 `lastKnown`（上一 tick 刚读到的值，最多 50 ms 旧），在检测到界面关闭时**先把它记下去**，补住空洞 |
+| 下一 tick 的取值 | `WorldProbe.seed(lastKnown, tick)` 把这个值垫进缓存，`latest()` 的年龄判定（≤ `WORLD_READ_MAX_AGE`）让它算"新鲜"，于是异步结果到达前时间轴是连续的 |
+
+**这不是把 no_data 藏起来**：垫值会在 `WORLD_READ_MAX_AGE`（5 tick）后自然过期。
+区块卸载、方块被拆、多人读不到这些情况，该记 no_data 还是照记 ——
+验证清单里的 N1c 就是在盯这一点（走远到区块卸载，`no-data` 必须开始增长）。
+
+> 教训：**"读不到"和"还没读到"是两回事**。
+> 异步读取的第一次调用天生拿不到结果，把它的第一次返回当成"失败"上报，
+> 是在制造假警报。修这类问题的方向是"用最后一次已知值兜住 + 给个过期窗口"，
+> 而不是把等待包装成失败。
+
 **认不出来的情况**：右键信息过期 / 目标模组用快捷键开界面 → 锚点为 null
 → 退化成纯运行时身份，关掉界面只能 `PAUSED`。这是刻意的：
 **宁可明确停住，也不要往别的方块上记。**
+
+---
+
+### CP10 · 把时间序列变成「多条按物品分组的数据线」　风险：中 ⚠️
+
+```
+需求：槽位里的东西会变。铁锭 → 空 → 铜锭 → 铁锭 这样一路变下来，
+      不能画成一条连来连去的折线（那些连线毫无意义），
+      而且要"每种物品一条自己的线、各有各的颜色，图例可以单独关掉"。
+```
+
+#### 先定一个容易搞反的分工：**分组是派生视图，不是存储结构**
+
+直觉上"出现新物品就新建一个数组"很自然，但那样会带来三个麻烦：
+
+| 麻烦 | 具体是什么 |
+|---|---|
+| 环形覆盖 | 写满时要跨 N 个数组协调"该丢哪一段最旧的"，很容易写错 |
+| 清空 / 查询 | "清空"要遍历所有数组；"某一刻这一格里到底是什么"反而要反查 |
+| 时间轴 | 多条数组之间没有统一的时间轴，画图前还得先归并一次 |
+
+所以这里选的另一条路：**扁平的环形缓冲（`SampleStore`）仍是唯一真相**，
+按物品分组的 `ChartData.series()` 是它的**派生视图**，数据一变就整体重算。
+
+代价是"每次重算都是 O(n)"。用 `SampleStore#version` 把它压到**每 tick 最多一次**
+（而不是每帧一次，见 CP12 的缓存），n 最大 36000（半小时），
+一次全量遍历是零点几毫秒 —— 换来的是"顺序、断档、清空、环形覆盖全都自动正确"。
+
+#### 断点规则：什么时候必须把线剪掉
+
+三种情况统一落到 `SeriesPoint#breakBefore` 一个标记上，渲染层只管照着断开：
+
+| 情况 | 为什么必须断 |
+|---|---|
+| 物品换了 | 从"64 个铁锭"变成"1 个铜锭"，差值 −63 是假的 |
+| 中间是 `no_data` | 那段时间我们没观测到，**把两点连起来等于编造数据** |
+| tick 不连续（间隔 > `CONTINUITY_GAP`） | 采样停了（暂停 / 状态切换），同样不能连 |
+
+契约：**每条线的第一个点一定是"段起点"**（`breakBefore = true`）。
+它前面没东西可连，所以这是无害的；渲染层靠 `colStart` 决定"要不要连到左邻列"，
+而首列本来就没有左邻列。
+
+`ChartData` 还顺手给出 `switches`（物品切换次数），面板上显示成 `switch N`。
+
+#### 配色：按**下标**取色，而不是按名字哈希
+
+`series` 的顺序 = 物品**首次出现**的顺序（`LinkedHashMap` 保证），
+所以"第几条线用什么颜色"是稳定的 —— 不会因为中途冒出一个新物品，
+旧线就集体换色。这是"按下标取色"而不是"按 itemId 哈希取色"的原因：
+后者在调色板轮转时也可能撞色，前者至少保证了"先出现的线颜色固定"。
+
+`minecraft:air`（格子空着）单独给一个低饱和灰蓝：它不是物品，不该和物品线抢注意力，
+但它**仍然是一条正经的线**（数量恒 0）—— 丢掉它就看不出"这一格被抽空了"。
+
+---
+
+### CP11 · 波形渲染：坐标轴、自动缩放、尖峰、稀疏数据　风险：中 ⚠️
+
+```
+需求：一眼看懂。要有坐标轴和刻度；采样点比像素多时尖峰不能被平均掉；
+      纵轴自动缩放；no_data 是空白断档；鼠标框选。
+```
+
+#### 1. 纵轴自动缩放要"吸附到整数刻度"
+
+直接用 `[min, max]` 会有两个毛病：刻度落在小数上读不出来；
+而且窗口一滚动范围就每帧变，数字不停抖。
+
+做法：按 `(max-min)/4` 求一个 nice step（1/2/5/10/20/50/100… 阶梯），
+再把上下界吸附到它的整数倍。这样刻度落在整数上，**范围只会偶尔跳一次**。
+
+> 仍然会有跳变（这是自动缩放的固有代价），但频率从"每帧"降到"过一会儿一次"。
+
+#### 2. 稠密数据：按**列**取极值，不是取平均
+
+一个像素列里可能落着上百个采样点。取平均会把"一瞬冲到 64 又落回 0"抹平 ——
+而那恰恰是物流系统最值得看的东西。所以每列记录 `min/max/first/last`，
+画的时候画**从 min 到 max 的竖线**，再把上一列的 `last` 连到本列的 `first`
+（数据是台阶状的，跳变就发生在这条竖线上）。
+
+#### 3. 稀疏数据：列与列之间**线性插值**
+
+反过来，缩放到很近时一个点占一列，中间会隔着很多空列 ——
+不补的话折线就退化成一串孤立的点。所以同一段之内，空列用首尾线性补上。
+
+**这两条不冲突**，因为它们判定的对象不同：
+
+- "中间隔了几列" → 说明采样点稀疏 → 补
+- 而断档不会走进来 —— 断档会让下一列的 `colStart = true`，直接跳过连接
+
+#### 4. `no_data` 的列什么都不画
+
+断档就该看得出来是断档。图上留白，比画一条 0 的线诚实。
+
+#### 5. 每帧复杂度 = O(窗口内采样点数)，且零常驻分配
+
+- 列聚合数组（`colMin/colMax/colFirst/colLast/colHas/colStart`）**按图表宽度复用**，
+  只在宽度变化时重建 —— 不是每帧 new
+- 每个 series 的点是**按 tick 有序**的 → 用二分（`lowerBound`）找窗口起点，
+  于是"全览 30 分钟数据"时不必从第一个点开始扫
+- 画线只用 `GuiGraphics#fill`（逐列 1px 竖直矩形）。它没有画线 API，
+  但"逐列竖直矩形"正好和"按列聚合"是同一个形状 —— 两件事合成一次遍历
+
+> 这是"挂机 10 分钟不掉帧"的依据所在；实测确认见 `VERIFY.md` N12。
+
+**一个已知的、故意不修的边界**：若在同一个像素列里发生了物品切换（要求缩放到
+极远 + 恰好切换），旧颜色会在这一列多画一小截。列宽 1px，肉眼不可见，
+不值得为它把聚合逻辑复杂化。
+
+---
+
+### CP12 · 视图状态：实时 / 冻结 / 框选 / 图例　风险：低
+
+```
+需求：波形实时滚动；能用鼠标框选一段；图例能开关数据线；面板能缩放。
+```
+
+#### 规则只有一条，好记
+
+| 动作 | 结果 |
+|---|---|
+| 拖出一段选区 | **自动冻结视图**（否则波形继续往前滚，刚框住那段几秒后就跑出屏幕） |
+| 点「实时滚动」 | 回到实时滚动 + **清掉选区**（两者不并存） |
+| 点「清选」 | 只清选区，**不解冻**（要实时就自己点「实时滚动」） |
+| 点「全览」 | 冻结 + 窗口 = 整段记录 |
+| 滚轮（实时） | 缩放，右端锚定（最新数据必须一直在视野里） |
+| 滚轮（冻结） | 左右平移（回头细看某一段） |
+| 滚轮在**面板外** | 转交容器（CP8 之一） |
+
+框选期间额外**锁住窗口**（`selectWindowStart/End`）：不锁的话波形会跟着手跑，选不准。
+松开手时按"锁住的那个窗口"把像素换算成 tick —— **不能重算窗口**，
+否则松手那一帧窗口已经变了，选框会跳一下。
+
+#### 布局只有一份
+
+`ScopeScreen#layout()` 产出这一帧的全部矩形（含每个按钮/图例块的位置），
+**渲染与鼠标命中共用同一份结果**。上一版是"渲染按一套坐标、点击按另一套坐标"，
+这类错位是最难查的一类 bug —— 明明按钮画在那里，就是点不到。
+
+面板尺寸与位置、以及"哪些数据线被图例关掉了"都是**静态字段**（跨开合保持）：
+它们是使用偏好，不是数据。但**探针换了目标时会清空隐藏集合**
+（换了一套数据线，上一套的隐藏记录没有意义），
+且会**丢掉已经不存在的数据线**的隐藏记录（`pruneHidden`），
+否则某个物品消失又出现时会莫名保持隐藏，玩家找不到原因。
+
+#### 派生数据的缓存：`version` 而不是"每帧重算"
+
+`SampleStore#version` 在任何 `add` / `clear` 时 +1。界面 `rebuildIfNeeded` 时
+对比版本号，只有变了才重算 `ChartData` + `Analyzer.Summary`。
+
+效果：60 fps 下的全量遍历从 **60 次/秒** 降到 **20 次/秒**（采样频率），
+而且改动只集中在一处 —— 不会出现"某条路径忘了通知界面刷新"的漏网情况。
+
+> 取舍说明：代价是 `toList()` 会真的复制一份（最多 36000 个引用 ≈ 290 KB），
+> 20 次/秒 ≈ 5.8 MB/s 的年轻代垃圾。对 JVM 完全无压力，
+> 换来的是 `ChartData` 保持纯函数形态（可离线测试，见 `dev-check/`）——
+> 比省这点内存值得。
 
 ---
 
@@ -444,6 +653,15 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 | 格子 hover 高亮 | **自己补画**（CP8 之二） | 接受没有高亮 | 全是公开 API，十几行就能拿回视觉反馈 |
 | 面板边界 | 拖动中宽松、打开时收紧（CP8 之三） | 一律限制在屏幕内 | 大 GUI scale 下面板必须能推出去；但又要留退路 |
 | 第三方搜索框守卫 | 每支持一个搜索类模组加一个小探针（反射） | 只靠通用兜底 | 探针是**主动**判定，能在"点进搜索框立刻按键"时也拦住；兜底要等一次按键才学会 |
+| 按物品分组的数据线 | **派生视图**（扁平环形缓冲是唯一真相） | 存储层就按物品分数组 | 前者让"环形覆盖 / 清空 / 断档判定"只写一遍；后者要跨数组协调、且丢失统一时间轴（CP10） |
+| 数据线配色 | 按 series **下标**取色 | 按 itemId 哈希 | 保证"先出现的线颜色固定"，不会因新物品出现而集体换色 |
+| 纵轴范围 | 吸附到 nice step | 直接用 min/max | 刻度落在整数上，且把"每帧抖"降成"偶尔跳一次"（CP11） |
+| 稠密采样 | 逐列取 min/max | 逐列取平均 | 平均会把尖峰抹平，而尖峰正是物流分析最想看的东西 |
+| 画线原语 | 逐列 1px 竖直矩形 | 引入画线库 | `GuiGraphics` 本来就没有画线 API；而"逐列竖直矩形"和"逐列聚合"是同一个形状，合成一次遍历（CP11） |
+| 派生数据缓存 | `SampleStore#version` + 每 tick 最多重算一次 | 每帧重算 / 界面里做增量更新 | 前者把开销降到 1/3 且只改一处；增量更新更容易漏（CP12） |
+| 建立选区 | **自动冻结**视图 | 继续实时滚动 | 不冻结的话刚框住那段几秒后跑出屏幕，选择就没意义了（CP12） |
+| 面板尺寸 | 右下角可缩放 + 静态字段记住 | 固定尺寸 | 波形要放坐标轴/图例/框选，固定 272×190 画不下；尺寸也是使用偏好（CP12） |
+| 关界面接缝 | 用 `lastKnown` 兜住 + 垫进 `WorldProbe` 缓存 | 接受 1 tick 假 no_data | "读不到"和"还没读到"是两回事，把等待包装成失败是制造假警报（CP9 之一） |
 
 ### 已知限制（不是 bug，是取舍）
 
@@ -458,19 +676,31 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 | 多人下关界面记不到真值 | 纯客户端定位的必然代价 | 见 CP9 |
 | 用快捷键开界面的模组拿不到坐标 | vanilla 菜单不存方块坐标，只能靠右键事件推 | 见 CP9 |
 | 第三方搜索框需逐个加探针 | 那些模组的搜索框不挂进 `screen.children()` | 目前只接了 JEI；通用兜底能覆盖其余情况（代价：多按一次） |
+| 一个像素列里同时发生物品切换时，旧颜色会在该列多画一小截 | 列聚合每列只记 `first` 的断点标记 | 列宽 1px，肉眼不可见；不值得为它复杂化聚合逻辑（CP11） |
+| 图例超过 3 行时多出的收成 `+N`（点不到） | 面板高度有限 | 一个槽位同时出现 7 种以上物品很罕见；把面板拖大即可（CP12） |
+| 纵轴范围随窗口滚动偶尔会跳一下 | 自动缩放的固有代价 | 已吸附到整数刻度，跳变频率远低于逐帧抖动（CP11） |
+| 界面上只画 3 条数据线时，跨空列会线性插值（画成斜坡） | 采样点稀疏时无法知道真实跳变发生在哪一 tick | 台阶数据的斜坡只出现在"两点间隔很大"的情况，属合理近似（CP11） |
 
 ### 待决问题（写代码前先决定）
 
 1. **多探针**：现在只有 1 个探针。多探针需要把 `Sampler` 的状态改成
-   `Map<ProbeTarget, SampleStore>`。**建议 G2 之后再做**，界面复杂度会翻倍。
+   `Map<ProbeTarget, SampleStore>`，界面也要改成"一屏多条独立波形 / 多页切换"。
+   **G2 之后可以开始考虑**，但界面复杂度会明显上升。
+   （好消息：`ChartData.build` 已经是纯函数，"多套数据各建一份"是它的自然用法。）
 2. **采样降频**：长时间记录时是否需要"每 N tick 采样一次"以延长覆盖时长？
-   （`no_data` 每 tick 一条，密集断档会较快写满环形缓冲，可能需要"断档合并"。）
+   注意：若真的降频，`ChartData.CONTINUITY_GAP` 必须跟着改成 N，
+   否则正常采样会被误判成断档、波形碎成一堆短线段。
 3. **物品 NBT**：现在只记 itemId，不区分 NBT 不同的同名物品
    （例如带不同附魔的书）。做物流分析时大概率够用，但要在文档里写明。
 4. **让容器的键盘操作也能用**：需要补上 `hoveredSlot`（它是 `protected`）。
    可行路径：反射写字段，或改成"纯事件叠加绘制"方案（让容器界面留作
    `minecraft.screen`，用 `ScreenEvent.Render.Post` 画面板）。后者更干净但改动面大。
 5. **`no_data` 的采样密度**：现在和真实样本一样每 tick 一条。是否该在断档期间降频？
+   （同理注意 `CONTINUITY_GAP`。）
+6. **图例的可滚动 / 可折叠**：现在超过 3 行会把多出来的收成 `+N`。
+   真出现"一个槽位里轮换了十几种物品"的场景时，需要给图例加翻页。
+7. **时间轴对齐参考**：目前所有系列的横轴都是绝对 tick。
+   若以后支持"多探针对比"，可能需要"以某个事件为 0 点"的相对时间轴。
 
 ---
 
@@ -518,9 +748,13 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 | `Screen.mouseClicked/mouseReleased/mouseDragged/mouseScrolled` | `(double,double,…)`，`ContainerEventHandler` 默认方法 | 面板交互 |
 | `Screen.tick()` | `Minecraft#tick` 在 `screen != null` 时调用 | 刷新槽位快照 |
 | `GuiGraphics.drawString(Font,@Nullable String,int,int,int)` | 存在 | 画文字 |
-| `GuiGraphics.fill(int,int,int,int,int)` | 存在 | 画矩形 |
+| **`GuiGraphics.drawString(Font,@Nullable String,int,int,int,boolean dropShadow)`** | 存在（去阴影） | 小号刻度数字用它更清楚 |
+| `GuiGraphics.fill(int,int,int,int,int)` | 存在，**支持 ARGB**（带 alpha 好用） | 画矩形 / 竖线 |
+| **`GuiGraphics.enableScissor(int,int,int,int)` / `disableScissor()`** | public | 需要裁剪时可用；本项目优先用"坐标钳制"代替（CP11） |
+| **`GuiGraphics` 没有画线 API** | 只有 `fill`（axis-aligned 矩形）/ `drawString` / `blit` | 斜线要逐列 1px 竖直矩形拼（CP11） |
+| **`Screen.hasShiftDown()/hasControlDown()/hasAltDown()`** | **public static，在 `Screen` 上**（不是 `Minecraft`） | 任何地方都能问修饰键 |
 | `InputConstants.KEY_RBRACKET` | `public static final int = 93` | 备用键位 `]` |
-| **`InputConstants.KEY_F9`** | `public static final int = 298` | **默认键位 `F9`**（功能键不产生字符，见 CP2） |
+| **`InputConstants.KEY_F9`** | `public static final int = 298` | **代码默认键位 `F9`**（功能键不产生字符，见 CP2） |
 | `KeyMapping.matches(int,int)` | **只比 keyCode，忽略修饰键** | ★ CP2 的坑 |
 | `KeyMapping.releaseAll()` | `public static` | 开面板时清按键状态 |
 | `EditBox` / `AbstractWidget.isFocused()` | public | ★ CP2 规则 3 第 1 层 |
@@ -573,27 +807,44 @@ src/main/java/com/jessetech/logiscope/
 │  └─ ProbeTarget.java        绑定层：探针目标（运行时身份 + 持久身份）
 ├─ collect/
 │  ├─ ContainerAccess.java    采集层：读菜单槽位（★ CP1，项目基石）
-│  ├─ WorldProbe.java         采集层：读方块实体，服务端线程执行（★ CP9）
+│  ├─ WorldProbe.java         采集层：读方块实体，服务端线程执行 + seed 垫值（★ CP9）
 │  └─ Sampler.java            采集层：状态机 + 每 tick 采样（CP4/CP5/CP9）
 ├─ store/
 │  ├─ Sample.java             存储层：最小可序列化单元（含 no_data 哨兵）
-│  └─ SampleStore.java        存储层：环形缓冲
+│  └─ SampleStore.java        存储层：环形缓冲 + version 计数（CP12）
 ├─ analysis/
-│  └─ Analyzer.java           分析层：纯函数（过滤 no_data）
+│  ├─ Analyzer.java           分析层：纯函数（摘要 / 逐 tick 差值，跳过 no_data）
+│  ├─ ChartData.java          分析层：扁平序列 → 按物品分组的数据线（★ CP10）
+│  ├─ Series.java             分析层：一条数据线（含断点）
+│  └─ SeriesPoint.java        分析层：一个采样点（含 breakBefore）
 └─ ui/
-   └─ ScopeScreen.java        呈现层：可拖动的浮层面板（CP6/CP8）
+   ├─ ScopeScreen.java        呈现层：可拖动可缩放的浮层面板，布局与交互（CP6/CP8/CP12）
+   └─ ChartRenderer.java      呈现层：坐标轴 / 自动缩放 / 多线 / 框选 / 准线（★ CP11）
+
+dev-check/
+└─ TestChart.java             ★ 离线断言（不启动游戏）：断点规则、分组、颜色顺序、框选统计
+                               跑法见文件头注释；分析层不依赖游戏类才能这么用
 ```
+
+**为什么 `analysis/` 要拆成四个文件**：`ChartData` 负责"分组与断点判定"，
+`Series`/`SeriesPoint` 是它的数据形状，`Analyzer` 保留"与具体图形无关的统计"。
+三者的共同点是**都不 import 任何 `net.minecraft`** —— 这不是洁癖，
+而是让 `dev-check/TestChart.java` 能脱离游戏跑断言的前提（`VERIFY.md` H 组）。
 
 ## 六、扩展点（新功能该往哪加）
 
 | 想加的功能 | 加在哪 | 注意 |
 |---|---|---|
-| 新的统计量（吞吐、周期） | `analysis/Analyzer` | 保持纯函数，别引入状态；记得跳过 no_data |
-| 新的图表类型 | `ui/` 下新建渲染器 | 只读 `List<Sample>`，别碰 `Sampler` |
-| CSV / JSON 导出 | 新建 `export/` 包 | 从 `SampleStore.toList()` 取数据；no_data 要单独标记 |
-| 在波形上标点 | `ui/` + `store/` 加标记集合 | 标记是**用户数据**，不该塞进 `SampleStore` 的环形缓冲（会被覆盖掉） |
-| 在波形上**框选一段区间** | `ui/ScopeScreen` 的鼠标处理 | 面板外已经是空白画布（CP8 之一保证不穿透），直接吃 `mouseDragged` 即可 |
-| 支持多探针 | `Sampler` + `ScopeScreen` | 见第三节「待决问题 1」 |
+| 新的统计量（吞吐、周期） | `analysis/Analyzer` | 保持纯函数，别引入状态；记得跳过 no_data；**顺手在 `dev-check/TestChart.java` 里加几条断言** |
+| 新的图表类型 | `ui/` 下新建渲染器 | 只读 `ChartData` / `List<Sample>`，别碰 `Sampler` |
+| CSV / JSON 导出 | 新建 `export/` 包 | 从 `SampleStore.toList()` 取数据；no_data 要单独标记。分组信息可以直接复用 `ChartData.series()` |
+| 在波形上标点 | `ui/ChartRenderer` + `ScopeScreen` 的标记集合 | 标记是**用户数据**，不该塞进 `SampleStore` 的环形缓冲（会被覆盖掉）。选区的两个端点已经是现成的落点（`ChartRenderer.Selection`） |
+| 在波形上**框选一段区间** | ✅ 已完成 | 见 CP12；`Selection` → `ChartData.ranges()` → 统计块 |
+| 换配色 / 加调色板条目 | `ui/ChartRenderer.PALETTE` | 按 series **下标**取色，所以往末尾加颜色不会影响已有线的颜色 |
+| 图上再叠一层信息（速率曲线等） | `ui/ChartRenderer` 里加一条"派生线" | 派生线的 y 尺度可能和 count 差很多 → 需要第二条纵轴，建议先想清楚 |
+| 支持多探针 | `Sampler` + `ScopeScreen` + `ChartData` | 见第三节「待决问题 1」。`ChartData.build` 是纯函数，"各建一份"是它的自然用法 |
 | **支持别的搜索类模组**（REI / EMI） | `bind/TextInputGuard` 里加一个小探针 | 照 `JeiSearchProbe` 抄；先用 `javap -p -cp run/mods/<mod>.jar` 查它的 API |
 | 让容器的键盘操作也能用 | `ui/ScopeScreen` 补 `hoveredSlot` | 见第三节「待决问题 4」 |
 | 兼容自绘界面的模组 | `collect/` 下新建 accessor | 需要面向接口重构 `ContainerAccess` |
+| **图例可滚动 / 可折叠** | `ui/ScopeScreen` 的 `capRows` / `renderLegend` | 见第三节「待决问题 6」 |
+| **给纯逻辑层加更多断言** | `dev-check/` 下新建 `Test*.java` | 前提是那一层不 import 游戏类。跑法见 `VERIFY.md` H 组 |

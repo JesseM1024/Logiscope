@@ -10,10 +10,13 @@
   "logiscope.status.following": "坐标跟踪中",
   "logiscope.status.paused": "已暂停（手动）",
   "logiscope.status.paused_auto": "已暂停（源丢失）",
+
   "logiscope.hint.pick_slot": "点下面任一格，把探头接上去",
   "logiscope.hint.no_container": "没有外部容器界面·先打开一台设备",
   "logiscope.hint.scroll": "滚轮翻页",
   "logiscope.hint.drag": "按住这里拖动",
+  "logiscope.hint.resize": "拖这里缩放面板",
+
   "logiscope.btn.back": "返回选格",
   "logiscope.btn.pause": "暂停",
   "logiscope.btn.resume": "继续",
@@ -21,6 +24,16 @@
   "logiscope.btn.close": "收起",
   "logiscope.btn.follow_on": "关界面后继续检测：开",
   "logiscope.btn.follow_off": "关界面后继续检测：关",
+
+  "logiscope.tool.live": "实时滚动",
+  "logiscope.tool.frozen": "已冻结",
+  "logiscope.tool.fit": "全览",
+  "logiscope.tool.clear_sel": "清选",
+
+  "logiscope.chart.too_small": "面板太小·拖右下角放大",
+  "logiscope.chart.no_data_in_window": "这一区间没有数据",
+  "logiscope.chart.all_hidden": "数据线都被图例关掉了",
+
   "logiscope.flash.attached": "探头已接上",
   "logiscope.flash.runtime_only": "探头已接上（无坐标，关界面即停）",
   "logiscope.flash.detached": "已断开探头",
@@ -28,6 +41,10 @@
   "logiscope.flash.resumed": "已继续",
   "logiscope.flash.resume_failed": "数据源不可用，停在暂停",
   "logiscope.flash.cleared": "已清空记录",
+  "logiscope.flash.live": "已回到实时滚动",
+  "logiscope.flash.fit": "已全览整段记录",
+  "logiscope.flash.sel_cleared": "已清除选区",
+
   "logiscope.msg.following": "LogiScope：界面已关，转为坐标跟踪",
   "logiscope.msg.paused_auto": "LogiScope：数据源丢失，已暂停"
 }

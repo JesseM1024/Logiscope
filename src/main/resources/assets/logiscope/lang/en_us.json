@@ -10,10 +10,13 @@
   "logiscope.status.following": "Tracking by position",
   "logiscope.status.paused": "Paused (manual)",
   "logiscope.status.paused_auto": "Paused (source lost)",
+
   "logiscope.hint.pick_slot": "Click a slot below to attach the probe",
   "logiscope.hint.no_container": "No container open - open a device first",
   "logiscope.hint.scroll": "scroll to page",
   "logiscope.hint.drag": "drag here to move",
+  "logiscope.hint.resize": "drag here to resize",
+
   "logiscope.btn.back": "Slots",
   "logiscope.btn.pause": "Pause",
   "logiscope.btn.resume": "Resume",
@@ -21,6 +24,16 @@
   "logiscope.btn.close": "Hide",
   "logiscope.btn.follow_on": "Keep tracking after close: ON",
   "logiscope.btn.follow_off": "Keep tracking after close: OFF",
+
+  "logiscope.tool.live": "Live",
+  "logiscope.tool.frozen": "Frozen",
+  "logiscope.tool.fit": "Fit all",
+  "logiscope.tool.clear_sel": "Clear sel",
+
+  "logiscope.chart.too_small": "Panel too small - drag bottom-right corner",
+  "logiscope.chart.no_data_in_window": "no data in this range",
+  "logiscope.chart.all_hidden": "all series hidden by the legend",
+
   "logiscope.flash.attached": "Probe attached",
   "logiscope.flash.runtime_only": "Probe attached (no position, stops on close)",
   "logiscope.flash.detached": "Probe detached",
@@ -28,6 +41,10 @@
   "logiscope.flash.resumed": "Resumed",
   "logiscope.flash.resume_failed": "Source unavailable, staying paused",
   "logiscope.flash.cleared": "Record cleared",
+  "logiscope.flash.live": "Back to live scrolling",
+  "logiscope.flash.fit": "Showing the whole recording",
+  "logiscope.flash.sel_cleared": "Selection cleared",
+
   "logiscope.msg.following": "LogiScope: GUI closed, tracking by position",
   "logiscope.msg.paused_auto": "LogiScope: data source lost, paused"
 }
