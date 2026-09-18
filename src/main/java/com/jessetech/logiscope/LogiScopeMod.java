@@ -3,7 +3,7 @@ package com.jessetech.logiscope;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.KeyBindings;
 import com.jessetech.logiscope.bind.TextInputGuard;
-import com.jessetech.logiscope.collect.Sampler;
+import com.jessetech.logiscope.collect.ProbeManager;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -31,8 +31,14 @@ public final class LogiScopeMod {
     public static final String MODID = "logiscope";
     public static final Logger LOGGER = LoggerFactory.getLogger("LogiScope");
 
-    /** 全局唯一的采样器实例。所有层都通过它读数据。 */
-    private static final Sampler SAMPLER = new Sampler();
+    /**
+     * 全局唯一的探针管理器。所有层都通过它拿数据。
+     *
+     * 第九轮之前这里是"唯一的 Sampler"（只能有一个探头）。现在管理器里面持有
+     * **多个** {@code ProbeInstance}（正在运行的探针是一个列表），并且是每客户端 tick
+     * 驱动它们采样的唯一入口。
+     */
+    private static final ProbeManager PROBES = new ProbeManager();
 
     public LogiScopeMod(IEventBus modBus, ModContainer container) {
         // 注册快捷键（必须在模组总线上）
@@ -59,8 +65,8 @@ public final class LogiScopeMod {
         // ContainerAnchor 内部用 isClientSide 过滤掉了。
         NeoForge.EVENT_BUS.<PlayerInteractEvent.RightClickBlock>addListener(ContainerAnchor::onRightClickBlock);
 
-        // 每客户端 tick：锚点计时 + 采样
-        NeoForge.EVENT_BUS.<ClientTickEvent.Post>addListener(Sampler::onClientTick);
+        // 每客户端 tick：锚点计时 + 全局时钟推进 + 所有探针实例采样
+        NeoForge.EVENT_BUS.<ClientTickEvent.Post>addListener(ProbeManager::onClientTick);
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来
@@ -69,7 +75,7 @@ public final class LogiScopeMod {
         LOGGER.info("[LogiScope] client-only mod constructed");
     }
 
-    public static Sampler sampler() {
-        return SAMPLER;
+    public static ProbeManager probes() {
+        return PROBES;
     }
 }

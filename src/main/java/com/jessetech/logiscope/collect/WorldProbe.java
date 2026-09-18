@@ -10,14 +10,22 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+
 /**
  * 采集层：界面关掉之后，从「方块实体」继续取值的通道。
+ *
+ * ★ 第九轮：从"全局单例"改成"每个探针实例一份" ★
+ *   多探针并存之后，读值缓存、待处理标志、下标验证结果都必须是**每实例独立**的
+ *   （否则两个探针会互相覆盖对方的读数）。但"现在世界走到第几 tick"是全世界唯一的，
+ *   已经抽到 {@link ServerClock}。所以本类现在只剩实例状态，时钟从 ServerClock 取。
  *
  * ★ 为什么只能单人用 ★
  * 多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
@@ -35,80 +43,17 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class WorldProbe {
 
-    /** 缓存结果 + 它是哪一客户端 tick 提交的，用来判断新鲜度（见 clientTick 注释） */
-    private record Snapshot(@Nullable ContainerAccess.SlotView view, long atClientTick) {
+    /** 缓存结果 + 它是哪一客户端 tick 提交的，用来判断新鲜度 */
+    private record Snapshot(List<ContainerAccess.SlotView> views, long atClientTick) {
     }
 
-    private static volatile Snapshot cached;
-    private static volatile boolean pending;
-
-    // ==================================================================
-    // 两只时钟（第八轮 N13）
-    // ==================================================================
-
-    /**
-     * 客户端 tick 计数。
-     *
-     * 异步读取的「新鲜度」用它判定，**不用世界 tick** ——
-     * 读值延迟是真实时间量（提交到服务端线程，1~2 个客户端 tick 后回来），
-     * 与世界流速无关。tick rate 200 时世界 tick 一次跳 ~10，
-     * 按世界 tick 判新鲜会把刚回来的真值判成超龄（第八轮实测：成段 no_data 虚线）。
-     */
-    private static volatile long clientTick;
-
-    /**
-     * 权威世界 tick：服务端线程读出的 {@code ServerLevel#getGameTime()}，-1 = 不可用。
-     *
-     * 为什么客户端自己的 {@code Level#getGameTime()} 不能当世界时钟（第八轮 N13 实测，
-     * sources jar 核实）：
-     *   · 客户端 {@code ClientLevel#tickTime()} 每客户端 tick 本地 +1；
-     *   · 服务端 {@code MinecraftServer} 每 20 个**服务端** tick（tickCount % 20）才发一次
-     *     {@code ClientboundSetTimePacket}，把绝对值砸给客户端。
-     *   tick rate 20 时两条节拍恰好重合（本地 +1 与纠正值相等，无感）；
-     *   tick rate 40 时世界每客户端 tick 走 2，本地却只 +1，且每 10 个客户端 tick
-     *   被纠正 +20 —— 客户端看到的 gameTime 是一条**错拍的阶梯**。
-     *   拿它当采样时钟：阶梯平台期被"世界没走 tick"判定吞掉（成段无数据），
-     *   阶梯跳变时一条样本横跨 20 个世界 tick（IO 速率全错）。
-     * 单人存档直接在服务端线程读权威值；多人没有集成服务端，退回客户端值（限制见类注释）。
-     */
-    private static volatile long serverGameTime = -1;
-
-    /**
-     * 由 {@code Sampler#onClientTick} 每客户端 tick 调一次：
-     * 推进客户端 tick 计数 + 刷新权威世界 tick。
-     */
-    public static void tickClient() {
-        clientTick++;
-        Minecraft mc = Minecraft.getInstance();
-        IntegratedServer server = mc.getSingleplayerServer();
-        if (server == null) {
-            // 离开单人存档（断线 / 回主菜单）：权威值作废，防止跨世界串值
-            serverGameTime = -1;
-            return;
-        }
-        try {
-            server.execute(() -> {
-                ServerLevel level = server.getLevel(Level.OVERWORLD);
-                if (level != null) {
-                    serverGameTime = level.getGameTime();
-                }
-            });
-        } catch (Throwable ignored) {
-            // 服务器正在关闭：下一客户端 tick 会重试
-        }
+    /** 下标验证结果：与 {@code target.slots()} **同序**的容器内下标；-1 = 这一格没验证出来 */
+    private record Mapping(ProbeTarget target, int[] indexes, MappingStatus status) {
     }
 
-    /**
-     * 权威世界 tick。有集成服务端就用服务端线程读出的真值；
-     * 还没读到过 / 多人 → 退回 fallback（客户端 Level#getGameTime()，语义退化为"客户端近似"）。
-     */
-    public static long worldGameTime(long fallback) {
-        long t = serverGameTime;
-        return t >= 0 ? t : fallback;
-    }
-
-    private WorldProbe() {
-    }
+    private volatile Snapshot cached;
+    private volatile boolean pending;
+    private volatile Mapping mapping;
 
     // ==================================================================
     // 下标映射验证（第六轮 M4：MEK 等模组机器的槽位下标不可信）
@@ -127,35 +72,118 @@ public final class WorldProbe {
     public enum MappingStatus {
         /** 验证还没回来（异步，1~2 tick） */
         PENDING,
-        /** 下标可信：vanilla Container（vanilla 保证），或服务端内容匹配唯一命中 */
+        /** 全部选中格的下标都可信 */
         VERIFIED,
-        /** 下标不可信：内容匹配有歧义（例如对着空格子挂探头，机器里空格子不止一个） */
+        /** 至少有一格的下标不可信（内容匹配有歧义，例如对着空格子挂探头） */
         UNVERIFIED,
         /** 这台机器既不是 Container 也没有 item handler，关界面后必然读不到 */
         UNAVAILABLE
     }
 
-    private record Mapping(ProbeTarget target, int index, MappingStatus status) {
+    /** 丢掉全部状态（读值缓存 + 下标验证）。重新配置 / 销毁探针时调用。 */
+    public void reset() {
+        cached = null;
+        pending = false;
+        mapping = null;
     }
 
-    /** 最近一次验证结果。同一时刻只有一个探头，单个槽位足够。 */
-    private static volatile Mapping mapping;
+    /**
+     * 只丢读值缓存，**保留下标验证**。
+     * 关界面转 FOLLOWING 时用：验证是挂探头时做的（GUI 开着才能做），
+     * 之后每次开关界面都不能丢 —— 否则模组机器关界面后立刻退化回不可信下标。
+     */
+    public void resetReadCache() {
+        cached = null;
+        pending = false;
+    }
+
+    /**
+     * ★ 用"最后一次已知值"垫一下，专治"刚关掉界面那 1 tick 的假 no_data" ★
+     *
+     * 问题出在时序上，不是读取失败：
+     *   第 N   tick  客户端发现界面关了 → 提交不了请求（这一 tick 还没进 FOLLOWING）
+     *   第 N+1 tick  request() 把任务丢给服务端线程，
+     *               而**同一 tick 内** latest() 立刻就要取值 —— 服务端线程还没轮到
+     *               → 必然返回 null → 记下一条 no_data
+     * 所以那条 no_data 是"异步管道的启动延迟"，不是"这台机器读不到"，纯属误导。
+     *
+     * 修法：进入 FOLLOWING 时把上一 tick 刚读到的值（最多 50 ms 旧）当作一次快照塞进缓存，
+     * 让时间轴续上；真正的异步结果在 1–2 个客户端 tick 内到达并覆盖它。
+     * 若确实读不到（多人 / 区块卸载 / 方块被拆），这个垫值会在 maxAge 之后自然过期，
+     * 之后照样记 no_data —— 该断的地方还是会断。
+     */
+    public void seed(@Nullable List<ContainerAccess.SlotView> views) {
+        if (views == null || views.isEmpty()) {
+            return;
+        }
+        cached = new Snapshot(List.copyOf(views), ServerClock.clientTick());
+        // 刻意不动 pending：垫值只是"缓一下"，不该阻止真正的异步请求发出去
+    }
+
+    /**
+     * 请求一次世界侧读取。**每客户端 tick 调一次即可**，不要在同一 tick 里反复调。
+     * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
+     */
+    public void request(@Nullable ProbeTarget target) {
+        if (target == null || !target.hasPersistentId() || target.slots().isEmpty() || pending) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (!mc.isLocalServer()) {
+            return;
+        }
+        IntegratedServer server = mc.getSingleplayerServer();
+        if (server == null) {
+            return;
+        }
+
+        pending = true;
+        long atClient = ServerClock.clientTick();
+        try {
+            server.execute(() -> {
+                List<ContainerAccess.SlotView> views = readNow(server, target);
+                cached = new Snapshot(views, atClient);
+                pending = false;
+            });
+        } catch (Throwable t) {
+            // 服务器正在关闭时会拒绝任务。忽略即可，下一 tick 会重试。
+            pending = false;
+        }
+    }
+
+    /**
+     * 取最近一次读到的值（与 {@code target.slots()} 同序）。
+     *
+     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄返回 null
+     *                          （记 no_data），避免服务端卡顿时把一堆陈旧值当成新值
+     *                          写进时间序列。
+     */
+    @Nullable
+    public List<ContainerAccess.SlotView> latest(int maxAgeClientTicks) {
+        Snapshot snap = cached;
+        if (snap == null || snap.views() == null) {
+            return null;
+        }
+        return (ServerClock.clientTick() - snap.atClientTick()) <= maxAgeClientTicks ? snap.views() : null;
+    }
 
     /**
      * 挂探头的瞬间调用（此时 GUI 还开着，菜单内容与服务端真值同步）。
      * 在服务端线程做一次"内容指纹匹配"：拿着菜单槽当前内容去能力 handler 里找，
      * 唯一命中 → 那个下标就是真下标。
      *
-     * 匹配策略（宽松到严格回退）：
+     * 匹配策略（宽松到严格回退），**逐格独立判定**：
      *   1. 物品 + 数量都相同的槽位若唯一 → 采用
      *   2. 仅物品相同的槽位若唯一 → 采用（容忍挂探头瞬间 1 tick 的同步差）
-     *   3. 否则 UNVERIFIED —— 宁可明确告诉用户"不可信"，也不要瞎猜
+     *   3. 否则这一格标记为未验证 —— 宁可明确告诉用户"不可信"，也不要瞎猜
      *
      * 注意匹配只在挂探头这一刻做一次：下标是结构性信息，内容只是用来"指认"它，
      * 之后内容怎么变都不影响。vanilla Container 路径直接跳过匹配（vanilla 保证下标）。
+     *
+     * @param menuViews 与 {@code target.slots()} 同序的菜单快照；无菜单时为 null
      */
-    public static void verifyIndex(ProbeTarget target, @Nullable ContainerAccess.SlotView view) {
-        if (target == null || !target.hasPersistentId()) {
+    public void verifyIndex(ProbeTarget target, @Nullable List<ContainerAccess.SlotView> menuViews) {
+        if (target == null || !target.hasPersistentId() || target.slots().isEmpty()) {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
@@ -163,8 +191,9 @@ public final class WorldProbe {
         if (server == null) {
             return;
         }
+        List<ContainerAccess.SlotView> copy = menuViews == null ? null : List.copyOf(menuViews);
         try {
-            server.execute(() -> mapping = verifyNow(server, target, view));
+            server.execute(() -> mapping = verifyNow(server, target, copy));
         } catch (Throwable ignored) {
             // 服务器正在关闭：FOLLOWING 也跑不了，无所谓
         }
@@ -172,30 +201,55 @@ public final class WorldProbe {
 
     /** ★ 必须在服务端线程执行 ★ */
     private static Mapping verifyNow(MinecraftServer server, ProbeTarget target,
-                                     @Nullable ContainerAccess.SlotView view) {
+                                     @Nullable List<ContainerAccess.SlotView> menuViews) {
+        int n = target.slots().size();
+        int[] idx = new int[n];
+        Arrays.fill(idx, -1);
+
         ServerLevel level = server.getLevel(target.dimension());
         if (level == null || !level.isLoaded(target.pos())) {
-            return new Mapping(target, -1, MappingStatus.UNAVAILABLE);
+            return new Mapping(target, idx, MappingStatus.UNAVAILABLE);
         }
         BlockEntity be = level.getBlockEntity(target.pos());
 
         // vanilla Container：getContainerSlot() 就是容器内下标，vanilla 保证，直接可信
         if (be instanceof Container container) {
-            int idx = target.containerSlotIndex();
-            boolean ok = idx >= 0 && idx < container.getContainerSize();
-            return new Mapping(target, ok ? idx : -1, ok ? MappingStatus.VERIFIED : MappingStatus.UNVERIFIED);
+            int size = container.getContainerSize();
+            boolean ok = true;
+            for (int i = 0; i < n; i++) {
+                int c = target.slots().get(i).containerSlotIndex();
+                if (c >= 0 && c < size) {
+                    idx[i] = c;
+                } else {
+                    ok = false;
+                }
+            }
+            return new Mapping(target, idx, ok ? MappingStatus.VERIFIED : MappingStatus.UNVERIFIED);
         }
 
         IItemHandler handler = itemHandler(level, target.pos(), be);
         if (handler == null) {
-            return new Mapping(target, -1, MappingStatus.UNAVAILABLE);
-        }
-        if (view == null) {
-            return new Mapping(target, -1, MappingStatus.UNVERIFIED);
+            return new Mapping(target, idx, MappingStatus.UNAVAILABLE);
         }
 
-        String wantItem = view.itemId();
-        int wantCount = view.count();
+        boolean all = true;
+        for (int i = 0; i < n; i++) {
+            ContainerAccess.SlotView view = menuViews != null && i < menuViews.size() ? menuViews.get(i) : null;
+            int found = matchOne(handler, view);
+            if (found >= 0) {
+                idx[i] = found;
+            } else {
+                all = false;
+            }
+        }
+        return new Mapping(target, idx, all ? MappingStatus.VERIFIED : MappingStatus.UNVERIFIED);
+    }
+
+    /** 拿一格的内容去 handler 里指认它的下标；指认不出来返回 -1 */
+    private static int matchOne(IItemHandler handler, @Nullable ContainerAccess.SlotView view) {
+        if (view == null) {
+            return -1;
+        }
         int exact = -1;
         int byItem = -1;
         int exactHits = 0;
@@ -214,166 +268,103 @@ public final class WorldProbe {
                 continue;
             }
             String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
-            if (!id.equals(wantItem)) {
+            if (!id.equals(view.itemId())) {
                 continue;
             }
             itemHits++;
             byItem = i;
-            if (s.getCount() == wantCount) {
+            if (s.getCount() == view.count()) {
                 exactHits++;
                 exact = i;
             }
         }
         if (exactHits == 1) {
-            return new Mapping(target, exact, MappingStatus.VERIFIED);
+            return exact;
         }
         if (itemHits == 1) {
-            return new Mapping(target, byItem, MappingStatus.VERIFIED);
+            return byItem;
         }
-        return new Mapping(target, -1, MappingStatus.UNVERIFIED);
+        return -1;
     }
 
     /** 这个探头的下标映射状态（探头不匹配时视为 PENDING） */
-    public static MappingStatus mappingStatus(@Nullable ProbeTarget target) {
+    public MappingStatus mappingStatus(@Nullable ProbeTarget target) {
         Mapping m = mapping;
         return m != null && m.target() == target ? m.status() : MappingStatus.PENDING;
     }
 
-    /** readNow 用的"真下标"：验证过的优先，否则退回菜单槽的 getContainerSlot() */
-    private static int effectiveIndex(ProbeTarget target) {
+    /** readNow 用的"真下标"：验证过的优先，否则退回该格自己的 containerSlotIndex */
+    private int effectiveIndex(ProbeTarget target, int i) {
         Mapping m = mapping;
-        if (m != null && m.target() == target && m.status() == MappingStatus.VERIFIED && m.index() >= 0) {
-            return m.index();
+        if (m != null && m.target() == target && m.indexes() != null && i < m.indexes().length) {
+            int v = m.indexes()[i];
+            if (v >= 0) {
+                return v;
+            }
         }
-        return target.containerSlotIndex();
+        return target.slots().get(i).containerSlotIndex();
     }
 
-    /** 丢掉全部缓存（读值缓存 + 下标验证 + 权威时钟）。切换探针 / 拔探头时调用。 */
-    public static void reset() {
-        cached = null;
-        pending = false;
-        mapping = null;
-        serverGameTime = -1;
-    }
+    // ==================================================================
+    // 读值
+    // ==================================================================
 
     /**
-     * 只丢读值缓存，**保留下标验证**。
-     * 关界面转 FOLLOWING 时用：验证是挂探头时做的（GUI 开着才能做），
-     * 之后每次开关界面都不能丢 —— 否则模组机器关界面后立刻退化回不可信下标。
-     */
-    public static void resetReadCache() {
-        cached = null;
-        pending = false;
-    }
-
-    /**
-     * ★ 用"最后一次已知值"垫一下，专治"刚关掉界面那 1 tick 的假 no_data" ★
+     * ★ 必须在服务端线程执行 ★
      *
-     * 问题出在时序上，不是读取失败：
-     *   第 N   tick  客户端发现界面关了 → 提交不了请求（这一 tick 还没进 FOLLOWING）
-     *   第 N+1 tick  WorldProbe.request() 把任务丢给服务端线程，
-     *               而**同一 tick 内** latest() 立刻就要取值 —— 服务端线程还没轮到
-     *               → 必然返回 null → 记下一条 no_data
-     * 所以那条 no_data 是"异步管道的启动延迟"，不是"这台机器读不到"，纯属误导。
+     * 返回与 {@code target.slots()} **同序**的快照；只要有一格读不到就整体返回 null。
      *
-     * 修法：进入 FOLLOWING 时把上一 tick 刚读到的值（最多 50 ms 旧）当作一次快照塞进缓存，
-     * 让时间轴续上；真正的异步结果在 1–2 个客户端 tick 内到达并覆盖它。
-     * 若确实读不到（多人 / 区块卸载 / 方块被拆），这个垫值会在 maxAge 之后自然过期，
-     * 之后照样记 no_data —— 该断的地方还是会断。
-     */
-    public static void seed(@Nullable ContainerAccess.SlotView view) {
-        if (view == null) {
-            return;
-        }
-        cached = new Snapshot(view, clientTick);
-        // 刻意不动 pending：垫值只是"缓一下"，不该阻止真正的异步请求发出去
-    }
-
-    /**
-     * 请求一次世界侧读取。**每客户端 tick 调一次即可**，不要在同一 tick 里反复调。
-     * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
-     */
-    public static void request(@Nullable ProbeTarget target) {
-        if (target == null || !target.hasPersistentId() || pending) {
-            return;
-        }
-        Minecraft mc = Minecraft.getInstance();
-        if (!mc.isLocalServer()) {
-            return;
-        }
-        IntegratedServer server = mc.getSingleplayerServer();
-        if (server == null) {
-            return;
-        }
-
-        pending = true;
-        long atClient = clientTick;
-        try {
-            server.execute(() -> {
-                ContainerAccess.SlotView view = readNow(server, target);
-                cached = new Snapshot(view, atClient);
-                pending = false;
-            });
-        } catch (Throwable t) {
-            // 服务器正在关闭时会拒绝任务。忽略即可，下一 tick 会重试。
-            pending = false;
-        }
-    }
-
-    /**
-     * 取最近一次读到的值。
-     *
-     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄返回 null
-     *                          （记 no_data），避免服务端卡顿时把一堆陈旧值当成新值
-     *                          写进时间序列。用客户端 tick 而不是世界 tick 的原因见
-     *                          {@link #clientTick} 的注释：读值延迟是真实时间量，
-     *                          与世界流速无关。
+     * ★ 为什么"有一格读不到就整体算读不到" ★
+     *   聚合值是"所有格子的和"。少读一格 → 和偏小 → 图上的总存量/总吞吐静默偏小，
+     *   而这种偏小在波形上完全看不出来（它看起来和正常的下降一模一样）。
+     *   相比之下 no_data 是**看得出来**的断档。两害相权，宁可断档。
+     *   （真读不到时照样记 no_data —— "该断的地方要断"，见 ARCHITECTURE.md CP9。）
      */
     @Nullable
-    public static ContainerAccess.SlotView latest(int maxAgeClientTicks) {
-        Snapshot snap = cached;
-        if (snap == null || snap.view() == null) {
-            return null;
-        }
-        return (clientTick - snap.atClientTick()) <= maxAgeClientTicks ? snap.view() : null;
-    }
-
-    /** ★ 必须在服务端线程执行 ★ */
-    @Nullable
-    private static ContainerAccess.SlotView readNow(MinecraftServer server, ProbeTarget target) {
+    private List<ContainerAccess.SlotView> readNow(MinecraftServer server, ProbeTarget target) {
         ServerLevel level = server.getLevel(target.dimension());
         if (level == null || !level.isLoaded(target.pos())) {
             return null;
         }
-        int idx = effectiveIndex(target);
-        if (idx < 0) {
+        BlockEntity be = level.getBlockEntity(target.pos());
+        if (be == null) {
             return null;
         }
-        BlockEntity be = level.getBlockEntity(target.pos());
 
-        // ---- 路径 1：原版 Container（原版箱子/熔炉、漏斗，以及实现该接口的模组）----
-        // 下标语义由 vanilla 保证：菜单槽的 getContainerSlot() 就是容器内下标
-        if (be instanceof Container container && idx < container.getContainerSize()) {
-            return ContainerAccess.make(-1, idx, container.getItem(idx));
+        Container container = be instanceof Container c ? c : null;
+        IItemHandler handler = container == null ? itemHandler(level, target.pos(), be) : null;
+        if (container == null && handler == null) {
+            return null;
         }
 
-        // ---- 路径 2：NeoForge 的物品 capability（模组机器的主通道）----
-        // 实测（javap 反查，第五轮）：Sophisticated Storage 的 StorageBlockEntity 与
-        // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
-        // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
-        // 但为了能和漏斗/管道交互，模组机器几乎都会注册 ItemHandler.BLOCK 能力，
-        // 这条路在服务端永远可用。
-        //
-        // ★ 下标用 verifyIndex 验证过的（第六轮 M4）★
-        // Mekanism 的 InventoryContainerSlot 构造是 super(emptyInventory, 0, x, y)，
-        // 下标硬编码 0 —— 直接用 getContainerSlot() 会跟踪到别的格子。
-        // 验证不了（内容匹配有歧义）时退回 getContainerSlot()，
-        // 但 Sampler 会向用户弹"下标不可信"的提示。
-        IItemHandler handler = itemHandler(level, target.pos(), be);
-        if (handler != null && idx < handler.getSlots()) {
-            return ContainerAccess.make(-1, idx, handler.getStackInSlot(idx));
+        int n = target.slots().size();
+        List<ContainerAccess.SlotView> out = new ArrayList<>(n);
+        for (int i = 0; i < n; i++) {
+            int idx = effectiveIndex(target, i);
+            if (idx < 0) {
+                return null;
+            }
+            // ---- 路径 1：原版 Container（原版箱子/熔炉、漏斗，以及实现该接口的模组）----
+            // 下标语义由 vanilla 保证：菜单槽的 getContainerSlot() 就是容器内下标
+            if (container != null) {
+                if (idx >= container.getContainerSize()) {
+                    return null;
+                }
+                out.add(ContainerAccess.make(-1, idx, container.getItem(idx)));
+                continue;
+            }
+            // ---- 路径 2：NeoForge 的物品 capability（模组机器的主通道）----
+            // 实测（javap 反查，第五轮）：Sophisticated Storage 的 StorageBlockEntity 与
+            // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
+            // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
+            // 但为了能和漏斗/管道交互，模组机器几乎都会注册 ItemHandler.BLOCK 能力。
+            // 下标用 verifyIndex 验证过的（第六轮 M4）；验证不了时退回 getContainerSlot()。
+            if (idx >= handler.getSlots()) {
+                return null;
+            }
+            out.add(ContainerAccess.make(-1, idx, handler.getStackInSlot(idx)));
         }
-        return null;
+        return List.copyOf(out);
     }
 
     /**
@@ -384,7 +375,7 @@ public final class WorldProbe {
      * 查询命中 NeoForge 的能力缓存，每 tick 七次的成本可以忽略。
      */
     @Nullable
-    private static IItemHandler itemHandler(ServerLevel level, BlockPos pos, @Nullable BlockEntity be) {
+    static IItemHandler itemHandler(ServerLevel level, BlockPos pos, @Nullable BlockEntity be) {
         IItemHandler direct = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, null);
         if (direct != null) {
             return direct;

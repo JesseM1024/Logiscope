@@ -46,7 +46,7 @@ public final class ContainerAnchor {
     private ContainerAnchor() {
     }
 
-    /** 由 Sampler 的客户端 tick 调用 */
+    /** 由 ProbeManager 的客户端 tick 调用 */
     public static void tick() {
         clk++;
     }

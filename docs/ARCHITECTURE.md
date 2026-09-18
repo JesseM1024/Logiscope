@@ -16,20 +16,25 @@
 │         bind/TextInputGuard    "玩家是不是正在打字"（三层守卫）   │
 ├───────────────────────────────────────────────────────────────┤
 │ 绑定层  bind/ContainerAnchor   右键方块 → 「维度 + 坐标」锚点     │
-│         bind/ProbeTarget       探针目标（运行时身份 + 持久身份）  │
+│         bind/ProbeTarget       探针目标（一组槽位 + 持久身份）    │
+│         bind/ProbeContext      ★ 当前可探测的容器（界面 / 准星）  │
 ├───────────────────────────────────────────────────────────────┤
 │ 采集层  collect/ContainerAccess  读菜单槽位（★ 界面开着时的数据源）│
 │         collect/WorldProbe       读方块实体（★ 界面关了时的数据源）│
-│         collect/Sampler          每 tick 产出 Sample，状态机      │
+│         collect/ProbeSlots       无 GUI 容器的槽位清单（问服务端） │
+│         collect/ServerClock      ★ 两只全局时钟                 │
+│         collect/ProbeInstance    ★ 一个探针：状态机 + 每 tick 采样│
+│         collect/ProbeManager     ★ 实例表 / 创建 / 删除 / 驱动    │
 ├───────────────────────────────────────────────────────────────┤
 │ 存储层  store/SampleStore      环形缓冲 + version，唯一真相       │
 │         store/Sample           最小可序列化单元（含 no_data 哨兵）│
 ├───────────────────────────────────────────────────────────────┤
 │ 分析层  analysis/Analyzer      纯函数：摘要 / 逐 tick 差值        │
 │         analysis/ChartData     纯函数：扁平序列 → 按物品分组的数据线│
+│         analysis/Aggregator    ★ 纯函数：多格 → 一条样本的内容    │
 │         analysis/Series(Pt)    数据线的形状（含断点标记）         │
 ├───────────────────────────────────────────────────────────────┤
-│ 呈现层  ui/ScopeScreen         只读：布局 / 交互 / 视图状态       │
+│ 呈现层  ui/ScopeScreen         只读：三页面（根/选格/图表）布局与交互│
 │         ui/ChartRenderer       只读：坐标轴 / 波形 / 框选 / 准线   │
 ├───────────────────────────────────────────────────────────────┤
 │ (规划)  持久层  export/*       CSV / JSON 导出                  │
@@ -40,20 +45,22 @@
 
 | 契约 | 内容 | 违反的后果 |
 |---|---|---|
-| C1 | `Sampler` 不认识任何 UI / 渲染类 | 界面崩了会连带采样一起挂 |
+| C1 | `ProbeInstance` / `ProbeManager` 不认识任何 UI / 渲染类 | 界面崩了会连带采样一起挂 |
 | C2 | `SampleStore` 只存 `(tick, itemId, count)`，不持有 `ItemStack` | 无法离线分析、无法导出、容易泄漏世界引用 |
-| C3 | `Analyzer` / `ChartData` 是纯函数，不持有状态 | 无法单元测试，图表和导出会算出不同结果 |
+| C3 | `Analyzer` / `ChartData` / `Aggregator` 是纯函数，不持有状态 | 无法单元测试，图表和导出会算出不同结果 |
 | C4 | `ui/*` 只读，绝不直接改采样数据 | 界面刷新时机不可控，容易写出竞态 |
-| C5 | 只有一个采样器实例：`LogiScopeMod.sampler()` | 多处 `new Sampler()` 会导致数据分裂 |
-| C6 | `WorldProbe#readNow` **只能在服务端线程跑** | 跨线程读 ServerLevel 是数据竞争 |
+| C5 | 只有一个探针管理器：`LogiScopeMod.probes()`；每个实例各持一份 `SampleStore` + `WorldProbe` | 多处 `new ProbeManager()` 会导致数据分裂；共享 `WorldProbe` 会让两个探针互相覆盖读数 |
+| C6 | `WorldProbe#readNow` / `ProbeSlots#readNow` **只能在服务端线程跑** | 跨线程读 ServerLevel 是数据竞争 |
 | C7 | `no_data` 样本不进统计（`Analyzer` / `ChartData` 负责过滤，但要让它**占时间轴**） | 断档会被算成"数量掉到 0"，净流量全错；反过来丢掉时间轴会让图上的断档消失 |
 | C8 | **`analysis/` 与 `store/` 不 import 任何 `net.minecraft` / `net.neoforged`** | 一旦引入游戏类，`dev-check/` 的离线断言就跑不了，只能靠进游戏肉眼看 |
+| C9 | 一个探针每 tick 只写**一条**样本（多格先聚合） | 下游（分组 / 波形 / 框选统计）会看到交错的多条序列，时间轴语义崩掉 |
 
 **一句话总结数据流**：
 
 ```
-按键盘 → KeyBindings → (界面开着?) ContainerAccess : WorldProbe
-                     → Sampler 状态机 → SampleStore(version)
+按键盘 → KeyBindings →（容器界面开着? ContainerAccess : WorldProbe）
+                     → ProbeManager 驱动每个 ProbeInstance 采样
+                     → Aggregator 把多格合成一条 → SampleStore(version)
                      → ChartData/Analyzer（version 变了才重算）
                      → ChartRenderer 画到 ScopeScreen 上
 ```
@@ -68,10 +75,17 @@
 
 `player.containerMenu.slots` → `Slot#getItem()` → `ItemStack`
 
-只列**外部设备**的槽位：`player.containerMenu != player.inventoryMenu`。
-`ContainerAccess#snapshot` 会把玩家自己的背包整体排除掉 ——
-面板能在没有容器界面时单独打开，那时 `containerMenu` 就是背包，
-不排除的话玩家会在列表里看到自己的 36 个格子并误以为那是机器。
+只列**外部设备**的槽位，判两次：
+
+| 判据 | 排除什么 |
+|---|---|
+| `player.containerMenu != player.inventoryMenu` | 整个菜单就是玩家背包的情况（关掉容器界面后单独开面板） |
+| `Slot#container != player.getInventory()` | **菜单里混着的玩家背包那 36 格** |
+
+> ⚠️ 第二条是第九轮补的。旧文档一直写着"会把玩家背包整体排除掉"，但代码里只有第一条 ——
+> 于是打开箱子时列表里其实混着自己背包的格子。单格时代它只是"列表有点长"；
+> 多格监控 + 可视化选格之后，它变成"点到自己背包的格子也会被当成设备槽"，语义就错了。
+> 顺带也跳过 `Slot#isFake()`（部分模组拿假槽位占位）。
 
 ### CP2 · 在 GUI 打开时捕获快捷键　风险：**高** ⚠️⚠️
 
@@ -194,12 +208,14 @@ private static boolean consumed() { return preCount > postCount; }
 
 ### CP4 · 每 tick 采样　风险：低
 
-`NeoForge.EVENT_BUS.addListener(Sampler::onClientTick)`，事件类型 `ClientTickEvent.Post`。
+`NeoForge.EVENT_BUS.addListener(ProbeManager::onClientTick)`，事件类型 `ClientTickEvent.Post`。
 
 - `Post` 在 tick 逻辑之后触发，此时同步数据已更新完毕
 - 事件在**游戏总线**上
-- 同一次 tick 里还兼职做两件事：`ContainerAnchor.tick()`（锚点计时）、
-  `KeyBindings#onClientTick`（无界面时的快捷键）
+- 同一次 tick 里兼职做三件事：`ContainerAnchor.tick()`（锚点计时）、
+  `ServerClock.tickClient()`（推进两只全局时钟）、
+  然后遍历**所有**探针实例各采样一次
+- `KeyBindings#onClientTick`（无界面时的快捷键）挂在同一个事件上，是另一个监听器
 
 ### CP5 · 数据源失效的检测　风险：中 ⚠️
 
@@ -462,8 +478,8 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 
 | 位置 | 做法 |
 |---|---|
-| 过渡那一 tick | `Sampler` 持有 `lastKnown`（上一 tick 刚读到的值，最多 50 ms 旧），在检测到界面关闭时**先把它记下去**，补住空洞 |
-| 下一 tick 的取值 | `WorldProbe.seed(lastKnown, tick)` 把这个值垫进缓存，`latest()` 的年龄判定（≤ `WORLD_READ_MAX_AGE`）让它算"新鲜"，于是异步结果到达前时间轴是连续的 |
+| 过渡那一 tick | `ProbeInstance` 持有 `lastViews`（上一 tick 刚读到的**槽位快照**，最多 50 ms 旧），在检测到界面关闭时**先把它记下去**，补住空洞 |
+| 下一 tick 的取值 | `WorldProbe.seed(lastViews)` 把这些值垫进缓存，`latest()` 的年龄判定（≤ `WORLD_READ_MAX_AGE`）让它算"新鲜"，于是异步结果到达前时间轴是连续的 |
 | **第六轮补充：过渡 tick 立刻 `request()`** | 只靠 seed 的话，下一 tick 的 `latest()` 拿到的仍是 seed（旧值被续命 1~2 tick，1t IO 测试里脉冲被拉宽，第六轮 M1）。过渡 tick 就把读取任务发给服务端，异步真值最早在下一 tick 接管，seed 退化成"异步失败时的兜底" |
 | **第六轮补充：重开界面也垫一格** | FOLLOWING → RECORDING 的切换 tick 原来什么都不记，时间轴断一格。用手头最新的世界侧读值垫上（与关界面方向对称） |
 
@@ -826,6 +842,162 @@ selectWindowStart = win[0];
 
 ---
 
+### CP16 · 探针实例化 + 多格聚合（第十轮）　风险：中 ⚠️
+
+```
+需求：面板里要有"正在运行的探针"列表（每行带删除按钮）；一个探针可以同时监控好几格，
+      记录结果是把它们加在一起。
+```
+
+#### 1. 为什么拆成 ProbeManager + ProbeInstance 两层
+
+原来的 `Sampler` 是**全局唯一**的（"项目里只有一个探头"是当时的刻意取舍）。
+现在要多个探针**同时**在跑，于是：
+
+| 类 | 职责 | 生命周期 |
+|---|---|---|
+| `ProbeManager` | 实例表、创建 / 删除、活跃指针（界面在看哪一个）、每 tick 驱动所有人、`followAfterClose` 这个全局偏好 | 整个游戏会话一个 |
+| `ProbeInstance` | 一个探针的状态机、自己的 `SampleStore`、自己的 `WorldProbe` | 创建时生、删除时灭 |
+
+**所有实例同时采样，而不是只跑"当前在看的那一个"**：需求是"用于选择"，
+语义就是它们都在跑。如果只跑活跃的那个，切回来会看到一段空白 ——
+而用户要的恰恰是"我离开的这段时间产线发生了什么"。
+代价是每个实例各占一份 36000 样本的环形缓冲，上限 16 个实例（`MAX_PROBES`）。
+
+#### 2. 哪些状态必须"每实例一份"，哪些必须"全局唯一"
+
+这是这次重构最容易写错的地方，独立列出来：
+
+| 状态 | 归属 | 理由 |
+|---|---|---|
+| `SampleStore` | **每实例** | 各有各的记录 |
+| `WorldProbe`（读值缓存 / pending / 下标验证） | **每实例** | 共享的话两个探针会互相覆盖读数 —— 这是最隐蔽的一类 bug（数据看起来"偶尔跳一下"） |
+| `watchedContainerId`、`manualPause`、`lastViews`、`warnedUnverifiedIndex` | **每实例** | 状态机私有 |
+| 客户端 tick 计数、权威世界 tick（`ServerClock`） | **全局唯一** | "现在世界走到第几 tick"全世界只有一个答案；留在实例里会导致删掉一个实例就把时钟清掉 |
+| `followAfterClose` | **全局唯一**（在 Manager 上） | 它是用户偏好，不是探针状态 |
+
+#### 3. 多格 → 一条样本：聚合规则
+
+一条 `Sample` 只能表示「一个物品 id + 一个数量」，而多个被监控的格子可能装着不同的东西。
+规则（实现见 `analysis/Aggregator`，断言见 `dev-check/TestChart.java`）：
+
+| 被监控的格子 | 聚合结果 |
+|---|---|
+| 全部为空（总数 0） | `minecraft:air` × 0（画成那条灰蓝线，表示"被抽空了"） |
+| 非空的格子里只有**一种**物品 | 那种物品 × **总数** |
+| 非空的格子里有**多种**物品 | `logiscope:mixed` × **总数**（图例显示"混合物品"） |
+
+**为什么"混合"不挑"最多的那个物品"**：那样图例上的物品名与实际内容不符，读数直接错。
+代价是混合状态下看不出具体是哪些物品 —— 这是诚实的代价，不是缺漏。
+**数量在任何情况下都是所有格子之和**，所以"总存量 / 总吞吐"这条线永远有效。
+
+#### 4. 读取失败时：**任何一格读不到，整条记 no_data**
+
+聚合值是"所有格子的和"。少读一格 → 和偏小 → 图上的总存量静默偏小，
+而这种偏小在波形上**完全看不出来**（它看起来和正常的下降一模一样）。
+相比之下 `no_data` 是**看得出来**的断档。两害相权，宁可断档。
+
+#### 5. 目标（`ProbeTarget`）的形态变化
+
+```
+旧：ProbeTarget(slotIndex, containerSlotIndex, itemId, dim, pos)      ← 一格
+新：ProbeTarget(List<SlotRef>, dim, pos)                              ← 一组
+    SlotRef(menuSlotIndex, containerSlotIndex, itemId, count)
+```
+
+`menuSlotIndex` 可以是 **-1**：准星创建的那种"无 GUI 容器"没有菜单，只能走世界侧读取。
+`ProbeTarget#hasMenuPath()` 就是给状态机判"能不能走最准的那条路"用的。
+
+#### 6. 无 GUI 容器的槽位清单（`ProbeSlots`）
+
+可视化选格依赖"菜单槽在屏幕上的位置"，而菜单只在界面开着时存在。
+无 GUI 的设备连"有几格、每格装着什么"客户端都不知道，只能由服务端线程读出来
+（`Container` 或 `ItemHandler` 能力），再异步交回客户端。
+
+`ProbeSlots` 用静态单例是**故意**的：同一时刻只可能有一个"正在配置的探针"
+（面板是单例界面）。这与 `WorldProbe` 必须每实例一份正好相反。
+
+---
+
+### CP17 · 可视化选格 + 准星入口（第十轮）　风险：高 ⚠️⚠️
+
+```
+需求：点「选择容器格」后光标禁用物品交互，只用于选格；左键点/划过的选中、右键取消；
+      没有容器界面时按快捷键，要看准星指着什么。
+```
+
+#### 1. cellMode 的两条铁律
+
+| 铁律 | 不这么做会怎样 |
+|---|---|
+| 面板外的 `mouseClicked / mouseDragged / mouseReleased / mouseScrolled` **一律吃掉，不转发给被压住的容器界面** | 点一格会顺手把物品拿起来（甚至丢出去），"只用来选格"就成了空话 |
+| 拖动必须**按线段采样**（每 4px 取一点），不能只判当前位置 | 鼠标事件按帧来，快速划过会**漏格**，而"划过的都被选中"是需求明写的 |
+
+选格集合维护的是**菜单槽下标**（`Slot#index`），不是容器内下标 ——
+因为 MEK 那类模组的 `getContainerSlot()` 恒为 0（CP9 之二），
+用容器下标做键会让"选了 1 格"变成"选中了全部"。容器下标那份集合是**派生**的
+（菜单开着时每次从菜单重算），供"容器界面中途关掉"之后继续用。
+
+#### 2. 覆盖层必须画在面板**之前**
+
+`render()` 里的顺序是：补画背景 hover → **选格覆盖层** → 面板底 → 标题/内容 → 手持物品。
+覆盖层放在面板之前，是因为容器格子可能落在面板底下（面板是可拖的浮层），
+反过来的话选中框会画到面板上面去。
+
+#### 3. 准星入口：只有服务端能开菜单
+
+需求第 3 条要"准星指着有 GUI 的容器 → 打开 GUI，并打开探针 GUI"。
+这里有个硬约束：**只有服务端能开菜单**（`ServerPlayer#openMenu` +
+`ClientboundOpenScreenPacket`）。纯客户端模组没有别的合法通道，只能
+**模拟一次真实的右键**（`MultiPlayerGameMode#useItemOn`）—— 这正是 vanilla 右键走的那条路。
+
+于是不能在同一 tick 里压图层，得跨 tick：
+
+```
+按 F9 → 准星是"有界面"的容器 → useItemOn() 发出交互
+                              → 记 PENDING_OVERLAY（60 tick 有效）
+       1~3 tick 后，服务端开界面 → ScreenEvent.Init.Post
+                              → 先把 pending 提升为锚点（ContainerAnchor，原有逻辑）
+                              → 再 pushGuiLayer 把面板压上去
+```
+
+**60 tick 过期**是必须的：服务端如果一直没开界面（太远 / 被拒），
+标志挂在那里会导致用户**下一次正常开任何容器时面板自己弹出来**。
+
+**副作用防线**：`performUseItemOn` 的顺序是
+`RightClickBlock 事件` → **`itemstack.onItemUseFirst`** → 方块 use → 物品 use。
+第二条是"物品抢在方块前面"，任何装了扳手 / 工具类物品的玩家都会被它抢走。
+所以发交互之前先用**反射只读**物品类的 `onItemUseFirst(ItemStack, UseOnContext)`
+的**声明类**：是原版 / NeoForge 的（即没覆写）才发；否则不发，改用面板提示用户空手再试。
+`getMethod` 对"没覆写"的情况返回接口 `IItemExtension` 上的 default 方法，
+所以判断的是包名前缀而不是具体类。
+
+**为什么"有 GUI"要用 `BlockState#getMenuProvider(Level, BlockPos)` 判定**：
+这就是 vanilla 自己用来决定"右键这个方块要不要开界面"的入口，
+语义天然一致，不需要维护一张"哪些方块有界面"的表。
+（`BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 是 protected，
+但 `BlockState` 继承的 `BlockStateBase` 把它的两参重载包成了 **public**，可以直接调。）
+
+#### 4. 准星判定的三条分支
+
+| 准星 | 判定 | 结果 |
+|---|---|---|
+| 有 `MenuProvider` | 有 GUI | 模拟右键打开界面 → 界面一开就压面板（**根页**） |
+| 无 `MenuProvider`，但 `Container` 或 `ItemHandler` 能力存在 | 有容器无界面 | 直接新建探针 + 进选格页（**列表选格**，可视化选格按钮置灰） |
+| 其它 / 没指到方块 | 不可探测 | 打开**根页**（挑一个已创建的探针看） |
+
+判"是不是容器方块实体"的两条路径与 `WorldProbe#readNow` 严格对齐
+（`Container` 或 `ItemHandler.BLOCK`，先无方向再六面）——
+这样不会出现"界面说能探测、实际读不到"。
+
+> 📌 **一处需要你确认的解读**：需求原文是"若是且有GUI，则打开GUI，并打开探针GUI"，
+> 而后半句对无 GUI 的情况明确写了"自动进入…创建流程"。
+> 两句的对比读下来，**有 GUI 的那支落在根页**（不是自动进创建流程）。
+> 如果你其实想要"有 GUI 时也直接进创建流程"，改
+> `KeyBindings#onScreenInit` 里 `openOverlay(...)` 的 `Page` 实参即可（一行）。
+
+---
+
 ## 三、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |
@@ -852,6 +1024,14 @@ selectWindowStart = win[0];
 | 面板尺寸 | 右下角可缩放 + 静态字段记住 | 固定尺寸 | 波形要放坐标轴/图例/框选，固定 272×190 画不下；尺寸也是使用偏好（CP12） |
 | 关界面接缝 | 用 `lastKnown` 兜住 + 垫进 `WorldProbe` 缓存 | 接受 1 tick 假 no_data | "读不到"和"还没读到"是两回事，把等待包装成失败是制造假警报（CP9 之一） |
 | 采样时钟 | 服务端线程读权威 `gameTime`，客户端 tick 只管新鲜度 | 客户端 `Level#getGameTime()` 直接用 | 客户端 gameTime 是错拍阶梯（本地 +1 / 服务端 20t 纠正一次），tick rate ≠ 20 时采样节奏与数值全错（CP15） |
+| 多探针 | **所有实例同时采样**，界面只切换查看对象 | 只跑"当前在看的那一个" | 语义是"正在运行的探针"，切回来应该看到离开那段时间的数据（CP16） |
+| `WorldProbe` 的归属 | **每实例一份** | 静态单例共享 | 共享读值缓存会让两个探针互相覆盖读数，且症状是"数据偶尔跳一下"，极难查（CP16） |
+| 全局时钟 | 抽成 `ServerClock`，不放在实例里 | 跟着 `WorldProbe` 走 | 删掉一个实例不该清掉全世界的时间（CP16） |
+| 多格聚合的"混合"档 | 合成 `logiscope:mixed`，数量仍取总数 | 取"最多的那个物品" / 取第一个 | 前者会让图例的物品名与实际内容不符（读数直接错）；数量取总数保证"总吞吐"这条线永远有效（CP16） |
+| 多格读值失败 | **任何一格读不到 → 整条记 no_data** | 跳过读不到的那格、按剩下的求和 | 和偏小在波形上和"正常下降"一模一样，**看不出来**；no_data 是看得出来的（CP16） |
+| 可视化选格的拖动 | 按线段每 4px 采样逐点命中 | 只判当前鼠标位置 | 鼠标事件按帧来，快速划过会漏格（CP17） |
+| 选格集合的键 | **菜单槽下标** | 容器内下标 | MEK 那类模组 `getContainerSlot()` 恒为 0，用它做键会让"选 1 格"变成"全选"（CP17、CP9 之二） |
+| 打开容器界面 | 模拟一次真实右键（`useItemOn`），跨 tick 再压图层 | 想在按键那一 tick 就压 | 只有服务端能开菜单，界面必须等服务端回包；且要先挡住"物品抢在方块前面"（CP17） |
 
 ### 已知限制（不是 bug，是取舍）
 
@@ -862,7 +1042,7 @@ selectWindowStart = win[0];
 | 面板打开时按 `E`（背包键）没反应 | `Screen#keyPressed` 不处理背包键，只有 `AbstractContainerScreen` 处理 | 同上，收起面板即可 |
 | 被压住的容器界面**不 tick** | 只有 `minecraft.screen` 才会被 `Screen#tick` | 少数依赖 tick 的自绘界面可能显示不动 |
 | 面板内的点击不会穿透到容器 | 这是刻意的，否则一次点击会同时触发两边 | 无 |
-| 多探针不支持 | 现在只有 1 个探针 | 见「待决问题」 |
+| **多探针**（第十轮已支持，上限 16 个） | 每实例一份半小时缓冲 + 每 tick 一次世界侧异步读取 | 数量很大时（十几个）会有可观的内存与查询开销；`MAX_PROBES` 就是为此设的 |
 | 多人下关界面记不到真值 | 纯客户端定位的必然代价 | 见 CP9 |
 | 用快捷键开界面的模组拿不到坐标 | vanilla 菜单不存方块坐标，只能靠右键事件推 | 见 CP9 |
 | 第三方搜索框需逐个加探针 | 那些模组的搜索框不挂进 `screen.children()` | 目前只接了 JEI；通用兜底能覆盖其余情况（代价：多按一次） |
@@ -873,10 +1053,10 @@ selectWindowStart = win[0];
 
 ### 待决问题（写代码前先决定）
 
-1. **多探针**：现在只有 1 个探针。多探针需要把 `Sampler` 的状态改成
-   `Map<ProbeTarget, SampleStore>`，界面也要改成"一屏多条独立波形 / 多页切换"。
-   **G2 之后可以开始考虑**，但界面复杂度会明显上升。
-   （好消息：`ChartData.build` 已经是纯函数，"多套数据各建一份"是它的自然用法。）
+1. ~~**多探针**~~（**第十轮已解决**）：`ProbeManager` + `ProbeInstance`，
+   `ChartData.build` 是纯函数，"各建一份"确实是它的自然用法 —— 这条路走对了。
+   遗留的小问题：现在没有"多探针同屏对比"，只有"一次看一个"。
+   真要做对比，需要相对时间轴（见下面第 7 条）。
 2. **采样降频**：长时间记录时是否需要"每 N tick 采样一次"以延长覆盖时长？
    注意：若真的降频，`ChartData.CONTINUITY_GAP` 必须跟着改成 N，
    否则正常采样会被误判成断档、波形碎成一堆短线段。
@@ -969,6 +1149,14 @@ selectWindowStart = win[0];
 | **`Slot.getContainerSlot()`** | 返回 `this.slot`（构造时传入的下标）；**`SlotItemHandler` 把 handler 下标传给 super** → 对它而言 `getContainerSlot()` 就是 handler 的槽位下标 | ★ CP9 之二的下标依据 |
 | **`Font.adjustColor`** | `private static`；alpha 位 == 0 时补 `0xFF` —— **只有文字有这个兜底，`fill` 没有** | ★ CP11 的 fill alpha 坑 |
 | `Dist` | `net.neoforged.api.distmarker.Dist` | 客户端专用声明 |
+| **`BlockState#getMenuProvider(Level, BlockPos)`** | **public**（`BlockState extends BlockBehaviour.BlockStateBase`，那一层把 protected 的 `BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 包成了 public 的两参重载），返回 `@Nullable MenuProvider` | ★ CP17 判"这个方块右键会不会开界面" |
+| **`MultiPlayerGameMode#useItemOn(LocalPlayer, InteractionHand, BlockHitResult)`** | public，返回 `InteractionResult` | ★ CP17 模拟一次真实右键以打开容器界面 |
+| **`Minecraft#hitResult`** | `public HitResult hitResult`（**字段**，不是 getter） | ★ CP17 准星结果。`Minecraft#tick` 里 `gameRenderer.pick(1.0F)` 是**无条件**每 tick 调一次的（在 screen 判断之前），所以即使界面开着它也刷新 |
+| **`BlockHitResult#getBlockPos()`** | public | ★ CP17 |
+| **`Slot#container` / `Slot#index` / `Slot#isFake()`** | 全是 **public**（`container` 是 `public final Container`，`index` 是 `public int`） | ★ CP1 排除玩家背包（`slot.container == player.getInventory()`）、CP17 用 `Slot#index` 当菜单槽下标 |
+| **`Player#getInventory()`** | `public Inventory getInventory()` | ★ CP1 |
+| **`Level#getBlockEntity(BlockPos)` / `Level#isLoaded(BlockPos)`** | public | CP17 判"是不是方块实体"；CP9 判"区块还在不在" |
+| **`Item#onItemUseFirst(ItemStack, UseOnContext)`** | **不是 Item 上的方法**，是 NeoForge `IItemExtension` 的 default 方法（`net.neoforged.neoforge.common.extensions`） | ★ CP17 用它判断"手上的物品会不会抢走这次右键"。反射 `getClass().getMethod(...)` 在**没覆写**时返回接口上的 default 方法，所以看**声明类的包名**（`net.minecraft.*` / `net.neoforged.*` = 安全） |
 
 ### 4.3 第三方模组 API（反射调用，零编译依赖）
 
@@ -998,30 +1186,35 @@ selectWindowStart = win[0];
 
 ```
 src/main/java/com/jessetech/logiscope/
-├─ LogiScopeMod.java          主类：注册 7 个事件监听、持有唯一 Sampler
+├─ LogiScopeMod.java          主类：注册 7 个事件监听、持有唯一 ProbeManager
 ├─ bind/
-│  ├─ KeyBindings.java        输入层：快捷键 + Screen 按键拦截 + 无界面时的轮询（CP2）
+│  ├─ KeyBindings.java        输入层：快捷键 + Screen 按键拦截 + 无界面时的准星入口（CP2/CP17）
 │  ├─ TextInputGuard.java     输入层：三层"正在打字"守卫（CP2 规则 3）
 │  ├─ ContainerAnchor.java    绑定层：右键方块 → 维度+坐标锚点（CP9）
-│  └─ ProbeTarget.java        绑定层：探针目标（运行时身份 + 持久身份）
+│  ├─ ProbeTarget.java        绑定层：探针目标（一组槽位 + 持久身份）
+│  └─ ProbeContext.java       绑定层：当前可探测的容器（容器界面 / 准星）（CP17）
 ├─ collect/
 │  ├─ ContainerAccess.java    采集层：读菜单槽位（★ CP1，项目基石）
-│  ├─ WorldProbe.java         采集层：读方块实体，服务端线程执行 + seed 垫值（★ CP9）
-│  └─ Sampler.java            采集层：状态机 + 每 tick 采样（CP4/CP5/CP9）
+│  ├─ WorldProbe.java         采集层：读方块实体，服务端线程执行 + seed 垫值（★ CP9）——**每实例一份**
+│  ├─ ProbeSlots.java         采集层：无 GUI 容器的槽位清单（CP16）
+│  ├─ ServerClock.java        采集层：两只**全局**时钟（CP15）
+│  ├─ ProbeInstance.java      采集层：一个探针的状态机 + 每 tick 采样 + 多格聚合（CP4/CP5/CP9/CP16）
+│  └─ ProbeManager.java       采集层：实例表 / 创建 / 删除 / 每 tick 驱动（CP16）
 ├─ store/
 │  ├─ Sample.java             存储层：最小可序列化单元（含 no_data 哨兵）
 │  └─ SampleStore.java        存储层：环形缓冲 + version 计数（CP12）
 ├─ analysis/
 │  ├─ Analyzer.java           分析层：纯函数（摘要 / 逐 tick 差值，跳过 no_data）
 │  ├─ ChartData.java          分析层：扁平序列 → 按物品分组的数据线（★ CP10）
+│  ├─ Aggregator.java         分析层：多格 → 一条样本的内容（★ CP16）
 │  ├─ Series.java             分析层：一条数据线（含断点）
 │  └─ SeriesPoint.java        分析层：一个采样点（含 breakBefore）
 └─ ui/
-   ├─ ScopeScreen.java        呈现层：可拖动可缩放的浮层面板，布局与交互（CP6/CP8/CP12）
+   ├─ ScopeScreen.java        呈现层：三页面（根/选格/图表）浮层面板，布局与交互（CP6/CP8/CP12/CP17）
    └─ ChartRenderer.java      呈现层：坐标轴 / 自动缩放 / 多线 / 框选 / 准线（★ CP11）
 
 dev-check/
-└─ TestChart.java             ★ 离线断言（不启动游戏）：断点规则、分组、颜色顺序、框选统计
+└─ TestChart.java             ★ 离线断言（不启动游戏）：断点规则、分组、颜色顺序、框选统计、多格聚合
                                跑法见文件头注释；分析层不依赖游戏类才能这么用
 ```
 
@@ -1041,7 +1234,10 @@ dev-check/
 | 在波形上**框选一段区间** | ✅ 已完成 | 见 CP12；`Selection` → `ChartData.ranges()` → 统计块 |
 | 换配色 / 加调色板条目 | `ui/ChartRenderer.PALETTE` | 按 series **下标**取色，所以往末尾加颜色不会影响已有线的颜色 |
 | 图上再叠一层信息（速率曲线等） | `ui/ChartRenderer` 里加一条"派生线" | 派生线的 y 尺度可能和 count 差很多 → 需要第二条纵轴，建议先想清楚 |
-| 支持多探针 | `Sampler` + `ScopeScreen` + `ChartData` | 见第三节「待决问题 1」。`ChartData.build` 是纯函数，"各建一份"是它的自然用法 |
+| 支持多探针 | ✅ 已完成（第十轮） | `ProbeManager` + `ProbeInstance`；加"同屏对比"要先做相对时间轴（待决问题 1、7） |
+| **多格监控一个新容器** | `ui/ScopeScreen` 的选格页 + `analysis/Aggregator` | 聚合规则改动的**第一站是 `Aggregator` + `dev-check` 断言**，别在采集层里改 |
+| **换一种"选格"的交互** | `ui/ScopeScreen` 的 `cellMode` / `applyCell` / `slotAt` | 记住两条铁律：面板外的事件不转交、拖动要按线段采样（CP17） |
+| **支持一种新的"入口"**（例如对着某类方块自动建探针） | `bind/ProbeContext` + `bind/KeyBindings#openFromCrosshair` | 判"是不是容器"要和 `WorldProbe#readNow` 的两条路径保持一致 |
 | **支持别的搜索类模组**（REI / EMI） | `bind/TextInputGuard` 里加一个小探针 | 照 `JeiSearchProbe` 抄；先用 `javap -p -cp run/mods/<mod>.jar` 查它的 API |
 | 让容器的键盘操作也能用 | `ui/ScopeScreen` 补 `hoveredSlot` | 见第三节「待决问题 4」 |
 | 兼容自绘界面的模组 | `collect/` 下新建 accessor | 需要面向接口重构 `ContainerAccess` |

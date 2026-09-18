@@ -8,19 +8,20 @@
 
 ## 一句话现状
 
-**G0–G1.8 / G3 已实机验证。第七轮：框选/冻结可用（P1–P4 全过）、接缝毛刺用户判定可接受、
-MEK 下标验证生效（N2/N2b 通过）、性能通过（E6）。**
-第七轮暴露三个问题（本轮全修）：① 缩放交互不符预期（光标锚定重做）；
-② 下标歧义警告被去抖吞掉；③ 采样不跟 `/tick rate`（时间刻度改世界 tick + 速率 n/t）。
-第八轮验证清单见 `VERIFY.md` 第二节（重点 Q1 / Q7 / Q9）。
+**G0–G1.8 / G2 / G2.1 / G3 全部实机验证通过**（第九轮 S1–S6 通过，
+`g2-waveform` 里程碑已打）。
+
+**第十轮（本轮）：UI 交互逻辑更新** —— 面板入口从"选一个格子"改成"管理一批探针"，
+并且一个探针可以同时监控多格（记录是聚合的）。
+三条需求与逐条验收见 `VERIFY.md` **第十轮清单**。**代码已完成，待实机验证。**
 
 | 项 | 状态 |
 |---|---|
-| 代码 | ✅ `BUILD SUCCESSFUL`，jar 83 KB |
-| 离线断言（`dev-check/TestChart.java`） | ✅ 47 条全过（`VERIFY.md` H 组） |
+| 代码 | ✅ `BUILD SUCCESSFUL` |
+| 离线断言（`dev-check/TestChart.java`） | ✅ **67 条**全过（原 47 + 本轮新增 20 条聚合规则） |
 | 产物验收（`verify-jar.py`） | ✅ 全部通过 |
-| 实机验证 | ⬜ **第八轮待做**（`VERIFY.md` 第二节） |
-| 版本控制 | ✅ 每轮改动都已提交 + 打标签（见 `BACKUP.md`） |
+| 实机验证 | ⬜ **第十轮待做**（`VERIFY.md` 第十轮清单） |
+| 版本控制 | ✅ `g2-waveform` 标签之后的所有改动都在本轮提交里（见 `BACKUP.md`） |
 
 ---
 
@@ -110,16 +111,16 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 
 ## 下一步（按顺序）
 
-1. **跑第九轮实机验证**（`VERIFY.md` 第三节）。重点：
-   - `S2`（`/tick rate 40` 下每世界 tick 一条、64/t 不再记成 128）—— 第八轮翻车项直接复现
-   - `S1`（`/tick rate 200` 连续无空白；样本间隔 ~10t 属物理极限，可接受）
-   - `S3–S6`（tick rate 5/20 回归 + 关 GUI 接缝）
-   - `D6`（可靠卸载法复测 no_data 增长）—— 一直没测
-2. 通过后把 `wip-*` 标签升格为正式里程碑 `g2-waveform`，G2 / G2.1 打勾。
+1. **跑第十轮实机验证**（`VERIFY.md` 第十轮清单）。重点：
+   - `T3`（可视化选格：光标禁用物品交互 + 左键拖选 + 右键取消）—— 本轮最核心的新交互
+   - `T7`（多格聚合：两格装同种物品 → 数量是两者之和；装不同物品 → 显示"混合物品"）
+   - `T10`（准星入口三条分支，尤其是"有 GUI 的容器"那条要能自动把界面打开）
+   - `T11`（旧功能回归：单格 + 关界面跟踪 + 波形缩放框选 + `/tick rate` 仍然正常）
+2. 通过后提交文档 + 打里程碑标签 `g3-probes`。
 3. 再考虑 G4（标注与差值）或 G5（导出）。两者都可做：
    - G4 的落点已经现成：`ChartRenderer.Selection` 的两个端点就是标记的最佳位置
    - G5 几乎是把 `List<Sample>` 写成文件，连分析层都不用碰
-   - 「准星强制探测」（F15）也排在 G4 前后做
+   - 「准星强制探测」（F15）本轮**已经顺带做了**（准星指着无 GUI 容器就能建探针）
 
 ---
 
@@ -140,6 +141,32 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 | 1 | **采样时钟重做（N13）**：第八轮实测 tick rate 200/40 下采样节奏与数据全错。根因（sources jar 核实）：客户端 `Level#getGameTime()` 是错拍阶梯——`ClientLevel#tickTime()` 每客户端 tick 本地 +1，服务端每 20 个服务端 tick 才纠正一次绝对值；tick rate 20 时恰好重合所以之前测不出。修法 = **两只钟拆开**：① 样本时间戳改用服务端线程读的权威 `ServerLevel#getGameTime()`（`WorldProbe#worldGameTime`，每客户端 tick 一个 `server.execute` 刷新 volatile，多人/主菜单退回客户端值）；② `WorldProbe` 异步读值新鲜度改按**客户端 tick** 判定（`latest(maxAgeClientTicks)`，读值延迟是真实时间量）。`seed/request` 签名随之简化 | `collect/WorldProbe`（`tickClient`/`worldGameTime`/`latest`）、`collect/Sampler`、`ui/ScopeScreen`（`latest` 调用点） |
 
 物理极限（记录在案，不是 bug）：客户端每秒最多观测 20 次，tick rate 200 时样本间隔 ~10t 不可再细，但累计值与 n/t 速率恒正确。详见 `ARCHITECTURE.md` CP15。
+
+---
+
+## 第十轮做了什么（UI 交互逻辑更新）
+
+需求原文三条（转述见 `GOALS.md` G7）。核心是**面板的入口变了**：
+从"在这台设备上选一个格子"变成"管理一批正在运行的探针"，
+并且一个探针可以**同时监控多格**。
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | **多探针并存**：原来的全局单例 `Sampler` 拆成 `ProbeManager`（实例表 / 创建 / 删除 / 每 tick 驱动）+ `ProbeInstance`（一个探针的状态机 + 自己的缓冲 + 自己的世界侧读取器）。`WorldProbe` 从静态单例改成**每实例一份**，两只全局时钟抽到 `ServerClock` | `collect/ProbeManager`（新）、`collect/ProbeInstance`（新）、`collect/ServerClock`（新）、`collect/WorldProbe`、`collect/Sampler`（删） |
+| 2 | **多格监控 + 聚合**：`ProbeTarget` 从"一格"变成"一组 `SlotRef`"；每 tick 把所有被监控格**加在一起**写一条样本；同物品取那种物品、混装标 `logiscope:mixed`。规则做成纯函数以便离线断言 | `bind/ProbeTarget`、`analysis/Aggregator`（新）、`ui/ChartRenderer`（mixed 配色与名字） |
+| 3 | **三页面结构**：根页（创建探针 + 运行中列表 + 每行删除按钮）/ 选格页 / 图表页；图表页的「选格」回退到**本实例**的选格页 | `ui/ScopeScreen`（重写） |
+| 4 | **可视化选格**：点「选择容器格」后 `cellMode` 生效 —— 面板外的鼠标事件一律吃掉不转发（禁用物品交互），左键点/划过的选中、右键取消，**拖动按线段每 4px 采样**逐格命中；覆盖层自己画；一键清空选择 | `ui/ScopeScreen` |
+| 5 | **无 GUI 容器的列表选格**：`ProbeSlots` 在服务端线程读方块实体的槽位清单交回客户端（客户端根本没有这些内容） | `collect/ProbeSlots`（新） |
+| 6 | **准星入口**：没有容器界面时按 F9 → 判准星。有 GUI → 模拟一次真实右键把界面打开（跨 tick 再压面板图层）；有容器无 GUI → 直接建实例进选格页；都没有 → 开根页 | `bind/ProbeContext`（新）、`bind/KeyBindings` |
+| 7 | **顺手修掉一个和文档不符的洞**：`ContainerAccess#snapshot` 之前其实**没有**排除玩家背包那 36 格（文档一直说排除了）。单格时代只是列表长，多格选格之后会变成"点到自己背包也被当成设备槽" | `collect/ContainerAccess` |
+| 8 | **离线断言 +20 条**：聚合规则（同物品求和 / 混装 / 全空 / 零长度 / 数组版与 List 版一致） | `dev-check/TestChart.java` |
+
+**为什么"混合"不取"最多的那个物品"**：图例上的物品名会与实际内容不符，读数直接错。
+数量在任何情况下都是所有格子之和，所以"总存量 / 总吞吐"这条线永远有效。见 CP16。
+
+**一处需要你确认的解读**：需求原文"若是且有GUI，则打开GUI，并打开探针GUI"，
+对比无 GUI 那半句明写的"自动进入…创建流程"，本轮把**有 GUI 的那支落在根页**
+（不是自动进创建流程）。想改的话是 `KeyBindings#onScreenInit` 里一个 `Page` 实参。
 
 ---
 
