@@ -27,7 +27,7 @@ import java.util.List;
  */
 public final class SampleStore {
 
-    private final Sample[] buf;
+    private Sample[] buf;
     private int size;
     private int head;
 
@@ -44,6 +44,30 @@ public final class SampleStore {
         if (size < buf.length) {
             size++;
         }
+        version++;
+    }
+
+    /**
+     * 换一个容量（配置改了之后**热生效**）。
+     *
+     * 保留**最新**的样本：新容量更小时丢掉最旧的，更大时把现有的搬过去。
+     * 版本号会 +1，于是界面会自动重算派生数据（不用重建探针、也不用重启）。
+     *
+     * @param newCapacity 新的容量（至少 1）
+     */
+    public synchronized void resize(int newCapacity) {
+        int cap = Math.max(1, newCapacity);
+        if (cap == buf.length) {
+            return;
+        }
+        int keep = Math.min(size, cap);
+        Sample[] fresh = new Sample[cap];
+        for (int i = 0; i < keep; i++) {
+            fresh[i] = buf[Math.floorMod(head - keep + i, buf.length)];
+        }
+        buf = fresh;
+        size = keep;
+        head = keep % cap;
         version++;
     }
 

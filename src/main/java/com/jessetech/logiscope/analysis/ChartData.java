@@ -4,9 +4,11 @@ import com.jessetech.logiscope.store.Sample;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 分析层：把「扁平的时间序列」整理成「按物品分组的折线」，供界面画图。
@@ -17,55 +19,56 @@ import java.util.Map;
  *   2. "清空"要遍历所有数组；"某一刻这一格里到底是什么"反而要反查；
  *   3. 多条数组之间没有统一的时间轴，画图时还得先做一次归并。
  * 所以这里选了另一条路：**扁平的环形缓冲仍是唯一真相**，
- * 按物品分组的 Series 是它的**派生视图**，每次数据变化重算一次（20 次/秒，O(n)）。
- * 结果是同一件事只写一遍，而且顺序、断档、清空全都自动正确。
+ * 按物品分组的 Series 是它的**派生视图**，每次数据变化重算一次（O(n)）。
+ *
+ * ★★ 每条线有两层：存量 + 单 tick 流量 ★★
+ *
+ * | 层 | 怎么来的 | 用来回答 |
+ * |---|---|---|
+ * | 存量 `points` | 直接来自采样 | 现在有多少 |
+ * | 流量 `flow` | 本 tick 存量 − 上一 tick 存量 | 现在进/出多快 |
+ *
+ * 流量是**算出来的**，不是另采一份数据 —— 所以它和存量天然对齐，
+ * 也不会多占缓冲空间。只在**相邻两格**之间算：段起点、中间夹过标记、
+ * 这个物品上一格不在被监控的格子里、上一格干脆没观测到（跨格）——
+ * 这些位置的变化归不到某一格上，硬写成 `n/t` 就是假的（比如从"64 铁"跳到"1 铜"的 −63），
+ * 宁可让那一段的 IO 空着。
  *
  * ★★ 断点规则（什么时候必须把线剪断）★★
  *
  * 规则一：**只有"这条线自己不连续"才剪**（per-series）。
- * 一个 tick 可以有多条样本（多格监控时每个出现的物品各一条，见 {@code analysis/Aggregator}），
- * 所以不能用"全局上一个样本"判连续性 —— 那样第二条样本必然被判成"换了物品"，
- * 波形会碎成一堆孤立点。
+ * 一个 tick 可以有多条样本（多格多物品时每个物品一条），所以不能用"全局上一个样本"判连续性。
  *
  * 规则二：**"不连续"由两件事定义，都与"采样间隔是多少"无关**：
  *
  * | 情况 | 为什么必须断 |
  * |---|---|
  * | 中间夹了标记（`no_data` = 读了读不到，`gap` = 没在记录） | 那段区间我们**没观测**，把两点连起来等于编造数据 |
- * | 这条线的上一个点**不在上一个数据 tick 上** | 那个 tick 里被监控的格子没有这个物品（被抽空了 / 换成了别的），再连上就是假的连续 |
+ * | 这条线的上一个点**不在上一个数据 tick 上** | 那个 tick 里被监控的格子没有这个物品，再连上就是假的连续 |
  *
- * 规则三：还有一个**静默大空档**兜底（{@link #MAX_SILENT_GAP}）：
- * 万一有一条没写标记的停摆路径，超过它就直接剪断，不让线横穿一大段空白。
+ * 规则三：还有一个**静默大空档**兜底（{@link #MAX_SILENT_GAP}）。
  *
- * ★ 为什么不再用"tick 间隔 > 1 就断"（第十轮第三次修复推翻的旧规则）★
- *   旧规则是"正常的采样是一 tick 一条，所以间隔只可能是 1"。它在**客户端 tick 与服务端
- *   tick 锁相**的年代成立（时间戳取自客户端自己的计数器，恒定 +1），但第八轮把时间戳
- *   换成**服务端权威 gameTime** 之后就不成立了：
+ * > 为什么不用"tick 间隔 > 1 就断"：时间戳取自服务端权威 `gameTime`（CP15），
+ * > 而客户端的观测节拍与服务端 tick 不锁相，偶尔会漏观测一格 ——
+ * > 那只是"采样稀疏"，不是数据断裂。（第十轮第四次修复把采样点搬到了世界 tick 上，
+ * > 主路径已经不漏格；这条规则仍然兜着回退路径。）
  *
- *   客户端每秒最多观测 20 次，服务端也每秒走 20 tick，两者**不锁相**。一次帧抖动
- *   （GC、区块生成、卡顿）就会让某个客户端 tick 看到 ±0 或 +2 的世界 tick。客户端
- *   看见 0 时按"世界没走 tick 就不记"跳过，于是**下一个样本的 tick 自然跳 2** ——
- *   这只是"少观测了一个 tick"，数据本身两端都真的、也没断，但旧规则会在这里剪一刀。
- *   实测现象就是 20t 正常流速下**偶发的断线**（第九轮之前从没出现过，因为那时时钟
- *   恰好恒 +1），而真正的停顿/读取失败**本来就有显式标记**，用不着靠数间隔去猜。
+ * ★ 物品种类上限 ★
+ * `maxItemKinds` 限的是**画出来的种类数**（每个种类一条存量线 + 一条流量线）。
+ * 超出的种类**照样进缓冲、照样进统计**（`dataCount` / `minValue` / `maxValue` 都算它），
+ * 只是不建线 —— 于是不会被一个"轮换了上千种物品"的槽位拖垮图例，
+ * 面板上会显示 `+N 未显示`，用户知道有多少没画。
  *
- *   换到高流速（`/tick rate 200`）就更明显：样本天然每 ~10 tick 一个，旧规则会把
- *   **每一个点**都判成断点。新规则下它只是一条采样稀疏的连续折线。
- *
- * ★ 为什么要有 version ★
- *   界面每帧都要这份数据。带上 version 后界面可以"数据没变就不重算"，
- *   把 60 次/秒 的全量遍历降到 20 次/秒（每次数据真的变化才发生一次）。
- *   纯函数 + 显式版本号，比在界面里做增量更新更容易证明是对的。
- *
- * @param series      按物品"首次出现顺序"排列 —— 顺序稳定，界面才能给每个物品固定的颜色
- * @param firstTick   时间轴起点（含标记样本）
- * @param lastTick    时间轴终点（含标记样本）
- * @param minValue    全体有数据样本的最小值
- * @param maxValue    全体有数据样本的最大值
- * @param dataCount   有数据的**样本条数**（多格多物品时一个 tick 可能好几条）
- * @param noDataCount 无数据的样本数（一个 tick 最多一条；中断标记不计入）
- * @param switches    物品**集合**发生变化的次数（按 tick 比集合，不是比单个样本）
- * @param version     对应的 SampleStore 版本号
+ * @param series       按物品"首次出现顺序"排列 —— 顺序稳定，界面才能给每个物品固定的颜色
+ * @param firstTick    时间轴起点（含标记样本）
+ * @param lastTick     时间轴终点（含标记样本）
+ * @param minValue     全体有数据样本的最小值（含未画线的种类）
+ * @param maxValue     全体有数据样本的最大值（含未画线的种类）
+ * @param dataCount    有数据的**样本条数**（多格多物品时一个 tick 可能好几条）
+ * @param noDataCount  无数据的样本数（一个 tick 最多一条；中断标记不计入）
+ * @param switches     物品**集合**发生变化的次数（按 tick 比集合）
+ * @param droppedKinds 因为超过 `maxItemKinds` 而没有画线的物品种类数
+ * @param version      对应的 SampleStore 版本号
  */
 public record ChartData(
         List<Series> series,
@@ -76,17 +79,18 @@ public record ChartData(
         int dataCount,
         int noDataCount,
         int switches,
+        int droppedKinds,
         long version) {
 
     public static final ChartData EMPTY =
-            new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, Long.MIN_VALUE);
+            new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, 0, Long.MIN_VALUE);
 
     /**
      * 静默大空档兜底（tick）：中间隔了这么多还没断，就直接剪断。
      *
      * 正常情况**用不到它** —— 停顿都有显式标记（见 {@link Sample#gap}）。
      * 它存在只为兜住"没写标记就停摆了"这种 unforeseen 路径，
-     * 所以阈值刻意给得很大（1 秒 = 20 tick）：观测抖动最多漏一两 tick，碰不到它。
+     * 所以阈值刻意给得很大（1 秒 = 20 tick）。
      */
     public static final long MAX_SILENT_GAP = 20;
 
@@ -130,7 +134,11 @@ public record ChartData(
      *
      * 语义说明：`first`/`last` 取的是区间内**最早/最晚**的采样值，
      * 中间若夹着别的物品（槽位被清空又装回来），差值仍然按"首尾"算 ——
-     * 它表达的是"这段时间里这个物品净变化了多少"，这正是物流分析想要的东西。
+     * 它表达的是"这段时间里这个物品净变化了多少"。
+     *
+     * 流量那三个字段是区间内**逐 tick 净变化**的合计：
+     * `inflow` 只累加正的、`outflow` 只累加负的 ——
+     * 两者在"进和出都很快"的区间里能给出比净变化丰富得多的信息。
      */
     public List<SeriesRange> ranges(long fromTick, long toTick) {
         long lo = Math.min(fromTick, toTick);
@@ -154,9 +162,25 @@ public record ChartData(
                 min = Math.min(min, p.count());
                 max = Math.max(max, p.count());
             }
-            if (n > 0) {
-                out.add(new SeriesRange(s.itemId(), n, first, last, min, max));
+            if (n == 0) {
+                continue;
             }
+            int flowSamples = 0;
+            int inflow = 0;
+            int outflow = 0;
+            for (SeriesPoint p : s.flow()) {
+                if (p.tick() < lo || p.tick() > hi) {
+                    continue;
+                }
+                flowSamples++;
+                if (p.count() > 0) {
+                    inflow += p.count();
+                } else {
+                    outflow += p.count();
+                }
+            }
+            out.add(new SeriesRange(s.itemId(), n, first, last, min, max,
+                    flowSamples, inflow, outflow));
         }
         return out;
     }
@@ -165,14 +189,21 @@ public record ChartData(
     // 构建
     // ------------------------------------------------------------------
 
+    /** 不限物品种类数（测试与离线分析用；界面走带配置值的那条）。 */
     public static ChartData build(long version, List<Sample> samples) {
+        return build(version, samples, Integer.MAX_VALUE);
+    }
+
+    public static ChartData build(long version, List<Sample> samples, int maxItemKinds) {
+        int kinds = Math.max(1, maxItemKinds);
         if (samples.isEmpty()) {
-            return new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, version);
+            return new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, 0, version);
         }
 
         // LinkedHashMap：series 的顺序 = 物品首次出现的顺序，
         // 于是"第几条线用什么颜色"是稳定的 —— 不能让它随数据增长而洗牌。
         Map<String, Builder> builders = new LinkedHashMap<>();
+        Set<String> dropped = new HashSet<>();
 
         long firstTick = samples.get(0).tick();
         long lastTick = samples.get(0).tick();
@@ -196,7 +227,6 @@ public record ChartData(
 
             if (s.isMarker()) {
                 // 标记：不产出点，只把"这里断了"记下来，交给下一个数据 tick 消化。
-                // 注意 interrupted 会一直挂到下一个数据 tick —— 中间不管隔多少个标记都一样断。
                 if (s.isNoData()) {
                     noDataCount++;
                 }
@@ -214,26 +244,48 @@ public record ChartData(
 
             for (int k = i; k < j; k++) {
                 Sample c = samples.get(k);
+
                 Builder b = builders.get(c.itemId());
                 if (b == null) {
-                    b = new Builder(c.itemId());
-                    builders.put(c.itemId(), b);
+                    if (builders.size() >= kinds) {
+                        // 超过种类上限：照样进统计，只是不画线
+                        dropped.add(c.itemId());
+                    } else {
+                        b = new Builder(c.itemId());
+                        builders.put(c.itemId(), b);
+                    }
                 }
 
-                // ★ 断点只看**这条线自己**的上一个点 ★
-                // 1. 中间有标记（读了读不到 / 没在记录）→ 断
-                // 2. 这是这条线的第一个点（契约：首点永远是"段起点"，渲染层靠它
-                //    决定"要不要连到左邻列"，而首列本来没有左邻列，所以标记为 true 无害）
-                // 3. 上一个**数据 tick** 里没有它 → 中间它被抽空了 / 换成了别的 → 断
-                // 4. 静默大空档兜底（正常路径用不到，见 MAX_SILENT_GAP）
-                boolean gap = interrupted
-                        || !hasPrevDataTick
-                        || b.lastTick != prevDataTick
-                        || (t - b.lastTick) > MAX_SILENT_GAP;
-                b.points.add(new SeriesPoint(t, c.count(), gap));
-                b.lastTick = t;
-                b.min = Math.min(b.min, c.count());
-                b.max = Math.max(b.max, c.count());
+                if (b != null) {
+                    // ★ 断点只看**这条线自己**的上一个点 ★
+                    // 1. 中间有标记（读了读不到 / 没在记录）→ 断
+                    // 2. 这是这条线的第一个点（契约：首点永远是"段起点"）
+                    // 3. 上一个**数据 tick** 里没有它 → 中间它被抽空了 / 换成了别的 → 断
+                    // 4. 静默大空档兜底（正常路径用不到，见 MAX_SILENT_GAP）
+                    boolean gap = interrupted
+                            || !hasPrevDataTick
+                            || b.lastTick != prevDataTick
+                            || (t - b.lastTick) > MAX_SILENT_GAP;
+                    b.points.add(new SeriesPoint(t, c.count(), gap));
+
+                    if (!gap && b.lastTick == t - 1) {
+                        // **紧挨着上一格**才算流量：跨格（中间有一格没观测到）的变化
+                        // 归不到哪一格上，硬写成 "n/t" 是假的 —— 宁可这一段 IO 空着
+                        int delta = c.count() - b.lastCount;
+                        b.flow.add(new SeriesPoint(t, delta, b.flowNeedBreak));
+                        b.flowNeedBreak = false;
+                        b.flowMin = Math.min(b.flowMin, delta);
+                        b.flowMax = Math.max(b.flowMax, delta);
+                    } else {
+                        // 断开了：下一段 IO 的第一个点要标成段起点
+                        b.flowNeedBreak = true;
+                    }
+
+                    b.lastTick = t;
+                    b.lastCount = c.count();
+                    b.min = Math.min(b.min, c.count());
+                    b.max = Math.max(b.max, c.count());
+                }
 
                 dataCount++;
                 minValue = Math.min(minValue, c.count());
@@ -248,7 +300,8 @@ public record ChartData(
 
         List<Series> out = new ArrayList<>(builders.size());
         for (Builder b : builders.values()) {
-            out.add(new Series(b.itemId, List.copyOf(b.points), b.min, b.max));
+            out.add(new Series(b.itemId, List.copyOf(b.points), List.copyOf(b.flow),
+                    b.min, b.max, b.flowMin, b.flowMax));
         }
 
         if (dataCount == 0) {
@@ -265,6 +318,7 @@ public record ChartData(
                 dataCount,
                 noDataCount,
                 countItemSetSwitches(samples),
+                dropped.size(),
                 version);
     }
 
@@ -275,10 +329,6 @@ public record ChartData(
      * 多条不同物品的样本，那样算出来的是"每 tick 都切换"，数字虚高且没有意义。
      * 用户想知道的是"这几格里装的东西变了几次"，所以按 tick 归组成集合再比。
      * 标记（no_data / gap）不算切换，它只是"没观测到"，切换链条到这里断掉重算。
-     *
-     * 代价：一次额外的 O(n) 扫描（只在 rebuild 时跑，最多 20 次/秒）。
-     * 刻意用两个复用的 List 而不是 HashSet —— k（一个 tick 里的物品种数）很小，
-     * 线性比较的常数比建哈希表小，也不产生每 tick 的分配。
      */
     public static int countItemSetSwitches(List<Sample> samples) {
         int switches = 0;
@@ -290,7 +340,6 @@ public record ChartData(
         while (i < n) {
             Sample s = samples.get(i);
             if (s.isMarker()) {
-                // 断档不算"切换"：它只是没观测到
                 hasPrev = false;
                 prev.clear();
                 i++;
@@ -328,10 +377,16 @@ public record ChartData(
     private static final class Builder {
         final String itemId;
         final List<SeriesPoint> points = new ArrayList<>();
+        final List<SeriesPoint> flow = new ArrayList<>();
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
-        /** 这条线自己上一次出现的 tick；用来判"它在上一个数据 tick 里在不在" */
+        int flowMin = 0;
+        int flowMax = 0;
+        /** 这条线自己上一次出现的 tick 与数量（判连续性 + 算流量） */
         long lastTick = Long.MIN_VALUE;
+        int lastCount;
+        /** 下一段流量的第一个点要不要标成段起点 */
+        boolean flowNeedBreak;
 
         Builder(String itemId) {
             this.itemId = itemId;
@@ -341,13 +396,17 @@ public record ChartData(
     /**
      * 框选区间内某条数据线的统计。
      *
-     * @param samples 区间内这条线的采样点数
-     * @param first   区间内最早的值
-     * @param last    区间内最晚的值
+     * @param samples     区间内这条线的**存量**采样点数
+     * @param first       区间内最早的存量值
+     * @param last        区间内最晚的存量值
+     * @param flowSamples 区间内可算流量的 tick 数（比采样点数少，段起点不算）
+     * @param inflow      区间内**流入**合计（只累加正的净变化，≥ 0）
+     * @param outflow     区间内**流出**合计（只累加负的净变化，≤ 0）
      */
-    public record SeriesRange(String itemId, int samples, int first, int last, int min, int max) {
+    public record SeriesRange(String itemId, int samples, int first, int last, int min, int max,
+                              int flowSamples, int inflow, int outflow) {
 
-        /** 净变化 */
+        /** 净变化（存量首尾之差，与 `inflow + outflow` 在无断档时相等） */
         public int delta() {
             return last - first;
         }

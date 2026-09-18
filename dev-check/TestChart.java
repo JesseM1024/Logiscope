@@ -60,6 +60,10 @@ public class TestChart {
         t16MarkersAreTransparentToStats();
         t17SeriesDropoutInMultiSlot();
         t18LatestTick();
+        t19FlowBasics();
+        t20FlowInRangeStats();
+        t21KindCap();
+        t22StoreResize();
         System.out.println();
         if (failed == 0) {
             System.out.println("全部通过");
@@ -504,6 +508,128 @@ public class TestChart {
         small.add(new Sample(4, "minecraft:iron_ingot", 4));
         eq("覆盖后只剩最新一条", 1, small.latestTick().size());
         eq("覆盖后是新值", 4, small.latestTick().get(0).count());
+    }
+
+    // ---- 第十轮第五次修复：单 tick IO（净流量） ----
+
+    // 19) 流量 = 相邻两格的存量差；跨格 / 断档 / 首格都不产生流量
+    private static void t19FlowBasics() {
+        // 存量在涨
+        List<Sample> up = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 14),
+                new Sample(3, "minecraft:iron_ingot", 12));
+        Series a = ChartData.build(1L, up).byItem("minecraft:iron_ingot");
+        eq("首格没有流量（没有上一格）", 2, a.flow().size());
+        eq("第二格 +4", 4, a.flow().get(0).count());
+        eq("第三格 -2（流出）", -2, a.flow().get(1).count());
+        yes("流量的第一个点是段起点", a.flow().get(0).breakBefore());
+        no("后面接着", a.flow().get(1).breakBefore());
+        eq("流量范围（含负数）", "-2..4", a.flowMin() + ".." + a.flowMax());
+        eq("最近一次流量", -2, a.lastFlow());
+
+        // 中间少观测一格（1 → 2 → 4）：存量线连着，但那一格的流量归不出来
+        List<Sample> sparse = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                new Sample(4, "minecraft:iron_ingot", 13),
+                new Sample(5, "minecraft:iron_ingot", 14));
+        Series b = ChartData.build(2L, sparse).byItem("minecraft:iron_ingot");
+        eq("存量线不断（4 个点）", 4, b.points().size());
+        eq("流量只有 2 个点（跨格那两格没有流量）", 2, b.flow().size());
+        eq("第一段流量 +1", 1, b.flow().get(0).count());
+        eq("第二段流量 +1（tick 5）", 1, b.flow().get(1).count());
+        yes("跨格之后的新段起点", b.flow().get(1).breakBefore());
+
+        // no_data / gap 之后同样没有流量
+        List<Sample> broken = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 12),
+                Sample.noData(3),
+                new Sample(4, "minecraft:iron_ingot", 20));
+        Series c = ChartData.build(3L, broken).byItem("minecraft:iron_ingot");
+        eq("断档后不产生流量", 1, c.flow().size());
+        eq("断档前那格 +2", 2, c.flow().get(0).count());
+    }
+
+    // 20) 框选区间里的流入 / 流出合计（进和出都很快时，净变化看不出来的东西）
+    private static void t20FlowInRangeStats() {
+        // 100 → 90 → 90 → 110：净 +10，但中间有 −10 与 +20
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 100),
+                new Sample(2, "minecraft:iron_ingot", 90),
+                new Sample(3, "minecraft:iron_ingot", 90),
+                new Sample(4, "minecraft:iron_ingot", 110));
+        ChartData d = ChartData.build(1L, s);
+        List<ChartData.SeriesRange> all = d.ranges(0, 100);
+        eq("只有一条线", 1, all.size());
+        ChartData.SeriesRange r = all.get(0);
+        eq("净变化 +10", 10, r.delta());
+        eq("流入合计 +20", 20, r.inflow());
+        eq("流出合计 -10", -10, r.outflow());
+        eq("可算流量的 tick 数 3", 3, r.flowSamples());
+
+        // 区间只取 tick 3 那一格：那里恰好没有变化
+        ChartData.SeriesRange flat = d.ranges(3, 3).get(0);
+        eq("区间内流量点 1 个", 1, flat.flowSamples());
+        eq("那一格流入 0", 0, flat.inflow());
+        eq("那一格流出 0", 0, flat.outflow());
+
+        // 区间只取 tick 2 那一格：−10 落在这里
+        ChartData.SeriesRange drop = d.ranges(2, 2).get(0);
+        eq("区间内流量点 1 个", 1, drop.flowSamples());
+        eq("流入 0", 0, drop.inflow());
+        eq("流出 -10", -10, drop.outflow());
+    }
+
+    // 21) 物品种类上限：超出的种类照样进统计，只是不画线
+    private static void t21KindCap() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(1, "minecraft:copper_ingot", 5),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                new Sample(2, "minecraft:copper_ingot", 6),
+                new Sample(2, "minecraft:gold_ingot", 100));
+
+        ChartData cap1 = ChartData.build(1L, s, 1);
+        eq("只画 1 种", 1, cap1.series().size());
+        eq("画的是首次出现的那种", "minecraft:iron_ingot", cap1.series().get(0).itemId());
+        eq("未显示的种类数", 2, cap1.droppedKinds());
+        eq("数据照样全记（3 tick 里 5 条样本）", 5, cap1.dataCount());
+        eq("全局最大值仍然包含未显示的种类", 100, cap1.maxValue());
+
+        ChartData capAll = ChartData.build(2L, s, 256);
+        eq("上限够大时三种都画", 3, capAll.series().size());
+        eq("没有未显示的", 0, capAll.droppedKinds());
+
+        ChartData unlimited = ChartData.build(3L, s);
+        eq("不带上限的重载 = 全画", 3, unlimited.series().size());
+    }
+
+    // 22) 缓冲容量热切换（配置改了不重启）
+    private static void t22StoreResize() {
+        SampleStore st = new SampleStore(4);
+        for (int i = 1; i <= 4; i++) {
+            st.add(new Sample(i, "minecraft:iron_ingot", i));
+        }
+        eq("写满", 4, st.size());
+        long v0 = st.version();
+        st.resize(2);
+        eq("缩小后容量", 2, st.capacity());
+        eq("缩小后保留 2 条", 2, st.size());
+        eq("保留的是最新的两条", "3..4", st.toList().get(0).count() + ".." + st.toList().get(1).count());
+        yes("版本号变了（界面会重算）", st.version() != v0);
+
+        st.resize(6);
+        eq("放大后容量", 6, st.capacity());
+        eq("放大后条数不变", 2, st.size());
+        st.add(new Sample(5, "minecraft:iron_ingot", 5));
+        eq("继续可写", 3, st.size());
+        eq("最新一条", 5, st.latestTick().get(0).count());
+
+        st.resize(2);
+        eq("再缩小仍然只留最新", 2, st.size());
+        eq("最新还是那两条", "4..5", st.toList().get(0).count() + ".." + st.toList().get(1).count());
     }
 
     // ---- 断言 ----

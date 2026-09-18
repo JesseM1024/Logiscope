@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.ui;
 
+import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
@@ -129,6 +130,14 @@ public final class ScopeScreen extends Screen {
     /** 图例里被关掉的物品线。跨开合保持：它是"看图的偏好"，不是数据 */
     private static final Set<String> hiddenItems = new HashSet<>();
 
+    /**
+     * 开了 IO 线（单 tick 净流量）的物品。
+     *
+     * 为什么单独一份集合而不是"hiddenItems 的补集"：两者是**两级**开关，
+     * 四象限都有意义（只看存量 / 只看 IO / 都看 / 都不看）。
+     */
+    private static final Set<String> ioShown = new HashSet<>();
+
     /** 由输入层设置的"一打开面板就提示这句话"（例如"手上的物品会抢走右键"） */
     @Nullable
     private static String pendingFlashKey;
@@ -150,6 +159,11 @@ public final class ScopeScreen extends Screen {
     private static final int DEL_W = 13;
 
     private static final String SERIES_PREFIX = "series:";
+    /**
+     * 图例里 IO 子行的前缀。**是物品行的子级**：父行控制存量线，子行控制 IO 线。
+     * 默认 IO 关着（图看起来和以前一样），点一下子行才把它画出来。
+     */
+    private static final String IO_PREFIX = "io:";
 
     // ==================================================================
     // 会话状态（每次打开重置）
@@ -501,7 +515,7 @@ public final class ScopeScreen extends Screen {
         builtVersion = v;
         builtProbeId = p.id();
         List<Sample> samples = p.store().toList();
-        chartData = ChartData.build(v, samples);
+        chartData = ChartData.build(v, samples, LogiScopeConfig.maxItemKinds());
         summary = Analyzer.summarize(samples);
         pruneHidden();
         refreshSelectionStats();
@@ -512,12 +526,14 @@ public final class ScopeScreen extends Screen {
      * 不做的话，某个物品消失又出现时会莫名其妙地保持隐藏，玩家找不到原因。
      */
     private void pruneHidden() {
-        if (hiddenItems.isEmpty()) {
-            return;
-        }
         for (String id : List.copyOf(hiddenItems)) {
             if (chartData.byItem(id) == null) {
                 hiddenItems.remove(id);
+            }
+        }
+        for (String id : List.copyOf(ioShown)) {
+            if (chartData.byItem(id) == null) {
+                ioShown.remove(id);
             }
         }
     }
@@ -650,11 +666,19 @@ public final class ScopeScreen extends Screen {
         return out;
     }
 
+    /**
+     * 图例条目：**每个物品两格** —— 物品行（存量线）+ 紧挨着的 IO 子行（单 tick 净流量）。
+     *
+     * 为什么摆成"相邻两格"而不是真做一棵树：图例是流式换行的色块带，
+     * 做成缩进的树要占两倍行高（面板是浮层，高度很贵）。
+     * 子行紧跟父行、且只写 "IO"、颜色用同色系浅色 —— 层级关系一眼能看出来。
+     */
     private List<Item> legendItems() {
         List<Item> out = new ArrayList<>();
         for (Series s : chartData.series()) {
             out.add(new Item(SERIES_PREFIX + s.itemId(),
                     ChartRenderer.label(chartData.indexOf(s.itemId()), s.itemId()), true));
+            out.add(new Item(IO_PREFIX + s.itemId(), tr("logiscope.legend.io"), true));
         }
         return out;
     }
@@ -801,7 +825,8 @@ public final class ScopeScreen extends Screen {
         if (selecting) {
             sel = draftSelection(L, start, end);
         }
-        return new ChartRenderer.View(start, end, hiddenItems, sel, selecting, selectionStats, mouseX, mouseY);
+        return new ChartRenderer.View(start, end, hiddenItems, ioShown, sel, selecting, selectionStats,
+                mouseX, mouseY);
     }
 
     /**
@@ -909,7 +934,7 @@ public final class ScopeScreen extends Screen {
         switch (page) {
             case ROOT -> {
                 ProbeManager mgr = LogiScopeMod.probes();
-                String head = tr("logiscope.info.probes") + " " + mgr.count() + " / " + ProbeManager.MAX_PROBES;
+                String head = tr("logiscope.info.probes") + " " + mgr.count() + " / " + LogiScopeConfig.maxProbes();
                 g.drawString(this.font, head, left, y, 0xBFBFBF, false);
                 y += ROW_H;
                 String hint = hasTarget ? tr("logiscope.hint.create_ready") : tr("logiscope.hint.no_target");
@@ -949,6 +974,11 @@ public final class ScopeScreen extends Screen {
                         + ChartRenderer.fmtExact(summary.max()) + "  avg "
                         + ChartRenderer.fmtExact(summary.average());
                 String sw = "switch " + chartData.switches() + "  series " + chartData.series().size();
+                if (chartData.droppedKinds() > 0) {
+                    // 超过 maxItemKinds 的种类：数据照记，只是不画线 —— 得让用户知道
+                    sw += "  " + tr("logiscope.info.kinds_dropped")
+                            .replace("%s", String.valueOf(chartData.droppedKinds()));
+                }
                 int mmW = L.w() - 2 * PAD - this.font.width(sw) - 8;
                 g.drawString(this.font, cut(mm, mmW), left, y, 0xC8C8D4, false);
                 g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
@@ -982,6 +1012,13 @@ public final class ScopeScreen extends Screen {
             }
             sb.append(ChartRenderer.label(-1, t.itemId())).append(" x")
                     .append(ChartRenderer.fmtExact(t.count()));
+            if (ioShown.contains(t.itemId())) {
+                Series s = chartData.byItem(t.itemId());
+                if (s != null && s.hasFlow()) {
+                    int f = s.lastFlow();
+                    sb.append(" [").append(f > 0 ? "+" + f : String.valueOf(f)).append("/t]");
+                }
+            }
             shown++;
         }
         return sb.toString();
@@ -1166,6 +1203,10 @@ public final class ScopeScreen extends Screen {
      */
     private void renderLegend(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
+            if (c.id().startsWith(IO_PREFIX)) {
+                renderLegendIo(g, c, mouseX, mouseY);
+                continue;
+            }
             if (!c.id().startsWith(SERIES_PREFIX)) {
                 renderChip(g, c, mouseX, mouseY, false, 0);
                 continue;
@@ -1185,6 +1226,30 @@ public final class ScopeScreen extends Screen {
             g.fill(c.x() + 4, c.y() + 3, c.x() + 10, c.y() + 9, off ? 0xFF3A3A44 : color);
             g.drawString(this.font, c.label(), c.x() + 13, c.y() + 2, off ? 0xFF70707A : 0xFFD8D8E4, false);
         }
+    }
+
+    /**
+     * 图例里的 IO 子行：小一格、缩进两像素、同色系浅色块 —— 明确是上面那个物品的子级。
+     * 关着的时候是灰的（和图例里"被关掉的线"一个语汇）。
+     */
+    private void renderLegendIo(GuiGraphics g, Chip c, int mouseX, int mouseY) {
+        String itemId = c.id().substring(IO_PREFIX.length());
+        boolean on = ioShown.contains(itemId);
+        boolean hover = c.hit(mouseX, mouseY);
+        int bg = !on ? 0xFF17171E : (hover ? 0xFF31313F : 0xFF22222C);
+        int border = !on ? 0xFF252530 : (hover ? 0xFF8A8AC8 : 0xFF44445A);
+        int x = c.x();
+        int y = c.y() + 2;
+        int w = c.w();
+        int h = c.h() - 3;
+        g.fill(x, y, x + w, y + h, bg);
+        g.fill(x, y, x + w, y + 1, border);
+        g.fill(x, y + h - 1, x + w, y + h, border);
+        g.fill(x, y, x + 1, y + h, border);
+        g.fill(x + w - 1, y, x + w, y + h, border);
+        int color = ChartRenderer.flowColor(ChartRenderer.colorOf(chartData.indexOf(itemId), itemId));
+        g.fill(x + 4, y + 3, x + 9, y + 8, on ? color : 0xFF3A3A44);
+        g.drawString(this.font, c.label(), x + 12, y + 2, on ? 0xFFE0E0EC : 0xFF70707A, false);
     }
 
     private void renderButtons(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
@@ -1721,6 +1786,7 @@ public final class ScopeScreen extends Screen {
         mgr.setActive(p.id());
 
         hiddenItems.clear();
+        ioShown.clear();
         selection = null;
         selectionStats = List.of();
         live = true;
@@ -1744,7 +1810,9 @@ public final class ScopeScreen extends Screen {
 
     private void onChip(String id) {
         ProbeManager mgr = LogiScopeMod.probes();
-        if (id.startsWith(SERIES_PREFIX)) {
+        if (id.startsWith(IO_PREFIX)) {
+            toggleIo(id.substring(IO_PREFIX.length()));
+        } else if (id.startsWith(SERIES_PREFIX)) {
             toggleSeries(id.substring(SERIES_PREFIX.length()));
             return;
         }
@@ -1876,6 +1944,13 @@ public final class ScopeScreen extends Screen {
     private void toggleSeries(String itemId) {
         if (!hiddenItems.remove(itemId)) {
             hiddenItems.add(itemId);
+        }
+    }
+
+    /** 图例里 IO 子行的开关：控制这条物品的**单 tick 净流量**线画不画 */
+    private void toggleIo(String itemId) {
+        if (!ioShown.remove(itemId)) {
+            ioShown.add(itemId);
         }
     }
 

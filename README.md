@@ -100,7 +100,10 @@ gradlew.bat createLaunchScripts
 | 在波形里**点一下** | 取消选择 |
 | 滚轮（实时模式） | 缩放时间窗口 |
 | 滚轮（冻结模式） | 左右平移，回头细看某一段 |
-| 点**图例色块** | 开关那条数据线的渲染 |
+| 点**图例色块** | 开关那条数据线（**存量**）的渲染 |
+| 点图例里物品后面的 **`IO`** 小格 | 开关这个物品的 **IO 线**（单 tick 净流量，默认关）。
+想看 IO 时建议把它的存量线关掉 —— 纵轴会自动缩放到 IO 自己的范围。
+⚠️ **一进一出发生在同一个 tick 里**（存量一直不变）时，净流量是 0：从外部只能观测到"每格的存量"，看不到同格内的进出（见 `docs/ARCHITECTURE.md` CP18）。要看这种情形的进出，请监控上游/下游容器的格子 |
 
 **按钮**
 
@@ -141,7 +144,8 @@ logiscope/
 ├─ dev-check/TestChart.java    ★ 离线断言：不启动游戏就能验断点规则/分组/统计/多格聚合
 ├─ src/main/
 │  ├─ java/com/jessetech/logiscope/
-│  │  ├─ LogiScopeMod.java     主类：注册 7 个事件监听、持有唯一 ProbeManager
+│  │  ├─ LogiScopeMod.java     主类：注册事件监听与配置、持有唯一 ProbeManager
+│  │  ├─ LogiScopeConfig.java  资源上限的客户端配置（缓冲 72000 / 探针 16 / 物品种类 256）
 │  │  ├─ bind/                 输入层（快捷键 + TextInputGuard 三层打字守卫）
 │  │  │     ContainerAnchor    右键方块 → 维度+坐标锚点
 │  │  │     ProbeTarget        探针目标（一组槽位 + 持久身份）
@@ -166,6 +170,9 @@ logiscope/
 ├─ build.gradle                注意 filteringCharset = 'UTF-8' 那一行
 ├─ gradle.properties           版本号都在这里
 └─ verify-jar.py               构建产物验收工具
+
+运行时（不是你手写的）：`config/logiscope-client.toml` —— 资源上限都在那里，
+游戏内从「模组列表 → LogiScope → 配置」改；`bufferSamples` 改完**立刻生效**。
 ```
 
 **`analysis/` 与 `store/` 刻意不 import 任何 `net.minecraft`** ——
