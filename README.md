@@ -55,7 +55,8 @@ gradlew.bat createLaunchScripts
 | [`docs/VISION.md`](docs/VISION.md) | 项目方向、核心依据、**明确不做什么** | 开始任何新功能前 |
 | [`docs/GOALS.md`](docs/GOALS.md) | G0–G7 分目标与**可验证的验收标准** | 想知道"下一步做什么" |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**17 条关键逻辑路径（CP1–CP17）**、数据契约、**已核实的 API 清单** | **改代码前必读** |
-| [`docs/VERIFY.md`](docs/VERIFY.md) | **实机验证清单**（逐条可打勾） | 每次改完要进游戏试 |
+| [`docs/VERIFY.md`](docs/VERIFY.md) | **当前这一轮的实机验证清单**（逐条可打勾） | 每次改完要进游戏试 |
+| [`docs/VERIFY-HISTORY.md`](docs/VERIFY-HISTORY.md) | 历轮验证结论、根因 → 修法、**已接受的限制**、完整 A–F 功能清单 | 回归排查时回看 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 目前进度、已知问题、验证记录 | 每次开工前 |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复、**本地 git 用法（含要不要上传 GitHub）** | 做有风险的改动前 |
 
