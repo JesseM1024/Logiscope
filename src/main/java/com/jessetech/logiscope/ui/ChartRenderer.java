@@ -1,6 +1,5 @@
 package com.jessetech.logiscope.ui;
 
-import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
@@ -68,18 +67,19 @@ public final class ChartRenderer {
     /** "格子空着"单独给一个低饱和的灰蓝：它不是物品，不该和物品线抢注意力 */
     private static final int EMPTY_SLOT_COLOR = 0xFF707888;
 
-    /**
-     * "多格监控、里面装着不同物品"的合成线颜色（见 {@code analysis/Aggregator}）。
-     * 与空槽的灰蓝刻意拉开距离：一个是"什么都没有"，一个是"有东西但说不清是哪种"。
-     */
-    private static final int MIXED_SLOT_COLOR = 0xFFA89880;
-
     // ------------------------------------------------------------------
     // 布局与配色常量
     // ------------------------------------------------------------------
 
-    /** 左侧留给纵轴数字的宽度 */
-    public static final int AXIS_LEFT = 34;
+    /**
+     * 左侧留给纵轴数字的宽度。
+     *
+     * ★ 第十轮加宽（34 → 46）★
+     * 实测反馈：测"单格堆叠"这种大数量的容器时，刻度数字（如 16000000）长到
+     * 画到 GUI 外面去了。两条修法一起上：数字改用科学计数法（见 {@link #fmtCount}），
+     * 同时把这条轴留宽一点 —— 最长的标签形如 `-9.99E8`（8 字符 ≈ 44px）。
+     */
+    public static final int AXIS_LEFT = 46;
     /** 底部留给时间刻度的宽度 */
     public static final int AXIS_BOTTOM = 11;
     private static final int PAD_TOP = 5;
@@ -177,9 +177,6 @@ public final class ChartRenderer {
     public static int colorOf(int seriesIndex, String itemId) {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return EMPTY_SLOT_COLOR;
-        }
-        if (Aggregator.MIXED_ITEM.equals(itemId)) {
-            return MIXED_SLOT_COLOR;
         }
         return PALETTE[Math.floorMod(seriesIndex, PALETTE.length)];
     }
@@ -341,7 +338,8 @@ public final class ChartRenderer {
         for (int v = lo; v <= hi; v += step) {
             int yy = yOf(v);
             g.fill(plotX + 1, yy, plotR - 1, yy + 1, COLOR_GRID);
-            String lb = String.valueOf(v);
+            // 大数走科学计数法：8 位整数会把刻度挤出面板（见 fmtCount）
+            String lb = fmtCount(v);
             g.drawString(font, lb, plotX - 3 - font.width(lb), yy - 3, COLOR_LABEL, false);
         }
     }
@@ -476,8 +474,8 @@ public final class ChartRenderer {
                 continue;
             }
             String name = label(data.indexOf(r.itemId()), r.itemId());
-            rows[n] = name + " " + r.first() + "→" + r.last()
-                    + "  Δ" + signed(r.delta())
+            rows[n] = name + " " + fmtCount(r.first()) + "→" + fmtCount(r.last())
+                    + "  Δ" + signedCount(r.delta())
                     + "  " + fmtRate(r.delta(), span);
             rowColors[n] = colorOf(data.indexOf(r.itemId()), r.itemId());
             n++;
@@ -565,7 +563,7 @@ public final class ChartRenderer {
         if (tick - p.tick() > tolerance) {
             return "-";
         }
-        return String.valueOf(p.count());
+        return fmtCount(p.count());
     }
 
     // ------------------------------------------------------------------
@@ -675,11 +673,53 @@ public final class ChartRenderer {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
         }
-        if (Aggregator.MIXED_ITEM.equals(itemId)) {
-            return tr("logiscope.slot.mixed");
-        }
         int i = itemId.indexOf(':');
         return i < 0 ? itemId : itemId.substring(i + 1);
+    }
+
+    /**
+     * 数量 → 给人看的短标签。
+     *
+     * ★ 为什么大数要用科学计数法（第十轮实测反馈）★
+     * 用户测"单格堆叠"这类大数量的容器时，纵轴刻度是 16000000 这种 8 位数，
+     * 直接画到 GUI 外面去了。改成 {@code 1.6E7} 之后 5 个字符就够，
+     * 配合 {@link #AXIS_LEFT} 从 34 加宽到 46，怎么都不会溢出。
+     *
+     * 规则（小数字保持可读的整数，只有大到读不动才换写法）：
+     *
+     * | 数值 | 显示 |
+     * |---|---|
+     * | 0 … 9999 | 原样整数（`0` / `64` / `9999`） |
+     * | ≥ 10000 | 科学计数法，最多两位小数、去掉多余的 0（`1E4` / `1.5E5` / `1.6E7` / `9.99E6`） |
+     *
+     * 用整数运算做尾数，避免 {@code 9999999} 被浮点四舍五入成 {@code 1.0E7} 那种假精度。
+     */
+    public static String fmtCount(int v) {
+        if (v == 0) {
+            return "0";
+        }
+        String sign = v < 0 ? "-" : "";
+        long a = Math.abs((long) v);
+        if (a < 10000) {
+            return String.valueOf(v);
+        }
+        // 把 |v| 缩到 [100, 999] 的整数（= 尾数保留两位小数），同时数出指数
+        int exp = 0;
+        long m = a;
+        while (m >= 1000) {
+            m /= 10;
+            exp++;
+        }
+        int displayExp = exp + 2;
+        int whole = (int) (m / 100);
+        int frac = (int) (m % 100);
+        if (frac == 0) {
+            return sign + whole + "E" + displayExp;
+        }
+        if (frac % 10 == 0) {
+            return sign + whole + "." + (frac / 10) + "E" + displayExp;
+        }
+        return sign + whole + "." + (frac < 10 ? "0" + frac : String.valueOf(frac)) + "E" + displayExp;
     }
 
     private static String fmtSecs(long ticks) {
@@ -691,8 +731,9 @@ public final class ChartRenderer {
         return String.format(Locale.ROOT, "%.3f/t", delta / (double) Math.max(1L, spanTicks));
     }
 
-    private static String signed(int v) {
-        return v > 0 ? "+" + v : String.valueOf(v);
+    /** 带正负号的短标签（大数同样走科学计数法，见 fmtCount） */
+    private static String signedCount(int v) {
+        return v > 0 ? "+" + fmtCount(v) : fmtCount(v);
     }
 
     private static void centered(GuiGraphics g, Font font, String text, int cx, int y, int color) {

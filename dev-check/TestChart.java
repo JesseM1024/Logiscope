@@ -1,13 +1,14 @@
 /*
  * 分析层的离线验收：不启动游戏，直接喂造好的时间序列。
  *
- * 覆盖两块：
- *   1. ChartData 的断点规则（换物品 / no_data / 采样中断）—— 波形正确性的核心
- *   2. Aggregator 的多格聚合规则（第九轮新增）—— "多格监控记录是聚合的"的核心
+ * 覆盖三块：
+ *   1. ChartData 的断点规则（per-series 连续性 / no_data / 多物品同 tick）
+ *   2. Aggregator 的多格聚合规则（按物品分别求和 —— 第十轮按用户反馈修正过）
+ *   3. Analyzer 的按 tick 合计统计
  *
- * 为什么要有它：这两种行为在游戏里都只能靠肉眼看，而且很难复现
+ * 为什么要有它：这些行为在游戏里都只能靠肉眼看，而且很难复现
  * （要制造 no_data、要精准暂停、要摆出"两格装不同物品"的局面）。
- * 这里用几行断言把它们钉死 —— 以后改这两处时跑一遍就知道有没有改坏。
+ * 这里用几行断言把它们钉死 —— 以后改这几处时跑一遍就知道有没有改坏。
  *
  * 运行（不需要 Gradle，不需要启动游戏；JDK 21 的 javac/java 即可）：
  *
@@ -17,7 +18,7 @@
  *
  * 前置：先跑一次 gradlew.bat build（或 compileJava），保证 classes 是最新的。
  *
- * 为什么能这样跑：ChartData / Aggregator / Series / SeriesPoint / Sample
+ * 为什么能这样跑：ChartData / Analyzer / Aggregator / Series / SeriesPoint / Sample
  * 刻意不引用任何游戏类 —— 这是"分析层保持纯函数"这条约定的直接回报：
  * 它天然可以脱离游戏被验证。
  *
@@ -26,6 +27,7 @@
  * 里跑，或先 chcp 65001。
  */
 import com.jessetech.logiscope.analysis.Aggregator;
+import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
@@ -47,8 +49,12 @@ public class TestChart {
         t6Ranges();
         t7AxisBoundsSanity();
         t8AggregateSameItem();
-        t9AggregateMixedItems();
+        t9AggregateDifferentItemsStaySeparate();
         t10AggregateDegenerate();
+        t11MultiItemTickNoFalseBreak();
+        t12ItemVanishesThenReturns();
+        t13BreakAfterNoData();
+        t14SummaryAggregatesPerTick();
         System.out.println();
         if (failed == 0) {
             System.out.println("全部通过");
@@ -195,62 +201,174 @@ public class TestChart {
         yes("空输入 isEmpty", e.isEmpty());
     }
 
-    // ---- 第九轮：多格监控的聚合规则 ----
+    // ---- 第十轮：多格聚合（按物品分别求和，不再合成"混合"） ----
 
-    // 8) 多个格子装同一种物品 → 那种物品 × 总数（需求："记录的结果是聚合的（加在一起）"）
+    // 8) 多个格子装同一种物品 → 那种物品 × 总数（"多格一起计算"）
     private static void t8AggregateSameItem() {
-        Aggregator.Result r = Aggregator.combine(
+        List<Aggregator.Totals> r = Aggregator.combine(
                 List.of("minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:iron_ingot"),
                 List.of(64, 16, 1));
-        eq("同物品：类目不变", "minecraft:iron_ingot", r.itemId());
-        eq("同物品：数量相加", 81, r.count());
-        no("不是混合", r.mixed());
-        no("不是空", r.empty());
+        eq("同物品：只出一条", 1, r.size());
+        eq("同物品：类目不变", "minecraft:iron_ingot", r.get(0).itemId());
+        eq("同物品：数量相加", 81, r.get(0).count());
+        no("不是空", r.get(0).empty());
 
         // 空槽位（count=0）不参与判定，但也不影响总数
-        Aggregator.Result r2 = Aggregator.combine(
+        List<Aggregator.Totals> r2 = Aggregator.combine(
                 List.of("minecraft:iron_ingot", Sample.EMPTY_ITEM),
                 List.of(32, 0));
-        eq("带一个空格子：仍是铁", "minecraft:iron_ingot", r2.itemId());
-        eq("带一个空格子：数量不变", 32, r2.count());
+        eq("带一个空格子：仍是一条", 1, r2.size());
+        eq("带一个空格子：仍是铁", "minecraft:iron_ingot", r2.get(0).itemId());
+        eq("带一个空格子：数量不变", 32, r2.get(0).count());
     }
 
-    // 9) 多个格子装不同物品 → 合成一条 logiscope:mixed，但**总数仍然有效**
-    //    （选"最多的那个物品"会让图例上的物品名与实际内容不符，读数直接错）
-    private static void t9AggregateMixedItems() {
-        Aggregator.Result r = Aggregator.combine(
+    // 9) ★ 本轮语义修正的核心 ★
+    //    多个格子装不同物品 → **各自一条**（不同物品仍然是图上的不同颜色线），
+    //    而**不是**合成一条"混合物品"。用户实机反馈明确否掉了第一版的混合写法。
+    private static void t9AggregateDifferentItemsStaySeparate() {
+        List<Aggregator.Totals> r = Aggregator.combine(
                 List.of("minecraft:iron_ingot", "minecraft:copper_ingot"),
                 List.of(64, 1));
-        eq("混装：标成混合", Aggregator.MIXED_ITEM, r.itemId());
-        eq("混装：数量仍是总数", 65, r.count());
-        yes("被识别为混合", r.mixed());
-        no("混装不是空", r.empty());
+        eq("两种物品 → 两条", 2, r.size());
+        eq("第一条是铁", "minecraft:iron_ingot", r.get(0).itemId());
+        eq("铁 64", 64, r.get(0).count());
+        eq("第二条是铜", "minecraft:copper_ingot", r.get(1).itemId());
+        eq("铜 1", 1, r.get(1).count());
 
-        // 与 Sample/ChartData 的约定一致：混合线不能被当成空槽线
-        yes("混合 id 不是 airflow", !Sample.EMPTY_ITEM.equals(r.itemId()));
+        // 同种物品分散在不相邻的格子里，也要合并到同一条
+        List<Aggregator.Totals> r2 = Aggregator.combine(
+                List.of("minecraft:iron_ingot", "minecraft:copper_ingot", "minecraft:iron_ingot"),
+                List.of(10, 5, 20));
+        eq("分散的铁合并成一条：共两条", 2, r2.size());
+        eq("铁 = 10 + 20", 30, r2.get(0).count());
+        eq("铜 = 5", 5, r2.get(1).count());
+        eq("顺序 = 首次出现顺序", "minecraft:iron_ingot", r2.get(0).itemId());
+
+        // 不能出现任何"混合"这种合成 id
+        for (Aggregator.Totals t : r) {
+            yes("不能是混合合成 id: " + t.itemId(), !"logiscope:mixed".equals(t.itemId()));
+        }
     }
 
-    // 10) 退化情形：全空 / 零长度 / 数量都是 0
+    // 10) 退化情形：全空 / 零长度 / 输出缓冲复用
     private static void t10AggregateDegenerate() {
-        Aggregator.Result allEmpty = Aggregator.combine(
+        List<Aggregator.Totals> allEmpty = Aggregator.combine(
                 List.of(Sample.EMPTY_ITEM, Sample.EMPTY_ITEM), List.of(0, 0));
-        eq("全空 → air", Sample.EMPTY_ITEM, allEmpty.itemId());
-        eq("全空 → 0", 0, allEmpty.count());
-        yes("全空 empty() 为真", allEmpty.empty());
+        eq("全空 → 仍出一条（那条灰蓝的空槽线）", 1, allEmpty.size());
+        eq("全空 → air", Sample.EMPTY_ITEM, allEmpty.get(0).itemId());
+        eq("全空 → 0", 0, allEmpty.get(0).count());
+        yes("全空 empty() 为真", allEmpty.get(0).empty());
 
-        Aggregator.Result none = Aggregator.combine(List.of(), List.of());
-        eq("零个槽位 → air", Sample.EMPTY_ITEM, none.itemId());
-        eq("零个槽位 → 0", 0, none.count());
+        List<Aggregator.Totals> none = Aggregator.combine(List.of(), List.of());
+        eq("零个槽位 → 出一条 air", 1, none.size());
+        eq("零个槽位 → air", Sample.EMPTY_ITEM, none.get(0).itemId());
 
         // 数组版本与 List 版本必须完全一致（采集层每 tick 走的是数组版本）
         String[] ids = {"minecraft:iron_ingot", "minecraft:gold_ingot"};
         int[] counts = {5, 7};
-        Aggregator.Result arr = Aggregator.combine(ids, counts, 2);
-        Aggregator.Result lst = Aggregator.combine(List.of(ids[0], ids[1]), List.of(5, 7));
-        eq("数组版与 List 版类目一致", lst.itemId(), arr.itemId());
-        eq("数组版与 List 版数量一致", lst.count(), arr.count());
-        eq("两个不同物品 → 混合", Aggregator.MIXED_ITEM, arr.itemId());
-        eq("总计 12", 12, arr.count());
+        String[] outIds = new String[4];
+        int[] outCounts = new int[4];
+        int m = Aggregator.combine(ids, counts, 2, outIds, outCounts);
+        List<Aggregator.Totals> lst = Aggregator.combine(List.of(ids[0], ids[1]), List.of(5, 7));
+        eq("数组版条目数", lst.size(), m);
+        eq("数组版类目一致", lst.get(0).itemId(), outIds[0]);
+        eq("数组版数量一致", lst.get(0).count(), outCounts[0]);
+        eq("数组版第二条类目一致", lst.get(1).itemId(), outIds[1]);
+
+        // 输出缓冲是复用的：连续调两次不能残留上一次的内容
+        int m2 = Aggregator.combine(new String[]{"minecraft:stone"}, new int[]{3}, 1, outIds, outCounts);
+        eq("复用缓冲：第二次只有一条", 1, m2);
+        eq("复用缓冲：内容正确", "minecraft:stone", outIds[0]);
+        eq("复用缓冲：数量正确", 3, outCounts[0]);
+    }
+
+    // ---- 第十轮：一个 tick 多条样本时的断点规则（per-series） ----
+
+    // 11) 同一 tick 有多个物品的样本时，每条线**不该在每个 tick 都断开**
+    //     （旧的"全局上一个样本"判法会在这里把波形碎成一堆孤立点）
+    private static void t11MultiItemTickNoFalseBreak() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(1, "minecraft:copper_ingot", 5),
+                new Sample(2, "minecraft:iron_ingot", 12),
+                new Sample(2, "minecraft:copper_ingot", 5),
+                new Sample(3, "minecraft:iron_ingot", 14),
+                new Sample(3, "minecraft:copper_ingot", 6));
+
+        ChartData d = ChartData.build(1L, s);
+        eq("两条线", 2, d.series().size());
+        Series iron = d.byItem("minecraft:iron_ingot");
+        Series copper = d.byItem("minecraft:copper_ingot");
+        yes("铁线存在", iron != null);
+        yes("铜线存在", copper != null);
+        eq("铁 3 个点", 3, iron.points().size());
+        yes("铁首点断开（契约）", iron.points().get(0).breakBefore());
+        no("铁第 2 点连着", iron.points().get(1).breakBefore());
+        no("铁第 3 点连着", iron.points().get(2).breakBefore());
+        eq("铁只有 1 个断点（= 首点）", 1, iron.breaks());
+        no("铜第 2 点连着", copper.points().get(1).breakBefore());
+        eq("每条线的值各自独立", "10..14", iron.min() + ".." + iron.max());
+        eq("样本条数（一个 tick 两条）", 6, d.dataCount());
+        eq("物品集合没变 → switch 0", 0, d.switches());
+        eq("时间轴 1..3", "1..3", d.firstTick() + ".." + d.lastTick());
+    }
+
+    // 12) 某个物品中途从"被监控的格子"里消失又出现 → 它那条线要断开
+    private static void t12ItemVanishesThenReturns() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                new Sample(3, "minecraft:copper_ingot", 5),
+                new Sample(4, "minecraft:copper_ingot", 6),
+                new Sample(5, "minecraft:iron_ingot", 12));
+
+        ChartData d = ChartData.build(1L, s);
+        Series iron = d.byItem("minecraft:iron_ingot");
+        eq("铁 3 个点", 3, iron.points().size());
+        no("铁第 2 点连着", iron.points().get(1).breakBefore());
+        yes("铁第 3 点（隔了 2 tick）必须断开", iron.points().get(2).breakBefore());
+        eq("铁 2 个断点", 2, iron.breaks());
+        eq("物品集合变了两次 → switch 2", 2, d.switches());
+    }
+
+    // 13) no_data 之后自动断开（per-series 之后**不需要**任何特殊处理）
+    private static void t13BreakAfterNoData() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                Sample.noData(3),
+                new Sample(4, "minecraft:iron_ingot", 12));
+
+        ChartData d = ChartData.build(1L, s);
+        Series iron = d.byItem("minecraft:iron_ingot");
+        eq("铁 3 个点", 3, iron.points().size());
+        no("断档前不断", iron.points().get(1).breakBefore());
+        yes("no_data 之后必须断开", iron.points().get(2).breakBefore());
+        eq("no_data 不计入 switch", 0, d.switches());
+        eq("no_data 样本数", 1, d.noDataCount());
+        eq("时间轴仍推进到 4", 4L, d.lastTick());
+    }
+
+    // 14) Analyzer 按 tick 合计：min/max/avg 是"每个 tick 的总存量"，不是单条样本
+    private static void t14SummaryAggregatesPerTick() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(1, "minecraft:copper_ingot", 5),
+                new Sample(2, "minecraft:iron_ingot", 20),
+                new Sample(2, "minecraft:copper_ingot", 5),
+                Sample.noData(3),
+                new Sample(4, "minecraft:iron_ingot", 7));
+
+        Analyzer.Summary sum = Analyzer.summarize(s);
+        eq("有数据的 tick 数", 3, sum.dataTicks());
+        eq("no-data 的 tick 数", 1, sum.noDataTicks());
+        eq("总存量最小值（7）", 7, sum.min());
+        eq("总存量最大值（25）", 25, sum.max());
+        eq("平均 (15+25+7)/3 = 15", 15, sum.average());
+        eq("首 tick 总存量", 15, sum.first());
+        eq("末 tick 总存量", 7, sum.last());
+        eq("净变化", -8, sum.netChange());
+        eq("出现最多的物品", "minecraft:iron_ingot", sum.dominantItem());
     }
 
     // ---- 断言 ----

@@ -31,7 +31,7 @@
 ├───────────────────────────────────────────────────────────────┤
 │ 分析层  analysis/Analyzer      纯函数：摘要 / 逐 tick 差值        │
 │         analysis/ChartData     纯函数：扁平序列 → 按物品分组的数据线│
-│         analysis/Aggregator    ★ 纯函数：多格 → 一条样本的内容    │
+│         analysis/Aggregator    ★ 纯函数：多格 → 按物品分别求和    │
 │         analysis/Series(Pt)    数据线的形状（含断点标记）         │
 ├───────────────────────────────────────────────────────────────┤
 │ 呈现层  ui/ScopeScreen         只读：三页面（根/选格/图表）布局与交互│
@@ -60,7 +60,7 @@
 ```
 按键盘 → KeyBindings →（容器界面开着? ContainerAccess : WorldProbe）
                      → ProbeManager 驱动每个 ProbeInstance 采样
-                     → Aggregator 把多格合成一条 → SampleStore(version)
+                     → Aggregator 把多格按物品求和 → SampleStore(version)
                      → ChartData/Analyzer（version 变了才重算）
                      → ChartRenderer 画到 ScopeScreen 上
 ```
@@ -594,15 +594,27 @@ if (handler != null && idx < handler.getSlots()) {
 
 | 情况 | 为什么必须断 |
 |---|---|
-| 物品换了 | 从"64 个铁锭"变成"1 个铜锭"，差值 −63 是假的 |
-| 中间是 `no_data` | 那段时间我们没观测到，**把两点连起来等于编造数据** |
-| tick 不连续（间隔 > `CONTINUITY_GAP`） | 采样停了（暂停 / 状态切换），同样不能连 |
+| tick 不连续（间隔 > `CONTINUITY_GAP`） | 中间那几 tick 没观测到这条线：可能是 `no_data`，也可能是这个物品已经不在被监控的格子里了。**把两点连起来等于编造数据** |
 
 契约：**每条线的第一个点一定是"段起点"**（`breakBefore = true`）。
 它前面没东西可连，所以这是无害的；渲染层靠 `colStart` 决定"要不要连到左邻列"，
 而首列本来就没有左邻列。
 
-`ChartData` 还顺手给出 `switches`（物品切换次数），面板上显示成 `switch N`。
+> ⚠️ **第十轮改成了 per-series（每条线各判各的），旧规则被推翻了一条。**
+> 第一版是"**上一个样本**的物品变了就断开"，单格时代没问题（一个 tick 只有一个物品）。
+> 但多格监控之后**同一 tick 会有多条不同物品的样本**（见 CP16），
+> 用全局 prev 判的话第二条样本必然被判成"物品切换"
+> → **每条线在每一个 tick 都断开** → 波形碎成一堆孤立点。
+>
+> 改成 per-series 之后，"物品换了"这件事天然由"它属于哪条线"解决，
+> 断点只剩"时间上不连续"一个原因 —— **比原来更简单也更准**。
+> 顺带一个好性质：`no_data` 不再需要任何特殊处理，它只要让那条线少一个点，
+> 下一点自然因为间隔超标被判成断点。
+
+`ChartData` 还顺手给出 `switches`（面板上显示成 `switch N`）。
+它的口径也跟着变了：**按 tick 比"物品集合"**，而不是比相邻两个样本 ——
+多格时后者会算出"每 tick 都切换"，数字虚高且没有意义。
+（实现 `countItemSetSwitches`，只多一次 O(n) 扫描，只在 rebuild 时跑。）
 
 #### 配色：按**下标**取色，而不是按名字哈希
 
@@ -876,20 +888,35 @@ selectWindowStart = win[0];
 | 客户端 tick 计数、权威世界 tick（`ServerClock`） | **全局唯一** | "现在世界走到第几 tick"全世界只有一个答案；留在实例里会导致删掉一个实例就把时钟清掉 |
 | `followAfterClose` | **全局唯一**（在 Manager 上） | 它是用户偏好，不是探针状态 |
 
-#### 3. 多格 → 一条样本：聚合规则
+#### 3. 多格 → 按物品分别求和（★ 第十轮按实测反馈修正过 ★）
 
 一条 `Sample` 只能表示「一个物品 id + 一个数量」，而多个被监控的格子可能装着不同的东西。
-规则（实现见 `analysis/Aggregator`，断言见 `dev-check/TestChart.java`）：
+第一版把不同物品合成了一条 `logiscope:mixed`（"混合物品"），**用户实机反馈明确否掉了**：
 
-| 被监控的格子 | 聚合结果 |
+> "这个功能不是我想要的，我想要的是多格槽位同一计算，但是不同物品仍使用先前的
+> 同一图表中不同颜色线的显示模式。"
+
+所以改成**按物品分别求和**（实现见 `analysis/Aggregator`，断言见 `dev-check/TestChart.java`）：
+
+| 两个被监控的格子 | 这个 tick 写几条、内容是什么 |
 |---|---|
-| 全部为空（总数 0） | `minecraft:air` × 0（画成那条灰蓝线，表示"被抽空了"） |
-| 非空的格子里只有**一种**物品 | 那种物品 × **总数** |
-| 非空的格子里有**多种**物品 | `logiscope:mixed` × **总数**（图例显示"混合物品"） |
+| 都是 64 铁 | 1 条：铁 × 128（"多格一起计算"） |
+| 64 铁 + 32 铜 | **2 条**：铁 × 64、铜 × 32（图上两条不同颜色的线） |
+| 都是空 | 1 条：`minecraft:air` × 0（那条灰蓝的"被抽空了"线） |
 
-**为什么"混合"不挑"最多的那个物品"**：那样图例上的物品名与实际内容不符，读数直接错。
-代价是混合状态下看不出具体是哪些物品 —— 这是诚实的代价，不是缺漏。
-**数量在任何情况下都是所有格子之和**，所以"总存量 / 总吞吐"这条线永远有效。
+也就是说：**"多格"只体现在"同种物品的数量相加"上，物品维度完全交给原有的
+"按物品分线 + 每种一条颜色"机制**。这才是"多格监控"该有的画法 ——
+第一版的混合写法把一台机器里几种物品的物流信息压成了一条线，
+等于把分析工具最重要的维度丢了。
+
+**连带的结构影响：一个 tick 会有多条样本。** 老契约是"每 tick 一条"，
+现在升级为"**每 tick 每条物品一条**"（共用同一个 tick 值）。这条改动落在两处：
+1. `ChartData#build` 的断点判定必须改成 **per-series**（见 CP10 的补充）
+2. `Analyzer#summarize` 先按 tick 合计再统计（面板上 `min/max/avg` 仍是"总存量"）
+
+**代价**：环形缓冲容量按**样本条数**算。监控 3 格、里面有 3 种物品时，
+一个世界 tick 占 3 条 → 半小时的容量实际只覆盖 10 分钟。这是刻意的取舍
+（要按时间算容量就得让容量随"当前物品种数"浮动，反而不可预测）。
 
 #### 4. 读取失败时：**任何一格读不到，整条记 no_data**
 
@@ -944,51 +971,79 @@ selectWindowStart = win[0];
 覆盖层放在面板之前，是因为容器格子可能落在面板底下（面板是可拖的浮层），
 反过来的话选中框会画到面板上面去。
 
-#### 3. 准星入口：只有服务端能开菜单
+#### 3. 准星入口：只有服务端能开菜单 + "有没有界面"怎么判
 
 需求第 3 条要"准星指着有 GUI 的容器 → 打开 GUI，并打开探针 GUI"。
 这里有个硬约束：**只有服务端能开菜单**（`ServerPlayer#openMenu` +
 `ClientboundOpenScreenPacket`）。纯客户端模组没有别的合法通道，只能
 **模拟一次真实的右键**（`MultiPlayerGameMode#useItemOn`）—— 这正是 vanilla 右键走的那条路。
 
-于是不能在同一 tick 里压图层，得跨 tick：
+##### 3.1 "有没有界面"不能静态判 —— 这是第十轮实测抓到的 bug
+
+第一版用 `BlockState#getMenuProvider` 判定，实测翻车：
+**空手对着精妙存储箱子、MEK 熔炼工厂按 F9，界面没打开，反而进了"无 GUI"分支。**
+javap 反查核实的结果：
+
+| 方块 | 覆写 `getMenuProvider`？ | 界面从哪开 |
+|---|---|---|
+| 原版 `ChestBlock` | ✅ 覆写（`SimpleMenuProvider`） | `getMenuProvider` + `openMenu` |
+| 原版 `AbstractFurnaceBlock` / `BarrelBlock` | ❌ **不覆写** | `useWithoutItem` 里直接 `player.openMenu(...)` |
+| 精妙存储 `ChestBlock` | ❌ 不覆写 | 同上（客户端直接 `return SUCCESS` 做预测） |
+| Mekanism `BlockTile` | ❌ 不覆写 | 同上（客户端按 `HasGui` 属性返回 SUCCESS / PASS） |
+
+**连原版熔炉都判不出来**，更别说模组机器。所以换成问
+"这个方块右键会不会**消费**这次交互"：
+
+```java
+// ProbeContext#wouldConsumeClick —— 直接在客户端调一次，不发任何包
+level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
+```
+
+这是所有容器方块为了做客户端预测**必须**回答的问题，比 `getMenuProvider` 可靠得多。
+`getMenuProvider` 降级为**快速肯定判据**：非空就直接算"有界面"，省一次预测。
+
+##### 3.2 判定为"无界面"时**不发交互** —— 顺手把 T15 的隐患也解决了
+
+如果按老做法"先发一次右键再看结果"，`performUseItemOn` 在方块 use 返回 PASS 之后
+会继续走到 `itemstack.useOn(...)` —— 玩家手里拿着扳手对着"没有界面的机器"按 F9 时，
+**那一步会真的改动机器**。直接问一次不发包，这条路就完全不碰物品逻辑。
+
+##### 3.3 跨 tick：等服务端把界面交出来
 
 ```
-按 F9 → 准星是"有界面"的容器 → useItemOn() 发出交互
-                              → 记 PENDING_OVERLAY（60 tick 有效）
+按 F9 → 准星是容器 → 问一次"会不会消费"
+                      ├─ 不消费 → 不发任何包，直接进创建流程（列表选格）
+                      └─ 消费   → useItemOn() 发出交互，记 PENDING_OPEN（40 tick）
        1~3 tick 后，服务端开界面 → ScreenEvent.Init.Post
                               → 先把 pending 提升为锚点（ContainerAnchor，原有逻辑）
-                              → 再 pushGuiLayer 把面板压上去
+                              → 再 pushGuiLayer 把面板压上去（根页）
+       40 tick 内一直没界面     → 兜底当作"没有界面" → 进创建流程
 ```
 
-**60 tick 过期**是必须的：服务端如果一直没开界面（太远 / 被拒），
-标志挂在那里会导致用户**下一次正常开任何容器时面板自己弹出来**。
+**40 tick 过期**是必须的：服务端如果一直没开界面（太远 / 被拒，
+或者那台机器"消费右键但不是开界面"），标志挂在那里会导致用户
+**下一次正常开任何容器时面板自己弹出来**。
 
-**副作用防线**：`performUseItemOn` 的顺序是
+**副作用防线（保留）**：`performUseItemOn` 的顺序是
 `RightClickBlock 事件` → **`itemstack.onItemUseFirst`** → 方块 use → 物品 use。
-第二条是"物品抢在方块前面"，任何装了扳手 / 工具类物品的玩家都会被它抢走。
-所以发交互之前先用**反射只读**物品类的 `onItemUseFirst(ItemStack, UseOnContext)`
-的**声明类**：是原版 / NeoForge 的（即没覆写）才发；否则不发，改用面板提示用户空手再试。
+第二条是"物品抢在方块前面"。所以发交互之前先**反射只读**物品类的
+`onItemUseFirst(ItemStack, UseOnContext)` 的**声明类**：是原版 / NeoForge 的
+（即没覆写）才发；否则不发，改用面板提示用户空手再试。
 `getMethod` 对"没覆写"的情况返回接口 `IItemExtension` 上的 default 方法，
 所以判断的是包名前缀而不是具体类。
 
-**为什么"有 GUI"要用 `BlockState#getMenuProvider(Level, BlockPos)` 判定**：
-这就是 vanilla 自己用来决定"右键这个方块要不要开界面"的入口，
-语义天然一致，不需要维护一张"哪些方块有界面"的表。
-（`BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 是 protected，
-但 `BlockState` 继承的 `BlockStateBase` 把它的两参重载包成了 **public**，可以直接调。）
+> 注：像 Mekanism 扳手那样**只覆写 `useOn`**（不覆写 `onItemUseFirst`）的工具，
+> 对"有界面的方块"是安全的（方块 use 先消费掉，轮不到物品）；
+> 只有对着"无界面但消费右键"的机器才可能生效 —— 见下面第 4 节的说明。
 
-#### 4. 准星判定的三条分支
+#### 4. 准星判定的四条分支
 
 | 准星 | 判定 | 结果 |
 |---|---|---|
-| 有 `MenuProvider` | 有 GUI | 模拟右键打开界面 → 界面一开就压面板（**根页**） |
-| 无 `MenuProvider`，但 `Container` 或 `ItemHandler` 能力存在 | 有容器无界面 | 直接新建探针 + 进选格页（**列表选格**，可视化选格按钮置灰） |
-| 其它 / 没指到方块 | 不可探测 | 打开**根页**（挑一个已创建的探针看） |
-
-判"是不是容器方块实体"的两条路径与 `WorldProbe#readNow` 严格对齐
-（`Container` 或 `ItemHandler.BLOCK`，先无方向再六面）——
-这样不会出现"界面说能探测、实际读不到"。
+| 不是容器方块实体（`Container` / `ItemHandler` 都没有） | 不可探测 | 打开**根页**；**一个包都不发**（所以对拉杆、门、按钮绝无副作用） |
+| 是容器 + `getMenuProvider` 非空 | 有 GUI（快速肯定） | 模拟右键开界面 → 界面一开就压面板（**根页**） |
+| 是容器 + "会消费右键" | 有 GUI | 同上 |
+| 是容器 + "不消费右键" | 无 GUI（机械手这类） | **不发交互**，直接新建探针 + 进选格页（**列表选格**，可视化选格按钮置灰） |
 
 > 📌 **一处需要你确认的解读**：需求原文是"若是且有GUI，则打开GUI，并打开探针GUI"，
 > 而后半句对无 GUI 的情况明确写了"自动进入…创建流程"。
@@ -1027,11 +1082,14 @@ selectWindowStart = win[0];
 | 多探针 | **所有实例同时采样**，界面只切换查看对象 | 只跑"当前在看的那一个" | 语义是"正在运行的探针"，切回来应该看到离开那段时间的数据（CP16） |
 | `WorldProbe` 的归属 | **每实例一份** | 静态单例共享 | 共享读值缓存会让两个探针互相覆盖读数，且症状是"数据偶尔跳一下"，极难查（CP16） |
 | 全局时钟 | 抽成 `ServerClock`，不放在实例里 | 跟着 `WorldProbe` 走 | 删掉一个实例不该清掉全世界的时间（CP16） |
-| 多格聚合的"混合"档 | 合成 `logiscope:mixed`，数量仍取总数 | 取"最多的那个物品" / 取第一个 | 前者会让图例的物品名与实际内容不符（读数直接错）；数量取总数保证"总吞吐"这条线永远有效（CP16） |
+| 多格聚合的粒度 | **按物品分别求和**：不同物品各自一条线，同种物品的数量相加 | 合成一条"混合物品"线（第一版做法） | 混合写法把一台机器里几种物品的物流信息压成一条线，等于丢掉分析工具最重要的维度。**用户实机明确否掉了第一版**（CP16） |
 | 多格读值失败 | **任何一格读不到 → 整条记 no_data** | 跳过读不到的那格、按剩下的求和 | 和偏小在波形上和"正常下降"一模一样，**看不出来**；no_data 是看得出来的（CP16） |
 | 可视化选格的拖动 | 按线段每 4px 采样逐点命中 | 只判当前鼠标位置 | 鼠标事件按帧来，快速划过会漏格（CP17） |
 | 选格集合的键 | **菜单槽下标** | 容器内下标 | MEK 那类模组 `getContainerSlot()` 恒为 0，用它做键会让"选 1 格"变成"全选"（CP17、CP9 之二） |
 | 打开容器界面 | 模拟一次真实右键（`useItemOn`），跨 tick 再压图层 | 想在按键那一 tick 就压 | 只有服务端能开菜单，界面必须等服务端回包；且要先挡住"物品抢在方块前面"（CP17） |
+| 判"这个方块有没有界面" | 问一次 `useWithoutItem(...).consumesAction()`（不发包） | `getMenuProvider` 静态判 / 发一次右键再看 | 前者连原版熔炉和几乎所有模组机器都判不出来；后者会把工具/物品的 `useOn` 一起触发（CP17） |
+| 探针名 | **方块名 + 槽位 + 坐标** | 只写槽位与坐标 | 用户实测："机器一多就分不清谁是谁"。方块名只用于显示，不参与身份判定（CP16） |
+| 纵轴刻度数字 | ≥ 10000 走**科学计数法**（`1.6E7`），轴宽 34 → 46px | 原样打印整数 | 用户实测：测单格堆叠时 8 位刻度数字画到 GUI 外面去了 |
 
 ### 已知限制（不是 bug，是取舍）
 
@@ -1043,6 +1101,8 @@ selectWindowStart = win[0];
 | 被压住的容器界面**不 tick** | 只有 `minecraft.screen` 才会被 `Screen#tick` | 少数依赖 tick 的自绘界面可能显示不动 |
 | 面板内的点击不会穿透到容器 | 这是刻意的，否则一次点击会同时触发两边 | 无 |
 | **多探针**（第十轮已支持，上限 16 个） | 每实例一份半小时缓冲 + 每 tick 一次世界侧异步读取 | 数量很大时（十几个）会有可观的内存与查询开销；`MAX_PROBES` 就是为此设的 |
+| 环形缓冲容量按**样本条数**算 | 多格多物品时一个世界 tick 要占好几条 | 监控 3 格、里面有 3 种物品时，36000 条只覆盖约 10 分钟而不是半小时（CP16） |
+| 对着"会消费右键但不是开界面"的容器机器按 F9，那一次右键会照常发生 | 只能用"消费与否"当作有没有界面的判据，40 tick 没等到界面就兜底 | 与玩家自己右键一次等价；不会误触**非容器**方块（那种情况一个包都不发）（CP17） |
 | 多人下关界面记不到真值 | 纯客户端定位的必然代价 | 见 CP9 |
 | 用快捷键开界面的模组拿不到坐标 | vanilla 菜单不存方块坐标，只能靠右键事件推 | 见 CP9 |
 | 第三方搜索框需逐个加探针 | 那些模组的搜索框不挂进 `screen.children()` | 目前只接了 JEI；通用兜底能覆盖其余情况（代价：多按一次） |
@@ -1156,6 +1216,9 @@ selectWindowStart = win[0];
 | **`Slot#container` / `Slot#index` / `Slot#isFake()`** | 全是 **public**（`container` 是 `public final Container`，`index` 是 `public int`） | ★ CP1 排除玩家背包（`slot.container == player.getInventory()`）、CP17 用 `Slot#index` 当菜单槽下标 |
 | **`Player#getInventory()`** | `public Inventory getInventory()` | ★ CP1 |
 | **`Level#getBlockEntity(BlockPos)` / `Level#isLoaded(BlockPos)`** | public | CP17 判"是不是方块实体"；CP9 判"区块还在不在" |
+| **`BlockState#useWithoutItem(Level, Player, BlockHitResult)`** | **public**（`BlockStateBase` 把 `BlockBehaviour` 的 protected 五参重载包成了这个三参版本），返回 `InteractionResult` | ★ CP17 判"这个方块右键会不会开界面"的**主判据**。容器方块为了做客户端预测必须在客户端返回 `SUCCESS`，所以在客户端直接调它是纯查询（不发包） |
+| **`InteractionResult#consumesAction()`** | public；`SUCCESS` / `CONSUME` 为真 | ★ CP17：`hasGui = result.consumesAction()` |
+| **容器方块的客户端预测返回值** | 原版箱子/熔炉/木桶：`if (level.isClientSide()) return SUCCESS`；精妙存储 `ChestBlock`：javap 核实同样返回 `SUCCESS`；Mekanism `BlockTile`：按 `HasGui` 属性返回 `SUCCESS` / `PASS` | ★ CP17 的实测依据（都是 sources / javap 真读出来的） |
 | **`Item#onItemUseFirst(ItemStack, UseOnContext)`** | **不是 Item 上的方法**，是 NeoForge `IItemExtension` 的 default 方法（`net.neoforged.neoforge.common.extensions`） | ★ CP17 用它判断"手上的物品会不会抢走这次右键"。反射 `getClass().getMethod(...)` 在**没覆写**时返回接口上的 default 方法，所以看**声明类的包名**（`net.minecraft.*` / `net.neoforged.*` = 安全） |
 
 ### 4.3 第三方模组 API（反射调用，零编译依赖）
@@ -1206,7 +1269,7 @@ src/main/java/com/jessetech/logiscope/
 ├─ analysis/
 │  ├─ Analyzer.java           分析层：纯函数（摘要 / 逐 tick 差值，跳过 no_data）
 │  ├─ ChartData.java          分析层：扁平序列 → 按物品分组的数据线（★ CP10）
-│  ├─ Aggregator.java         分析层：多格 → 一条样本的内容（★ CP16）
+│  ├─ Aggregator.java         分析层：多格 → 按物品分别求和（★ CP16）
 │  ├─ Series.java             分析层：一条数据线（含断点）
 │  └─ SeriesPoint.java        分析层：一个采样点（含 breakBefore）
 └─ ui/
