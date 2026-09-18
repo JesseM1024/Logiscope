@@ -227,6 +227,14 @@ public final class ChartRenderer {
                 && my >= py && my < py + plotHeight(chartH);
     }
 
+    /**
+     * 绘图区矩形 {x, y, w, h}（几何与 {@link #inPlot} 同源）。
+     * 界面层的叠加框（回放计算结果）要用它，别自己再算一遍 —— 两套几何必然错位。
+     */
+    public static int[] plotRect(int chartX, int chartY, int chartW, int chartH) {
+        return new int[]{chartX + AXIS_LEFT, chartY + PAD_TOP, plotWidth(chartW), plotHeight(chartH)};
+    }
+
     public static int xOfTick(int chartX, int chartW, long startTick, long endTick, long tick) {
         long span = Math.max(1L, endTick - startTick);
         return chartX + AXIS_LEFT

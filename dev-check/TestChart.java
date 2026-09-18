@@ -29,6 +29,8 @@
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
+import com.jessetech.logiscope.analysis.CurveMath;
+import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.archive.ArchiveData;
@@ -67,6 +69,7 @@ public class TestChart {
         t21KindCap();
         t23Markers();
         t24ArchiveFormat();
+        t25CurveMath();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -669,7 +672,85 @@ public class TestChart {
         }
     }
 
+
+    // 25) 回放计算（第十一轮②）：极值 / 简单统计 / 变化总量 / 变更区间
+    private static void t25CurveMath() {
+        // 数量线：7 7 8 8 9（用户给的例子：变化量 mean=1 var=0）
+        List<SeriesPoint> q = List.of(
+                new SeriesPoint(10, 7, true),
+                new SeriesPoint(11, 7, false),
+                new SeriesPoint(13, 8, false),   // 间隔 2 tick，但没断 → 真实变化 +1
+                new SeriesPoint(14, 8, false),
+                new SeriesPoint(15, 9, false));
+
+        CurveMath.Extremes e = CurveMath.extremes(q);
+        eq("min 7 @t10", "7@10", e.min() + "@" + e.minTick());
+        eq("max 9 @t15", "9@15", e.max() + "@" + e.maxTick());
+
+        CurveMath.Stats st = CurveMath.stats(q);
+        eq("mean 7.8", 7.8, st.mean(), 1e-9);
+        eq("med 8", 8.0, st.med(), 1e-9);
+        // 偏差 -0.8 -0.8 +0.2 +0.2 +1.2 → (0.64*2 + 0.04*2 + 1.44) / 5 = 0.56
+        eq("var 0.56", 0.56, st.var(), 1e-9);
+
+        CurveMath.TotalChange t = CurveMath.totalChange(q);
+        eq("上升 +2", 2L, t.rise());
+        eq("下降 0", 0L, t.fall());
+        eq("合计 Δ+2 == 首尾差", 2L, t.net());
+        eq("无断档", 0, t.gaps());
+
+        CurveMath.Events ev = CurveMath.changeEvents(q);
+        eq("变更 2 次", 2, ev.count());
+        eq("变化量 mean 1", 1.0, ev.dMean(), 1e-9);
+        eq("变化量 var 0", 0.0, ev.dVar(), 1e-9);
+        eq("周期 mean 2t（t13 → t15）", 2.0, ev.pMean(), 1e-9);
+        eq("周期 var 0", 0.0, ev.pVar(), 1e-9);
+
+        // 断档：变化不计入，缺口单独报出（Σ升+Σ降 故意 ≠ Δ —— 这是诚实，不是 bug）
+        List<SeriesPoint> broken = List.of(
+                new SeriesPoint(1, 10, true),
+                new SeriesPoint(2, 12, false),
+                new SeriesPoint(5, 20, true),    // 断档
+                new SeriesPoint(6, 18, false));
+        CurveMath.TotalChange bt = CurveMath.totalChange(broken);
+        eq("断档段：上升 +2（t1→t2）", 2L, bt.rise());
+        eq("断档段：下降 -2（t5→t6）", -2L, bt.fall());
+        eq("断档段：跨档的 +8 不计入", 0L, bt.net() - (bt.rise() + bt.fall()));
+        eq("断档 1 处", 1, bt.gaps());
+
+        CurveMath.Events bev = CurveMath.changeEvents(broken);
+        eq("断档段：变更 2 次", 2, bev.count());
+
+        // IO 线：流量值本身就是变化量
+        List<SeriesPoint> flow = List.of(
+                new SeriesPoint(2, 64, true),    // 段起点，剔除
+                new SeriesPoint(3, 64, false),   // +64
+                new SeriesPoint(4, 0, false),
+                new SeriesPoint(5, -10, false),  // -10
+                new SeriesPoint(8, 30, true));   // 中途断档，剔除
+        CurveMath.TotalChange ft = CurveMath.flowTotal(flow);
+        eq("IO 上升 +64", 64L, ft.rise());
+        eq("IO 下降 -10", -10L, ft.fall());
+        eq("IO 断档 2 处", 2, ft.gaps());
+
+        CurveMath.Events fev = CurveMath.flowEvents(flow);
+        eq("IO 变更 2 次（+64 / -10）", 2, fev.count());
+        eq("IO 变化量 mean 27", 27.0, fev.dMean(), 1e-9);
+        eq("IO 周期 mean 2t（t3 → t5）", 2.0, fev.pMean(), 1e-9);
+    }
+
+
+
     // ---- 断言 ----
+
+    private static void eq(String what, double expect, double actual, double eps) {
+        if (Math.abs(expect - actual) <= eps) {
+            System.out.println("  ok   " + what + " = " + actual);
+        } else {
+            failed++;
+            System.out.println("  FAIL " + what + " 期望 " + expect + " 实际 " + actual);
+        }
+    }
 
     private static void eq(String what, Object expect, Object actual) {
         if (expect == null ? actual == null : expect.equals(actual)) {

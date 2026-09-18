@@ -1,4 +1,5 @@
 {
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -85,5 +86,16 @@
   "logiscope.status.replay": "存档回放",
   "logiscope.flash.archived": "已导出存档 %s · 已停止记录",
   "logiscope.flash.replay_loaded": "已载入存档 %s",
-  "logiscope.flash.archive_failed": "导出失败 · 探针保留"
+  "logiscope.flash.archive_failed": "导出失败 · 探针保留",
+  "logiscope.calc.obj": "计算",
+  "logiscope.calc.op": "运算",
+  "logiscope.calc.quantity": "数量",
+  "logiscope.calc.io": "IO",
+  "logiscope.calc.op.none": "关闭",
+  "logiscope.calc.op.extremes": "极值",
+  "logiscope.calc.op.stats": "简单统计",
+  "logiscope.calc.op.total": "变化总量",
+  "logiscope.calc.op.events": "变更区间",
+  "logiscope.calc.no_data": "区间内没有样本",
+  "logiscope.calc.no_flow": "该曲线没有 IO 数据"
 }
