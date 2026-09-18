@@ -136,9 +136,10 @@ public record ChartData(
      * 中间若夹着别的物品（槽位被清空又装回来），差值仍然按"首尾"算 ——
      * 它表达的是"这段时间里这个物品净变化了多少"。
      *
-     * 流量那三个字段是区间内**逐 tick 净变化**的合计：
-     * `inflow` 只累加正的、`outflow` 只累加负的 ——
-     * 两者在"进和出都很快"的区间里能给出比净变化丰富得多的信息。
+     * ★ 曾经有 inflow/outflow（区间内逐 tick 流入/流出合计），第十轮⑥删掉了 ★
+     * 需求侧的理由：区间统计里已经有 `Δ`（首尾之差），`in + out` 是第二份
+     * 表达同一件事的数字，只会挤占统计块宽度。数据本身（`Series#flow`）
+     * 还在，要捡回来随时能重算。
      */
     public List<SeriesRange> ranges(long fromTick, long toTick) {
         long lo = Math.min(fromTick, toTick);
@@ -165,22 +166,7 @@ public record ChartData(
             if (n == 0) {
                 continue;
             }
-            int flowSamples = 0;
-            int inflow = 0;
-            int outflow = 0;
-            for (SeriesPoint p : s.flow()) {
-                if (p.tick() < lo || p.tick() > hi) {
-                    continue;
-                }
-                flowSamples++;
-                if (p.count() > 0) {
-                    inflow += p.count();
-                } else {
-                    outflow += p.count();
-                }
-            }
-            out.add(new SeriesRange(s.itemId(), n, first, last, min, max,
-                    flowSamples, inflow, outflow));
+            out.add(new SeriesRange(s.itemId(), n, first, last, min, max));
         }
         return out;
     }
@@ -396,17 +382,13 @@ public record ChartData(
     /**
      * 框选区间内某条数据线的统计。
      *
-     * @param samples     区间内这条线的**存量**采样点数
-     * @param first       区间内最早的存量值
-     * @param last        区间内最晚的存量值
-     * @param flowSamples 区间内可算流量的 tick 数（比采样点数少，段起点不算）
-     * @param inflow      区间内**流入**合计（只累加正的净变化，≥ 0）
-     * @param outflow     区间内**流出**合计（只累加负的净变化，≤ 0）
+     * @param samples 区间内这条线的**存量**采样点数
+     * @param first   区间内最早的存量值
+     * @param last    区间内最晚的存量值
      */
-    public record SeriesRange(String itemId, int samples, int first, int last, int min, int max,
-                              int flowSamples, int inflow, int outflow) {
+    public record SeriesRange(String itemId, int samples, int first, int last, int min, int max) {
 
-        /** 净变化（存量首尾之差，与 `inflow + outflow` 在无断档时相等） */
+        /** 净变化（存量首尾之差） */
         public int delta() {
             return last - first;
         }

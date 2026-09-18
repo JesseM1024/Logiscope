@@ -278,7 +278,7 @@ public final class ChartRenderer {
         // 轴就会自动缩放到 IO 自己的范围 —— 比在一张图里塞两套刻度清楚得多。
         for (Series s : all) {
             boolean level = !view.hidden().contains(s.itemId());
-            boolean io = view.ioShown().contains(s.itemId());
+            boolean io = view.ioShown().contains(s.itemId()) && !ChartData.EMPTY_ITEM.equals(s.itemId());
             if (!level && !io) {
                 continue;
             }
@@ -304,7 +304,7 @@ public final class ChartRenderer {
             // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
             // 第五轮 N8 就是这么全部失败的（用户以为框选坏了，其实是没数据 + 没反馈）
             if (view.selection() != null) {
-                drawSelection(g, font, view.selection(), List.of(), data, view.ioShown());
+                drawSelection(g, font, view.selection(), List.of(), data);
             }
             return;
         }
@@ -360,7 +360,8 @@ public final class ChartRenderer {
             if (!view.hidden().contains(s.itemId())) {
                 drawSeries(g, s.points(), color);
             }
-            if (view.ioShown().contains(s.itemId()) && s.hasFlow()) {
+            if (view.ioShown().contains(s.itemId()) && !ChartData.EMPTY_ITEM.equals(s.itemId())
+                    && s.hasFlow()) {
                 drawSeries(g, s.flow(), flowColor(color));
             }
         }
@@ -368,8 +369,7 @@ public final class ChartRenderer {
         // ---- 框选 ----
         Selection sel = view.selection();
         if (sel != null) {
-            drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data,
-                    view.ioShown());
+            drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data);
         }
 
         // ---- 十字线读数 ----
@@ -498,8 +498,7 @@ public final class ChartRenderer {
     // ------------------------------------------------------------------
 
     private void drawSelection(GuiGraphics g, Font font, Selection sel,
-                               List<ChartData.SeriesRange> stats, ChartData data,
-                               Set<String> ioShown) {
+                               List<ChartData.SeriesRange> stats, ChartData data) {
         int xa = xOf(sel.lo());
         int xb = xOf(sel.hi());
         int left = Math.max(plotX, Math.min(xa, xb));
@@ -535,12 +534,11 @@ public final class ChartRenderer {
             }
             String name = label(data.indexOf(r.itemId()), r.itemId());
             // 框选统计 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
+            // ★ 第十轮⑥删掉了 in/out：区间读数已经有 Δ（首尾之差），
+            //   in+out 是表达同一件事的第二份数字，只会把统计块挤宽。
             rows[n] = name + " " + fmtExact(r.first()) + "→" + fmtExact(r.last())
                     + "  Δ" + signedExact(r.delta())
-                    + "  " + fmtRate(r.delta(), span)
-                    + (ioShown.contains(r.itemId())
-                            ? "  in " + signedExact(r.inflow()) + " out " + signedExact(r.outflow())
-                            : "");
+                    + "  " + fmtRate(r.delta(), span);
             rowColors[n] = colorOf(data.indexOf(r.itemId()), r.itemId());
             n++;
         }
@@ -594,19 +592,36 @@ public final class ChartRenderer {
 
         StringBuilder sb = new StringBuilder();
         sb.append("t ").append(t).append("  ").append(fmtSecs(t - start));
+
+        // 先数一遍"这一格有东西可报"的线（两遍小循环，免得每帧分配列表）。
+        // ★ 第十轮⑥：只开 IO 线（存量线关掉）的物品也要报 ——
+        //   之前这批物品在十字线读数里彻底消失，用户盯着 IO 曲线却不知道读数。
+        int visible = 0;
+        for (Series s : data.series()) {
+            if (readable(view, s)) {
+                visible++;
+            }
+        }
         int shown = 0;
         for (int i = 0; i < data.series().size(); i++) {
             Series s = data.series().get(i);
-            if (view.hidden().contains(s.itemId())) {
+            if (!readable(view, s)) {
                 continue;
             }
             if (shown >= 3) {
-                sb.append("  +").append(data.series().size() - i);
+                sb.append("  +").append(visible - shown);
                 break;
             }
-            String v = valueAt(s, t, tolerance);
-            sb.append("   ").append(label(i, s.itemId())).append(' ').append(v);
-            if (view.ioShown().contains(s.itemId())) {
+            boolean level = !view.hidden().contains(s.itemId());
+            boolean io = view.ioShown().contains(s.itemId())
+                    && !ChartData.EMPTY_ITEM.equals(s.itemId());
+            sb.append("   ").append(label(i, s.itemId()));
+            if (level) {
+                // 存量线开着 → 报精确存量
+                sb.append(' ').append(valueAt(s, t, tolerance));
+            }
+            if (io) {
+                // 只开 IO 时读数形如 `barrel Δ+64`：名字 + 这个 tick 的净流量
                 sb.append(" Δ").append(flowAt(s, t, tolerance));
             }
             shown++;
@@ -618,6 +633,14 @@ public final class ChartRenderer {
         int ty = plotB - 12;
         g.fill(tx - 2, ty - 2, tx + tw + 3, ty + 10, 0xE0181822);
         g.drawString(font, text, tx, ty, COLOR_TEXT, false);
+    }
+
+    /** 十字线上"这条线有没有东西可报"：存量线或 IO 线至少一个开着（空格子没有 IO） */
+    private static boolean readable(View view, Series s) {
+        if (ChartData.EMPTY_ITEM.equals(s.itemId())) {
+            return !view.hidden().contains(s.itemId());
+        }
+        return !view.hidden().contains(s.itemId()) || view.ioShown().contains(s.itemId());
     }
 
     private String valueAt(Series s, long tick, long tolerance) {

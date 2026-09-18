@@ -61,7 +61,6 @@ public class TestChart {
         t17SeriesDropoutInMultiSlot();
         t18LatestTick();
         t19FlowBasics();
-        t20FlowInRangeStats();
         t21KindCap();
         t22StoreResize();
         System.out.println();
@@ -552,35 +551,9 @@ public class TestChart {
         eq("断档前那格 +2", 2, c.flow().get(0).count());
     }
 
-    // 20) 框选区间里的流入 / 流出合计（进和出都很快时，净变化看不出来的东西）
-    private static void t20FlowInRangeStats() {
-        // 100 → 90 → 90 → 110：净 +10，但中间有 −10 与 +20
-        List<Sample> s = List.of(
-                new Sample(1, "minecraft:iron_ingot", 100),
-                new Sample(2, "minecraft:iron_ingot", 90),
-                new Sample(3, "minecraft:iron_ingot", 90),
-                new Sample(4, "minecraft:iron_ingot", 110));
-        ChartData d = ChartData.build(1L, s);
-        List<ChartData.SeriesRange> all = d.ranges(0, 100);
-        eq("只有一条线", 1, all.size());
-        ChartData.SeriesRange r = all.get(0);
-        eq("净变化 +10", 10, r.delta());
-        eq("流入合计 +20", 20, r.inflow());
-        eq("流出合计 -10", -10, r.outflow());
-        eq("可算流量的 tick 数 3", 3, r.flowSamples());
-
-        // 区间只取 tick 3 那一格：那里恰好没有变化
-        ChartData.SeriesRange flat = d.ranges(3, 3).get(0);
-        eq("区间内流量点 1 个", 1, flat.flowSamples());
-        eq("那一格流入 0", 0, flat.inflow());
-        eq("那一格流出 0", 0, flat.outflow());
-
-        // 区间只取 tick 2 那一格：−10 落在这里
-        ChartData.SeriesRange drop = d.ranges(2, 2).get(0);
-        eq("区间内流量点 1 个", 1, drop.flowSamples());
-        eq("流入 0", 0, drop.inflow());
-        eq("流出 -10", -10, drop.outflow());
-    }
+    // 20) 已删除：框选区间的流入 / 流出合计。UI 不再显示 in/out（Δ 已经表达同一件事），
+    //     SeriesRange 里的 inflow/outflow/flowSamples 一并删掉了（第十轮⑥）。
+    //     流量本身的正确性仍由 t19 兜着。
 
     // 21) 物品种类上限：超出的种类照样进统计，只是不画线
     private static void t21KindCap() {
