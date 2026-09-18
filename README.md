@@ -50,9 +50,12 @@ gradlew.bat createLaunchScripts
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**9 条关键逻辑路径**、数据契约、**已核实的 API 清单** | **改代码前必读** |
 | [`docs/VERIFY.md`](docs/VERIFY.md) | **实机验证清单**（逐条可打勾） | 每次改完要进游戏试 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 目前进度、已知问题、验证记录 | 每次开工前 |
-| [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复 | 做有风险的改动前 |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复、**本地 git 用法（含要不要上传 GitHub）** | 做有风险的改动前 |
 
-**最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`。**
+**最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`；提交前 → `BACKUP.md`。
+
+> 版本控制是**纯本机的**（`D:\dev\logiscope\.git`），不需要联网也不需要账号。
+> 详见 `docs/BACKUP.md` 第八节。
 
 ---
 
