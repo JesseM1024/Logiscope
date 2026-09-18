@@ -175,6 +175,8 @@ echo %ERRORLEVEL%
 | ★S5 | tick rate 40 下挂探头 → 关 GUI 转 FOLLOWING | 接缝无缝、无假 no_data；关界面后继续跟踪真值（seed/异步在客户端 tick 新鲜度下正常） |
 | S6 | 正常玩法回归：1t IO / 漏斗 / MEK 关 GUI 跟踪 | 与第七、八轮一致（tick rate 20 时权威值与旧值理论上完全相等） |
 
+通过
+
 ### B. 回归 + 离线检查
 
 | # | 操作 | 期望 |
