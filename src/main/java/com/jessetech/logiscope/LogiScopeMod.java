@@ -12,6 +12,7 @@ import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -65,8 +66,14 @@ public final class LogiScopeMod {
         // ContainerAnchor 内部用 isClientSide 过滤掉了。
         NeoForge.EVENT_BUS.<PlayerInteractEvent.RightClickBlock>addListener(ContainerAnchor::onRightClickBlock);
 
-        // 每客户端 tick：锚点计时 + 全局时钟推进 + 所有探针实例采样
+        // 每客户端 tick：锚点计时 + 全局时钟推进 + 所有探针实例跑状态机
+        // （单人下的**采样**不在这里，而在下面的服务端 tick —— 见 ProbeManager 类注释）
         NeoForge.EVENT_BUS.<ClientTickEvent.Post>addListener(ProbeManager::onClientTick);
+
+        // 每**服务端** tick：单人下"一个世界 tick 一条真值"的采样点。
+        // 集成服务端与客户端同进程（纯客户端模组在专用服务器上不会被加载），
+        // 事件在 tickChildren 之后发 —— 读到的就是这一 tick 结束时的状态。
+        NeoForge.EVENT_BUS.<ServerTickEvent.Post>addListener(ProbeManager::onServerTick);
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来

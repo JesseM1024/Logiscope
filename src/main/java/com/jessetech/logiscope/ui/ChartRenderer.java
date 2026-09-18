@@ -3,6 +3,7 @@ package com.jessetech.logiscope.ui;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
+import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.network.chat.Component;
@@ -368,14 +369,18 @@ public final class ChartRenderer {
         long span = Math.max(1L, end - start);
         long step = niceTickStep(span / 4);
         // 窗口很短时按 tick 标，稍长就换算成秒 —— '−3t' 比 '−0s' 有意义得多
-        boolean asSeconds = span >= 400;
+        // 时间刻度的单位：跨过 20 秒就改标秒（按真实 tick 速率换算，不是硬编码 20）
+        double tps = ticksPerSecond();
+        boolean asSeconds = span / tps >= 20.0;
         for (long t = ceilTo(start, step); t < end; t += step) {
             int xx = xOf(t);
             if (xx < plotX + 2) {
                 continue;
             }
             g.fill(xx, plotY + 1, xx + 1, plotB - 1, COLOR_GRID);
-            String lb = asSeconds ? "-" + ((end - t) / 20) + "s" : "-" + (end - t) + "t";
+            String lb = asSeconds
+                    ? "-" + Math.round((end - t) / tps) + "s"
+                    : "-" + (end - t) + "t";
             if (xx + 2 + font.width(lb) < plotR) {
                 g.drawString(font, lb, xx + 2, plotB + 2, COLOR_LABEL, false);
             }
@@ -788,8 +793,27 @@ public final class ChartRenderer {
         return String.valueOf(v);
     }
 
+    /**
+     * 当前世界的 tick 速率（tick/秒）。
+     *
+     * 时间轴上的"秒"必须按它换算 —— 固定按 20 算的话 `/tick rate 200` 下
+     * 1 秒会被标成 10 秒。客户端能从 `Level#tickRateManager()` 拿到真实速率
+     * （服务端通过 `ClientboundTickingStatePacket` 同步过来，21.1.209 核实），
+     * 拿不到（主菜单等）就退回 vanilla 默认 20。
+     */
+    private static double ticksPerSecond() {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.level != null) {
+            float rate = mc.level.tickRateManager().tickrate();
+            if (rate > 0.0F) {
+                return rate;
+            }
+        }
+        return 20.0;
+    }
+
     private static String fmtSecs(long ticks) {
-        return String.format(Locale.ROOT, "%.1fs", ticks / 20.0);
+        return String.format(Locale.ROOT, "%.1fs", ticks / ticksPerSecond());
     }
 
     /** 速率单位是 **n per tick**（第七轮 N12：横轴是世界 tick，速率也按 tick 算才对得上） */

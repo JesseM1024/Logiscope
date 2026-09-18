@@ -4,36 +4,49 @@ import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeTarget;
 import net.minecraft.client.Minecraft;
+import net.minecraft.server.MinecraftServer;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
+import net.neoforged.neoforge.event.tick.ServerTickEvent;
 import org.jetbrains.annotations.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
- * 采集层：探针实例表 + 每 tick 的唯一驱动点。
+ * 采集层：探针实例表 + 两个驱动点。
  *
  * 第九轮之前这里是 {@code Sampler}（全局唯一一个探头）。多探针之后拆成两层：
- *   · {@link ProbeInstance}：**一个**探针的状态机、缓冲、世界侧读取器
+ *   · {@link ProbeInstance}：**一个**探针的状态机、缓冲、世界侧读取
  *   · 本类：实例表、创建 / 删除、活跃指针（界面当前在看哪一个）、每 tick 驱动所有人
+ *
+ * 【两个驱动点，分工明确】（第十轮第四次修复）
+ *
+ * | 驱动 | 线程 | 干什么 |
+ * |---|---|---|
+ * | {@link #onClientTick} | 渲染线程 | 推进时钟、跑**状态机**（界面开没开 / 源还在不在）、多人/无坐标时读菜单 |
+ * | {@link #onServerTick} | **服务端线程** | 单人下**采样**：一个世界 tick 一条真值（见 `ProbeInstance#sampleOnServerTick`） |
+ *
+ * 为什么采样要搬到服务端 tick：客户端每秒只能观测 20 次，而服务端每秒要走 20 tick
+ * （`/tick rate` 还能更快），两者的节拍**不锁相** —— 从客户端看过去必然偶尔漏一格。
+ * 挂到服务端 tick 上就没有这个问题：世界走一格我们记一格，`/tick rate 200` 就是 200 条/秒。
  *
  * 【为什么所有实例同时采样，而不是"只看活跃的那一个"】
  *   需求是"正在运行的探针是一个列表，用于选择" —— 语义就是它们**都在跑**，
  *   界面只是切换查看对象。如果只跑活跃的那个，切回来会看到一段空白，
  *   而用户要的恰恰是"我离开的这段时间产线发生了什么"。
- *   代价是每 tick 每个实例各发一次世界侧异步读取（单人集成服务端，成本很低），
- *   且每个实例各占一份 36000 样本的环形缓冲（约 290 KB 引用，上限 16 个实例）。
  *
- * 【活跃指针与"监听中的数组下标"无关】
- *   活跃只影响 UI；不影响任何采样。删掉活跃实例时自动落到列表里的第一个。
+ * 【实例表是 CopyOnWriteArrayList】
+ *   服务端线程每 tick 要遍历它，而增删发生在渲染线程（用户点创建 / 删除）——
+ *   普通 ArrayList 会在服务端线程上抛 ConcurrentModificationException。
+ *   增删是用户动作（很少），遍历是每 tick（很频繁），所以复制写列表正合适。
  */
 public final class ProbeManager {
 
-    /** 实例数上限。每实例一份半小时缓冲，且每 tick 一次异步读取，不做无上限。 */
+    /** 实例数上限。每实例一份半小时缓冲，且每 tick 一次世界侧读取，不做无上限。 */
     public static final int MAX_PROBES = 16;
 
-    private final List<ProbeInstance> probes = new ArrayList<>();
+    private final List<ProbeInstance> probes = new CopyOnWriteArrayList<>();
     private int nextId = 1;
     private int activeId = -1;
 
@@ -50,7 +63,7 @@ public final class ProbeManager {
     /** 由主类注册到游戏总线，签名固定为 (event) */
     public static void onClientTick(ClientTickEvent.Post event) {
         ContainerAnchor.tick();
-        // 先推进全局时钟（客户端 tick + 权威世界 tick），再让各实例按同一刻度采样
+        // 先推进全局时钟（客户端 tick + 权威世界 tick），再让各实例按同一刻度走状态机
         ServerClock.tickClient();
         LogiScopeMod.probes().tick();
     }
@@ -58,13 +71,37 @@ public final class ProbeManager {
     private void tick() {
         tick++;
         Minecraft mc = Minecraft.getInstance();
-        // 时间刻度 = 世界 tick（N12/N13）。主菜单等无世界场合退回客户端节拍。
+        // 状态机用的刻度 = 世界 tick（N12/N13）。主菜单等无世界场合退回客户端节拍。
         long gameTime = mc.level != null
                 ? ServerClock.worldGameTime(mc.level.getGameTime())
                 : tick;
         // 索引循环：删除只会发生在界面事件里（不在 tick 中途），所以不需要快照
-        for (int i = 0; i < probes.size(); i++) {
-            probes.get(i).tick(gameTime);
+        for (ProbeInstance p : probes) {
+            p.tick(gameTime);
+        }
+    }
+
+    /**
+     * ★ 采样驱动（服务端线程）★ 见类注释：单人下"一个世界 tick 一条真值"的来源。
+     *
+     * 只处理**自己这个集成服务端**（LAN 发布出去的也是它），
+     * 专用服务器上这个监听器不会被加载（模组声明为纯客户端）。
+     */
+    public static void onServerTick(ServerTickEvent.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (!mc.isLocalServer()) {
+            return;
+        }
+        MinecraftServer server = event.getServer();
+        if (server != mc.getSingleplayerServer()) {
+            return;
+        }
+        LogiScopeMod.probes().sampleAll(server);
+    }
+
+    private void sampleAll(MinecraftServer server) {
+        for (ProbeInstance p : probes) {
+            p.sampleOnServerTick(server);
         }
     }
 
