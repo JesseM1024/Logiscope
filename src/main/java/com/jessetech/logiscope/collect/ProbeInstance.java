@@ -57,10 +57,17 @@ import java.util.List;
  *   manualPause = true   用户按了「暂停」→ 不自动恢复，只能手动继续
  *   manualPause = false  数据源自己失效了 → 一旦数据源回来（重开同一台设备）自动恢复
  *
- * 【时间轴连续性：RECORDING → FOLLOWING 的接缝】
- *   关界面的那一 tick 记的是 lastViews（上一 tick 读到的槽位快照），并把它垫进
- *   WorldProbe 缓存，于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
- *   真读不到的时候才会记 no_data —— 该断的地方照样断。
+ * 【时间轴：只在"真的观测到"的时候才写样本】
+ *   这是第十轮第三次修复的核心，两个方向都算：
+ *   · **不补**：关界面那一 tick、异步读取还没回来的 tick，一律**什么都不写**。
+ *     以前这里会写一条"上一 tick 的值"（lastViews 垫值）来续上时间轴，
+ *     结果就是曲线上多出一个 1 tick 的平台 —— 那个 tick 我们其实什么都没看到。
+ *     现在时间轴留个空档，画图层面按"观测抖动"连线（见 {@code ChartData#build}），
+ *     看起来完全一样，但数据里不再有那句谎话。
+ *   · **不重复**：世界侧的读值带身份（{@link WorldProbe.Read#seq()}），
+ *     同一个观测只写一次；没拿到新观测就不写。
+ *   真正读不到（区块卸载 / 多人 / 方块没了）时照样记 `no_data` —— 该断的地方照样断。
+ *   记录被暂停时写一条 `gap` 标记，于是恢复之后那段不会被连起来（见 {@link Sample#gap}）。
  *
  * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12 → 第八轮 N13）】
  *   见 {@link ServerClock} 的类注释：客户端 {@code getGameTime()} 是错拍阶梯，
@@ -95,18 +102,14 @@ public final class ProbeInstance {
     private boolean manualPause;
 
     /**
-     * 最近一次真正读到的**原始槽位快照**（与 target.slots() 同序）。
+     * 上一次**已经写成样本**的世界侧观测的身份（{@link WorldProbe.Read#seq()}）。
      *
-     * 只为一件事存在：**补住"关掉容器界面的那一 tick"**。
-     * 那一 tick 菜单已经不在了（读不到），而世界侧的异步读取又还没回来，
-     * 于是时间轴上会凭空出现一个空洞 + 一条假 no_data。
-     * 手里这份值最多 1 tick（50 ms）旧，拿它续上比记"无数据"诚实得多。
-     *
-     * 存"快照"而不是"聚合结果"是为了能原样喂给
-     * {@link WorldProbe#seed}（它缓存的就是快照）。
+     * 只为了一件事：**同一个观测不许写两遍**。
+     * 世界侧读取是异步的，管道偶尔会让同一个结果在缓存里多躺一个客户端 tick；
+     * 若照抄不误，曲线上就会出现一个 1 tick 的平台 —— 而那个 tick 我们什么都没看到。
+     * 身份没变 = 没有新观测 → 这一 tick 不写（时间轴留空档）。
      */
-    @Nullable
-    private List<ContainerAccess.SlotView> lastViews;
+    private long lastUsedReadSeq = Long.MIN_VALUE;
 
     /** 上一次采样的世界 tick。世界没走 tick（流速调慢 / 暂停）就不记重复样本 */
     private long lastSampledGameTime = Long.MIN_VALUE;
@@ -196,7 +199,7 @@ public final class ProbeInstance {
         this.watchedContainerId = ContainerAccess.currentContainerId();
         this.store.clear();
         this.manualPause = false;
-        this.lastViews = null;
+        this.lastUsedReadSeq = Long.MIN_VALUE;
         this.warnedUnverifiedIndex = false;
         this.lastSampledGameTime = Long.MIN_VALUE;
         this.probe.reset();
@@ -229,7 +232,7 @@ public final class ProbeInstance {
         this.target = ProbeTarget.EMPTY;
         this.watchedContainerId = -1;
         this.manualPause = false;
-        this.lastViews = null;
+        this.lastUsedReadSeq = Long.MIN_VALUE;
         this.warnedUnverifiedIndex = false;
         this.probe.reset();
         this.state = State.ARMED;
@@ -243,7 +246,7 @@ public final class ProbeInstance {
         store.clear();
         probe.reset();
         target = ProbeTarget.EMPTY;
-        lastViews = null;
+        lastUsedReadSeq = Long.MIN_VALUE;
         state = State.ARMED;
         manualPause = false;
     }
@@ -253,6 +256,7 @@ public final class ProbeInstance {
         if (state == State.RECORDING || state == State.FOLLOWING) {
             manualPause = true;
             state = State.PAUSED;
+            writeGapMarker();
         }
     }
 
@@ -314,15 +318,12 @@ public final class ProbeInstance {
     /** 界面开着：读菜单 */
     private void tickRecording(long gameTime) {
         if (!ContainerAccess.hasForeignContainerOpen()) {
-            // 玩家关掉界面了
+            // 玩家关掉界面了 → 转坐标跟踪。
+            // ★ 这一 tick 刻意什么都不写 ★
+            // 菜单已经没了、世界侧读取也还没回来，我们**确实没有这一 tick 的观测**。
+            // 以前这里会写一条"上一 tick 的值"把时间轴续上，代价是曲线上多一个 1t 平台
+            // （那个 tick 并没有被观测到）。现在留个空档，画图层面按观测抖动连线。
             if (manager.followAfterClose() && target.hasPersistentId()) {
-                // ★ 先补住"关界面的这一 tick"★
-                // 这一 tick 菜单已经没了，但上一 tick 读到的值还在手上（最多 1 tick 旧）。
-                // 不补的话时间轴在这里断一格，而下一 tick 又会因为异步读取还没回来
-                // 记一条 no_data —— 合起来就是实机反馈的"关界面时冒出 1t 的 no-data"。
-                if (lastViews != null) {
-                    writeTick(gameTime, lastViews);
-                }
                 enterFollowing(true);
             } else {
                 pauseAuto();
@@ -342,7 +343,6 @@ public final class ProbeInstance {
             pauseAuto();
             return;
         }
-        lastViews = views;
         writeTick(gameTime, views);
     }
 
@@ -359,15 +359,9 @@ public final class ProbeInstance {
         }
 
         if (ContainerAccess.hasForeignContainerOpen()) {
-            // 玩家又把界面打开了 —— 优先回到最准的那条路径
+            // 玩家又把界面打开了 —— 优先回到最准的那条路径。
+            // 同样不写"过渡 tick"：菜单下一 tick 就能读到真值，中间那格空着即可。
             if (ContainerAccess.currentContainerId() == watchedContainerId || tryRebind()) {
-                // ★ 补住切换 tick ★
-                // 世界侧缓存里还留着切换前一刻的真值；不垫的话这一 tick 什么都不记，
-                // 时间轴断一格，波形在这里凭空断开（与关界面方向对称）。
-                List<ContainerAccess.SlotView> bridge = probe.latest(WORLD_READ_MAX_AGE);
-                if (bridge != null) {
-                    writeTick(gameTime, bridge);
-                }
                 state = State.RECORDING;
                 return;
             }
@@ -375,12 +369,22 @@ public final class ProbeInstance {
         }
 
         probe.request(target);
-        List<ContainerAccess.SlotView> views = probe.latest(WORLD_READ_MAX_AGE);
-        if (views == null) {
-            store.add(Sample.noData(gameTime));
-        } else {
-            lastViews = views;
-            writeTick(gameTime, views);
+        WorldProbe.Read read = probe.read(WORLD_READ_MAX_AGE);
+        switch (read.status()) {
+            case OK -> {
+                // ★ 同一个观测只写一次 ★
+                // seq 没变 = 管道还没把新结果送回来 → 这一 tick 没有新观测，
+                // 不写（写下去就是给旧值贴新 tick 标签 = 曲线上的假平台）。
+                if (read.seq() != lastUsedReadSeq) {
+                    lastUsedReadSeq = read.seq();
+                    writeTick(gameTime, read.views());
+                }
+            }
+            case UNAVAILABLE -> store.add(Sample.noData(gameTime));
+            // 还没读到过 / 结果太旧：这一 tick 什么都不记。
+            // 「没观测到」和「读失败」是两件事，别把前者写成 no_data（第五轮 F6 的教训）。
+            case NOT_READY -> {
+            }
         }
     }
 
@@ -400,12 +404,10 @@ public final class ProbeInstance {
     }
 
     private void enterFollowing(boolean notify) {
+        // 丢掉旧的读值缓存：**不要再拿"关界面前那个值"去续时间轴**
+        // （那是第十轮第三次修复去掉的假平台来源）。第一次观测等真正的异步结果回来。
         probe.resetReadCache();
-        // 把最后一次已知值垫进缓存，抹掉异步管道的启动延迟（见 WorldProbe#seed）
-        probe.seed(lastViews);
-        // ★ 立刻发出第一次世界侧读取 ★
-        // 不发的话，下一 tick 的 latest() 只能拿到 seed（上一 GUI 值）——
-        // 旧值被续命 1~2 tick，1t IO 测试里表现为切换瞬间脉冲被拉宽（第六轮 M1）。
+        lastUsedReadSeq = Long.MIN_VALUE;
         probe.request(target);
         state = State.FOLLOWING;
         if (notify) {
@@ -416,7 +418,21 @@ public final class ProbeInstance {
     private void pauseAuto() {
         manualPause = false;
         state = State.PAUSED;
+        writeGapMarker();
         notifyPlayer("logiscope.msg.paused_auto");
+    }
+
+    /**
+     * 写一条"中断"标记：让恢复之后的曲线**不会**跟暂停前连起来。
+     *
+     * 标记落在"最后一个已采样的 tick 的下一格"—— 也就是"从这一格起就没记录了"。
+     * 不一定正好等于暂停发生的那一 tick（暂停是界面上的动作，可能发生在两次采样之间），
+     * 但语义是对的，而且一定落在这段空白里，画图时能把线剪在该剪的地方。
+     */
+    private void writeGapMarker() {
+        if (lastSampledGameTime != Long.MIN_VALUE) {
+            store.add(Sample.gap(lastSampledGameTime + 1));
+        }
     }
 
     /**
@@ -553,16 +569,16 @@ public final class ProbeInstance {
             return listOfAgg(m);
         }
         if (state == State.FOLLOWING) {
-            List<ContainerAccess.SlotView> views = probe.latest(WORLD_READ_MAX_AGE);
-            if (views == null) {
+            WorldProbe.Read read = probe.read(WORLD_READ_MAX_AGE);
+            if (read.status() != WorldProbe.Read.Status.OK) {
                 return null;
             }
-            int m = aggregateInto(views);
+            int m = aggregateInto(read.views());
             return listOfAgg(m);
         }
         // 暂停 / 待选格：拿最后一条样本凑合显示（它至少是"我最后看到的样子"）
         Sample last = store.latest();
-        if (last == null || last.isNoData()) {
+        if (last == null || last.isMarker()) {
             return null;
         }
         return List.of(new Aggregator.Totals(last.itemId(), last.count()));

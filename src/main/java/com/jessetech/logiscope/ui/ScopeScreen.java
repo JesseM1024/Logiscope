@@ -938,16 +938,19 @@ public final class ScopeScreen extends Screen {
                 y += ROW_H;
 
                 String now = "now " + currentValueText(p);
-                g.drawString(this.font, now, left, y, 0x9BE1CB, false);
                 String counts = "ticks " + summary.dataTicks() + "  no-data " + summary.noDataTicks();
+                // 读数用**准确整数**，位数比短格式多，所以按剩余宽度裁一刀防止压到右边的计数
+                int nowW = L.w() - 2 * PAD - this.font.width(counts) - 8;
+                g.drawString(this.font, cut(now, nowW), left, y, 0x9BE1CB, false);
                 g.drawString(this.font, counts, right - this.font.width(counts), y, 0x808088, false);
                 y += ROW_H;
 
-                String mm = "min " + ChartRenderer.fmtCount(summary.min()) + "  max "
-                        + ChartRenderer.fmtCount(summary.max()) + "  avg "
-                        + ChartRenderer.fmtCount(summary.average());
-                g.drawString(this.font, mm, left, y, 0xC8C8D4, false);
+                String mm = "min " + ChartRenderer.fmtExact(summary.min()) + "  max "
+                        + ChartRenderer.fmtExact(summary.max()) + "  avg "
+                        + ChartRenderer.fmtExact(summary.average());
                 String sw = "switch " + chartData.switches() + "  series " + chartData.series().size();
+                int mmW = L.w() - 2 * PAD - this.font.width(sw) - 8;
+                g.drawString(this.font, cut(mm, mmW), left, y, 0xC8C8D4, false);
                 g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
             }
         }
@@ -978,7 +981,7 @@ public final class ScopeScreen extends Screen {
                 sb.append("  ·  ");
             }
             sb.append(ChartRenderer.label(-1, t.itemId())).append(" x")
-                    .append(ChartRenderer.fmtCount(t.count()));
+                    .append(ChartRenderer.fmtExact(t.count()));
             shown++;
         }
         return sb.toString();

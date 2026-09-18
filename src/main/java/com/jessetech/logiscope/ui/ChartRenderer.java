@@ -74,10 +74,10 @@ public final class ChartRenderer {
     /**
      * 左侧留给纵轴数字的宽度。
      *
-     * ★ 第十轮加宽（34 → 46）★
+     * ★ 第十轮加宽（34 → 46），第十轮第三次修复又靠"压缩步长"彻底解决溢出 ★
      * 实测反馈：测"单格堆叠"这种大数量的容器时，刻度数字（如 16000000）长到
-     * 画到 GUI 外面去了。两条修法一起上：数字改用科学计数法（见 {@link #fmtCount}），
-     * 同时把这条轴留宽一点 —— 最长的标签形如 `-9.99E8`（8 字符 ≈ 44px）。
+     * 画到 GUI 外面去了。修法：刻度改用科学计数法（见 {@link #fmtAxis}），
+     * 最长的标签形如 `-9.999E8`（8 字符 ≈ 44px）。
      */
     public static final int AXIS_LEFT = 46;
     /** 底部留给时间刻度的宽度 */
@@ -290,6 +290,25 @@ public final class ChartRenderer {
         //   · 刻度落在整数上，读得出来
         //   · 窗口滚动时范围只会偶尔跳一次，不会每一帧都在抖
         int step = niceStep((int) Math.ceil((vHi - vLo) / 4.0));
+        // ★ 刻度必须"读得出来"：相邻两个标签不能是同一个字符串 ★
+        // 大数量 + 小窗口时科学计数法只有 3 位小数，步长太小就会印出
+        // 一排一模一样的 `1.79E6`（实测反馈的截图里就是这样）。
+        // 解不出更多有效数字时（轴的宽度就 46px），就把步长顶上去 ——
+        // 宁可刻度稀疏，也不要一排看不懂的数字。
+        for (int guard = 0; guard < 12; guard++) {
+            int lo = Math.max(0, Math.floorDiv(vLo, step) * step);
+            if (lo + (long) step > vHi) {
+                break;   // 窗口里只有一条刻度线，无所谓重复
+            }
+            if (!fmtAxis(lo).equals(fmtAxis(lo + step))) {
+                break;
+            }
+            int next = nextNiceStep(step);
+            if (next <= step) {
+                break;
+            }
+            step = next;
+        }
         yLo = Math.max(0, Math.floorDiv(vLo, step) * step);
         int yHi = ceilDiv(vHi, step) * step;
         if (yHi <= yLo) {
@@ -338,8 +357,9 @@ public final class ChartRenderer {
         for (int v = lo; v <= hi; v += step) {
             int yy = yOf(v);
             g.fill(plotX + 1, yy, plotR - 1, yy + 1, COLOR_GRID);
-            // 大数走科学计数法：8 位整数会把刻度挤出面板（见 fmtCount）
-            String lb = fmtCount(v);
+            // 只有**纵轴**用科学计数法（用户要求）：它要容纳 8 位数量级的刻度，
+            // 而读数（十字线、框选统计、面板数字）一律给精确整数（见 fmtExact）。
+            String lb = fmtAxis(v);
             g.drawString(font, lb, plotX - 3 - font.width(lb), yy - 3, COLOR_LABEL, false);
         }
     }
@@ -474,8 +494,9 @@ public final class ChartRenderer {
                 continue;
             }
             String name = label(data.indexOf(r.itemId()), r.itemId());
-            rows[n] = name + " " + fmtCount(r.first()) + "→" + fmtCount(r.last())
-                    + "  Δ" + signedCount(r.delta())
+            // 框选统计 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
+            rows[n] = name + " " + fmtExact(r.first()) + "→" + fmtExact(r.last())
+                    + "  Δ" + signedExact(r.delta())
                     + "  " + fmtRate(r.delta(), span);
             rowColors[n] = colorOf(data.indexOf(r.itemId()), r.itemId());
             n++;
@@ -563,7 +584,8 @@ public final class ChartRenderer {
         if (tick - p.tick() > tolerance) {
             return "-";
         }
-        return fmtCount(p.count());
+        // 十字线读数 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
+        return fmtExact(p.count());
     }
 
     // ------------------------------------------------------------------
@@ -647,6 +669,24 @@ public final class ChartRenderer {
         return exp * 10;
     }
 
+    /**
+     * 比 {@code step} 大的下一个"整齐"步长（1/2/5/10 × 10^k）。
+     * 用在"相邻刻度标签重复"时把步长顶上去（见 {@code render}）。
+     */
+    private static int nextNiceStep(int step) {
+        int exp = 1;
+        while (exp * 10 <= step) {
+            exp *= 10;
+        }
+        for (int m : new int[]{1, 2, 5, 10, 20}) {
+            int cand = exp * m;
+            if (cand > step) {
+                return cand;
+            }
+        }
+        return step * 10;
+    }
+
     private static long niceTickStep(long raw) {
         for (long v : TICK_LADDER) {
             if (v >= raw) {
@@ -678,23 +718,32 @@ public final class ChartRenderer {
     }
 
     /**
-     * 数量 → 给人看的短标签。
+     * **纵轴刻度专用**：数量 → 给人看的短标签（科学计数法）。
      *
      * ★ 为什么大数要用科学计数法（第十轮实测反馈）★
      * 用户测"单格堆叠"这类大数量的容器时，纵轴刻度是 16000000 这种 8 位数，
-     * 直接画到 GUI 外面去了。改成 {@code 1.6E7} 之后 5 个字符就够，
-     * 配合 {@link #AXIS_LEFT} 从 34 加宽到 46，怎么都不会溢出。
+     * 直接画到 GUI 外面去了。改成 {@code 1.6E7} 之后 7 个字符就够，
+     * 配合 {@link #AXIS_LEFT} 的 46px 怎么都不会溢出。
      *
      * 规则（小数字保持可读的整数，只有大到读不动才换写法）：
      *
      * | 数值 | 显示 |
      * |---|---|
      * | 0 … 9999 | 原样整数（`0` / `64` / `9999`） |
-     * | ≥ 10000 | 科学计数法，最多两位小数、去掉多余的 0（`1E4` / `1.5E5` / `1.6E7` / `9.99E6`） |
+     * | ≥ 10000 | 科学计数法，**固定 3 位小数**、去掉多余的 0（`1E4` / `1.5E5` / `1.786E6`） |
+     *
+     * 固定 3 位小数（而不是"最多 2 位"）是第十轮第三次修复的改动：
+     * 尾数少一位，`1786000` 和 `1786500` 会印成同一个 `1.79E6`，
+     * 用户实测就撞上了"一整条轴上 5 个刻度全是 1.79E6"。
+     * 精度顶到头之后仍可能重复（那说明窗口窄得像放大镜），
+     * 由调用方把**步长**顶上去解决（见 {@code render} 里的刻度去重）。
      *
      * 用整数运算做尾数，避免 {@code 9999999} 被浮点四舍五入成 {@code 1.0E7} 那种假精度。
+     *
+     * ★ 只给纵轴用 ★ 读数（十字线 / 框选统计 / 面板数字）一律用 {@link #fmtExact}，
+     * 因为那几处要的是**准确整数**，不是"看得出来大概多少"。
      */
-    public static String fmtCount(int v) {
+    public static String fmtAxis(int v) {
         if (v == 0) {
             return "0";
         }
@@ -703,23 +752,40 @@ public final class ChartRenderer {
         if (a < 10000) {
             return String.valueOf(v);
         }
-        // 把 |v| 缩到 [100, 999] 的整数（= 尾数保留两位小数），同时数出指数
+        // 把 |v| 缩到 [1000, 9999] 的整数（= 尾数保留三位小数），同时数出指数
         int exp = 0;
         long m = a;
-        while (m >= 1000) {
+        while (m >= 10000) {
             m /= 10;
             exp++;
         }
-        int displayExp = exp + 2;
-        int whole = (int) (m / 100);
-        int frac = (int) (m % 100);
+        int displayExp = exp + 3;
+        int whole = (int) (m / 1000);
+        int frac = (int) (m % 1000);
         if (frac == 0) {
             return sign + whole + "E" + displayExp;
         }
-        if (frac % 10 == 0) {
-            return sign + whole + "." + (frac / 10) + "E" + displayExp;
+        // 尾数补成三位再剪掉末尾的 0：`1.500E6` → `1.5E6`，`1.050E6` → `1.05E6`
+        StringBuilder f = new StringBuilder(3);
+        int tmp = frac;
+        for (int i = 100; i >= 1; i /= 10) {
+            f.append((char) ('0' + (tmp / i) % 10));
         }
-        return sign + whole + "." + (frac < 10 ? "0" + frac : String.valueOf(frac)) + "E" + displayExp;
+        while (f.length() > 1 && f.charAt(f.length() - 1) == '0') {
+            f.setLength(f.length() - 1);
+        }
+        return sign + whole + "." + f + "E" + displayExp;
+    }
+
+    /**
+     * **读数专用**：原样整数，一位不省。
+     *
+     * 用户要求（第十轮第三次修复）：只有纵轴用科学计数法，
+     * 框选统计、十字线读数要的是**准确整数数值** ——
+     * 一个物流示波器报出 `1.79E6` 是没有意义的，用户要知道到底是几个。
+     */
+    public static String fmtExact(int v) {
+        return String.valueOf(v);
     }
 
     private static String fmtSecs(long ticks) {
@@ -731,9 +797,9 @@ public final class ChartRenderer {
         return String.format(Locale.ROOT, "%.3f/t", delta / (double) Math.max(1L, spanTicks));
     }
 
-    /** 带正负号的短标签（大数同样走科学计数法，见 fmtCount） */
-    private static String signedCount(int v) {
-        return v > 0 ? "+" + fmtCount(v) : fmtCount(v);
+    /** 带正负号的读数标签（准确整数） */
+    private static String signedExact(int v) {
+        return v > 0 ? "+" + fmtExact(v) : fmtExact(v);
     }
 
     private static void centered(GuiGraphics g, Font font, String text, int cx, int y, int color) {
