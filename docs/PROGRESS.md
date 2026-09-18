@@ -3,164 +3,171 @@
 > 这是**滚动更新**的快照。每次做完一段实质工作就更新它。
 > 目标定义见 `GOALS.md`，架构与风险见 `ARCHITECTURE.md`，验证步骤见 `VERIFY.md`。
 
-**最后更新**：2026-09-18（第一轮实机验证后 → 第二轮修复）
+**最后更新**：2026-09-18（第三轮实机后 → 第四轮修复）
 **当前版本**：`0.1.0`
-**当前里程碑**：**第一轮实机全组通过**（仅 1 个遗留问题 + 2 条增强）→ 第二轮改动已编译验收，
-**待实机确认**
+**当前里程碑**：**三轮实机后功能行为全部达成**；第四轮修掉 2 个根因 + 换默认键位，
+**待第四轮实机确认**
 
 ---
 
 ## 一、一句话状态
 
-第一轮实机跑完了：**A–F 六组里 A/B/C/D/E 的核心行为全部成立**，
-G1 / G1.5 / G3 的主要验收项都可以打勾。
-暴露的遗留问题只有 1 个真 bug（JEI 搜索框仍会弹面板）和 2 条增强要求
-（面板外点击应能操作容器、允许把面板拖出屏幕）。
-这三件事的代码都已写完并编译验收，**行为待第二轮实机确认**。
+第三轮实测的结果很好：**A–F 六组的功能全部通过，只暴露 2 个根因**
+（一个是文本守卫的逻辑 bug，一个是手持物品缺渲染），另外把默认键位换成 `F9`
+从根上消除打字冲突。三件事的代码都已写完、编译验收通过，**待第四轮实机确认**。
 
 ---
 
-## 二、第一轮实机结果（2026-09-18）
+## 二、实机结果汇总
 
-| 组 | 结果 |
-|---|---|
-| A 快捷键不打扰打字 | ⚠️ 原版背包搜索框 OK；**JEI 搜索框仍弹面板** |
-| B 面板不遮挡 + 可拖动 | ✅ 通过，另提两条增强 |
-| C 面板按钮 | ✅ 全部通过 |
-| D 关界面后继续检测 | ✅ 单人 D1–D11 全通过（多人不作为当前目标） |
-| E 回归 | ✅ 通过（E5 创造模式、E8 F1 已记录并处理） |
-| F 观察项 | ✅ F1–F3 符合预期，F6 复现（属预期行为） |
-
-逐条结果见 `VERIFY.md` 第一节。**结论：本轮的架构假设全部成立** ——
-CP2（GUI 内按键）、CP8（图层栈不遮挡）、CP9（坐标跟踪）都按设计工作。
-
----
-
-## 三、第二轮改动（按第一轮反馈）
-
-### 3.1 JEI 搜索框仍会弹面板　`[x] 待验证`
-
-**根因**：JEI 的搜索框（`mezz.jei.gui.input.GuiTextFieldFilter`）
-**本身继承自 `EditBox`**，但它**不挂进 `screen.children()`**，
-而是自己用 `createInputHandler()` 管输入。所以原来的
-`screen.getFocused() instanceof EditBox` 根本看不到它。
-
-**改法**：新建 `bind/TextInputGuard`，做**三层守卫**，任何一层命中就不抢键：
-
-| 层 | 判据 | 覆盖范围 |
+| 轮次 | 结果 | 遗留 |
 |---|---|---|
-| 1 | `screen.getFocused()` / `children()` 里的 `EditBox`（+ 类名兜底） | 原版背包搜索框、大多数模组输入框 |
-| 2 | **JEI 公开 API**：`IIngredientListOverlay#hasKeyboardFocus()` | JEI 搜索框（它不走第 1 层） |
-| 3 | **`CharacterTyped` 的 Pre/Post 计数差** | 任何模组的任何输入框（通用兜底） |
+| **第一轮** | A–E 核心行为全部成立，G1/G1.5/G3 主要验收项可打勾 | 1 真 bug（JEI 搜索框）+ 2 条增强 |
+| **第二轮** | 修复项 A8/A9/A11 通过；B 组新增行为（鼠标转发、拖动边界）通过 | 守卫第 3 层过度拦截 |
+| **第三轮** | **全部通过**，只剩 2 个根因 | 见下 |
 
-第 2 层**用反射调用，零编译期依赖**（没装 JEI 就静静跳过），
-入口是 `mezz.jei.common.Internal#getJeiRuntime`，之后全是 `mezz.jei.api.*` 的公开接口。
-要给 REI / EMI 加支持，就在同一个类里再加一个小探针。
+逐条结果见 `VERIFY.md` 第一节。
 
-第 3 层是核实出来的通用技巧 —— `KeyboardHandler#charTyped` 的实现是：
+---
+
+## 三、第三轮暴露的 2 个根因（本轮已修）
+
+### 3.1 文本守卫把快捷键永久锁死了　`[x] 待复验`
+
+**现象**（A7/A10/A12 失败）：在 JEI 搜索框里打完字、点外面失焦之后，
+**快捷键就再也打不开面板了**。
+
+**根因**：`TextInputGuard` 第 3 层用了**累计计数**：
 
 ```java
-if (ClientHooks.onScreenCharTypedPre(...)) return;   // 被 cancel → 不发 Post
-if (screen.charTyped(...)) return;                   // 被控件吃掉 → 不发 Post
-ClientHooks.onScreenCharTypedPost(...);              // 只有没人接手才发 Post
+// ❌ 错：被吃掉的字符会在差值上留下永久的 +1
+private static int charPreCount, charPostCount;
+private static boolean lastCharWasConsumed() { return charPreCount > charPostCount; }
 ```
 
-所以 **Pre 比 Post 多一次 ⇒ 上一个字符被消费了 ⇒ 有输入框在接手**。
-这条对任何模组都成立。代价是"刚打完字想开面板"时要多按一次 ——
-而它**会自愈**：`]` 的字符如果没人吃，计数差立刻归零，下一次按键就正常。
-（叠了 60 tick 时效窗口，避免很久以前打过一次字就永久抑制。）
+我原来的推理是"不在输入框里按键时计数差自动归零"——**这是错的**。
+一个被吃掉的字符给差值留下 **+1 之后，它永远不会消失**：之后每个未被吃掉的字符
+同时给两个计数各 +1，差值只是原地保持。于是"打过一次字"就等于"永久打开文本模式"。
 
-### 3.2 面板外的点击应该能操作容器　`[x] 待验证`
+**修法**：只记**上一个**字符事件的结果，用一个布尔量：
 
-**为什么要做**：用户明确说这是"以后图形化拖动、框选待测格"的基础 ——
-面板挡住的只是屏幕一块区域，其余部分本来就该能用。
+```java
+public static void onCharTypedPre(...)  { lastCharConsumed = true;  }  // 先假设被吃掉
+public static void onCharTypedPost(...) { lastCharConsumed = false; }  // Post 来了 = 没人接手
+```
 
-**改法**：`ScopeScreen` 把鼠标事件转交给被压住的容器界面：
+因为 Pre/Post 在同一次调用里同步跑完，一个字符事件结束时它恰好等于
+"这个字符有没有被吃掉"；而 `KeyPressed` 在 `charTyped` **之前**触发，
+所以按键那一刻读到的是"上一个字符的结果"——正是我们要的语义。
 
-| 事件 | 面板内 | 面板外 |
-|---|---|---|
-| `mouseClicked` | 标题栏拖拽 / 按钮 / 槽位列表 | 转发给 `parent.mouseClicked` |
-| `mouseDragged` | 拖动面板 | 转发（原版用它做快速合成） |
-| `mouseReleased` | 结束拖动 | 转发（**必须转**，否则容器的 quick-craft 状态会卡住） |
-| `mouseScrolled` | 翻槽位列表 | 转发 |
+> 教训：**"差值"型状态很容易写出"单向累积"的陷阱**。只有"每个事件都成对抵消"
+> 的量才能用差值；只要存在"只加不减"的分支，差值就会单调增长。
 
-**顺便修掉了一个一直存在的视觉缺陷**：背景容器界面的格子 hover **不高亮**。
-原因是背景图层由 `ClientHooks#drawScreen` 渲染，它给背景层传的鼠标坐标是
-`Integer.MAX_VALUE`（防止背景控件误高亮），而 `AbstractContainerScreen`
-恰恰是在 `render` 里用这两个坐标算 `hoveredSlot` 的 → 永远是 null。
-我们在最顶层，手里有真实坐标，所以**自己补画高亮** ——
-需要的信息全部有公开访问器：`getGuiLeft()/getGuiTop()/getSlotColor(int)`、
-`Slot#x/y/isActive()/isHighlightable()`、`renderSlotHighlight(...)`（public static）。
+### 3.2 手持物品不渲染　`[x] 待复验`
 
-### 3.3 允许把面板拖出屏幕　`[x] 待验证`
+**现象**（B7/B8）：点物品能拿到光标上、操作逻辑全对，但**跟着鼠标的物品图标和数字不见了**。
 
-**为什么**：GUI scale 调大时逻辑分辨率可能只有 320 宽，而面板固定 272 宽 ——
-不推出去就永远挡着容器界面。
+**根因**：背景容器界面是用 `Integer.MAX_VALUE` 当鼠标坐标渲染的，
+于是 `AbstractContainerScreen.render` 末尾那段"把 carried item 画在光标旁"的代码
+把它画到了屏幕外。**和 hover 高亮是同一个根因**，只是上次只补了高亮、漏了它。
 
-| 场景 | 规则 |
-|---|---|
-| 拖动中 | 左右至少留 `width/8`（最少 8px）可抓；向下至少留标题栏那一条"拖动条"；上方贴顶 |
-| 重新打开 | 越界就**贴回屏幕边缘**（防止面板正好压在别的按钮底下再也点不到） |
+**修法**：在最顶层自己补画，复刻 vanilla 的 `renderFloatingItem`（它是 private）：
 
-### 3.4 顺手修掉：创造模式背包也会弹面板　`[x] 待验证`
+```java
+ItemStack carried = bg.getMenu().getCarried();
+pose.pushPose(); pose.translate(0,0,232);
+g.renderItem(carried, mouseX - 8, mouseY - 8);
+g.renderItemDecorations(countFont, carried, mouseX - 8, mouseY - 8);
+pose.popPose();
+```
 
-第一轮 E5 记录：生存背包里按 `]` 正常（什么都不发生），
-但**创造模式**里会弹面板。根因是创造背包不走 `player.inventoryMenu`，
-它有自己的 `ItemPickerMenu`，于是 `containerMenu != inventoryMenu` 为真，
-被误判成"外部设备"。
+顺手把**槽位悬浮提示**也补上了（vanilla 的 `renderTooltip` 同样依赖 `hoveredSlot`，
+所以之前悬停格子既没高亮也没提示）。
 
-改法：在输入层排除 `EffectRenderingInventoryScreen`（生存背包与创造背包
-共同的基类），一行判定，不必分别引用两个具体类。
+**已知差异**：拖拽逐格分配时，vanilla 会把数字画成"剩余待分配量"
+（`quickCraftingRemainder`，private，读不到），这里只能画完整数量。
+
+### 3.3 默认键位换成 F9　`[x] 待复验`
+
+用户的判断是对的：只要快捷键是**能被打出来的字符**，就总有一条路会和搜索框打架。
+一路试过 `O` → `]`，两次都被咬到。**功能键根本不产生字符**，冲突通道从根上消失。
+
+- 三层守卫（`TextInputGuard`）**保留**，保的是"用户把快捷键改回字母键"和
+  "某些模组的输入框吃掉所有按键"这两种情况
+- ⚠️ 旧绑定存在 `run/options.txt` 里并覆盖代码默认值 —— **已删掉那一行**，
+  所以直接启动就是 F9
 
 ---
 
-## 四、验证记录
+## 四、第二轮改动（回顾）
+
+| 改动 | 关键点 |
+|---|---|
+| 三层文本守卫 | 原版 `EditBox` / JEI 公开 API（反射，零依赖）/ 字符被吃掉的通用兜底 |
+| 面板外鼠标转发 | `AbstractContainerScreen#mouseClicked` 用 `findSlot(mx,my)` 现算坐标，不依赖 `hoveredSlot` |
+| 背景 hover 高亮 | `getGuiLeft/getGuiTop/getSlotColor` + `renderSlotHighlight`（public static） |
+| 面板可推出屏幕 | 拖动中留拖动条，重新打开贴回边缘 |
+| 创造背包不再弹面板 | 排除 `EffectRenderingInventoryScreen` |
+
+细节见 `VERIFY.md` 与 `ARCHITECTURE.md` CP2 / CP8。
+
+---
+
+## 五、验证记录
 
 | 日期 | 项目 | 结果 |
 |---|---|---|
 | 2026-09-18 | `gradlew build`（首次） | ❌ 1 个编译错误：方法引用泛型推断失败 |
 | 2026-09-18 | 修复：改用显式类型实参 `.<Event>addListener(...)` | ✅ |
 | 2026-09-18 | `createMinecraftArtifacts` 复用缓存 | ✅ **1.24 秒**（首个项目同步骤 820 秒） |
-| 2026-09-18 | `runClient` 第一轮实机 | ✅ A–E 核心行为成立；暴露 1 个 bug + 2 条增强 |
-| 2026-09-18 | 第一轮四个问题的代码修复 | ✅ 构建 + `verify-jar.py` 通过 |
-| 2026-09-18 | `runClient` 第二轮实机（第一轮修复的验证） | ✅ 见 `VERIFY.md` 第一节 |
-| 2026-09-18 | 第二轮改动的代码实现（含 `TextInputGuard`） | ✅ `BUILD SUCCESSFUL` + `verify-jar.py` 全部通过 |
-| — | `runClient` 第三轮实机（照 `VERIFY.md` 第二节） | ⬜ **未做** |
+| 2026-09-18 | `runClient` 第一轮 | ✅ 1 真 bug + 2 条增强 |
+| 2026-09-18 | 第一轮修复的代码实现 | ✅ 构建 + `verify-jar.py` 通过 |
+| 2026-09-18 | `runClient` 第二轮 | ✅ A8/A9/A11 通过；守卫第 3 层过度拦截 |
+| 2026-09-18 | 第二轮修（`TextInputGuard` 等）的代码实现 | ✅ 构建 + 验收通过 |
+| 2026-09-18 | `runClient` 第三轮 | ✅ **功能全部达成**；暴露 2 个根因 |
+| 2026-09-18 | 第三轮 2 个根因 + 键位换 F9 | ✅ `BUILD SUCCESSFUL` + `verify-jar.py` 全部通过 |
+| — | `runClient` 第四轮（照 `VERIFY.md` 第二节） | ⬜ **未做** |
 
-产物：`build/libs/logiscope-0.1.0.jar`，**48,228 字节**（21 个 class + 2 个 lang + 元数据）。
-
----
-
-## 五、下一步（按优先级）
-
-1. **照 `docs/VERIFY.md` 第二节走一轮**（★ 开头的是本次新行为）。重点是
-   **A8/A9（JEI 搜索框）** 和 **B7–B9（面板外点击容器 + hover 高亮）**。
-2. 把 `GOALS.md` 里剩余待验证项逐条打勾
-3. 验证通过后提交并打标签：`git tag -a g1-panel-overlay`（见 `BACKUP.md`）
-4. 然后进 G2：把火花线升级为带坐标轴的正规波形
-   —— **B7 做完之后，"在波形上框选待测区间"这条路就通了**
+产物：`build/libs/logiscope-0.1.0.jar`，**49,020 字节**（21 个 class + 2 个 lang + 元数据）。
 
 ---
 
-## 六、已知问题 / 技术债
+## 六、下一步（按优先级）
+
+1. **照 `docs/VERIFY.md` 第二节走一轮**。重点四条：
+   - **K1**：选项里确认键位是 F9
+   - **A7**：搜索框打完字 → 失焦 → 按 F9 —— 第三轮失败的那条
+   - **B7R**：面板外点物品，**图标和数字要跟着鼠标** —— 第三轮缺渲染的那条
+   - **B9T**：悬停格子应有高亮 **+ 悬浮提示**
+2. 通过后把 `VERIFY.md` 的勾打上，提交并打正式标签
+   `git tag -a g1-panel-overlay`（把 `wip-round2-20260918` 升格）
+3. 然后进 **G2：把火花线升级为带坐标轴的正规波形** ——
+   波形框选所需的鼠标转发基础（G1.6）已经就位
+
+---
+
+## 七、已知问题 / 技术债
 
 | # | 问题 | 影响 | 计划 |
 |---|---|---|---|
 | 1 | `ScopeScreen.render` 每帧 `store.toList()`，`tick()` 每 tick `snapshot()` | 都会新建 List，样本几万条时是每秒 60 次分配 | G2 改成按需读取区间 |
 | 2 | 只记 `itemId`，不区分 NBT 不同的同名物品 | 带附魔的书会被视为同一种 | 文档已写明；按需再改 |
-| 3 | 面板打开时，容器的**键盘**操作（数字键换物、`Q` 丢弃、中键取方块）无效 | 这些走 `hoveredSlot`，背景层拿不到鼠标坐标 | CP8 已写明；要修得连 `hoveredSlot` 一起补（protected，需反射或换方案） |
-| 4 | 用**快捷键**开界面的模组拿不到方块坐标 | 关掉界面后只能暂停 | CP9 已写明；无通用解法 |
-| 5 | 单探针 | 无法同时对比多个格子 | G2 之后 |
-| 6 | 无导出功能 | 数据出不了游戏 | G5 |
-| 7 | `no_data` 每 tick 一条，密集断档会较快写满环形缓冲 | 长时间跟踪的覆盖时长变短 | 观察后再定，可能需要"断档合并" |
+| 3 | 面板打开时，容器的**键盘**操作（数字键 / `Q` / 中键）无效 | 走 `hoveredSlot`，背景层拿不到鼠标坐标 | 鼠标侧已完全可用；要修需补 `hoveredSlot` |
+| 4 | 拖拽分配时手持物品的数字是完整数量而非剩余量 | `quickCraftingRemainder` 是 private | 已接受，写进 VERIFY F8 |
+| 5 | 用快捷键开界面的模组拿不到方块坐标 | vanilla 菜单不存坐标 | CP9 已写明；无通用解法 |
+| 6 | 单探针 | 无法同时对比多个格子 | G2 之后 |
+| 7 | 无导出功能 | 数据出不了游戏 | G5 |
+| 8 | `no_data` 每 tick 一条，密集断档会较快写满环形缓冲 | 长时间跟踪的覆盖时长变短 | 观察后再定，可能需要"断档合并" |
+| 9 | 第三方搜索框需逐个加探针 | 那些模组的搜索框不挂进 `screen.children()` | 换 F9 后优先级降低；通用兜底仍有效 |
 
 ---
 
-## 七、环境备忘
+## 八、环境备忘
 
 | 项 | 值 |
 |---|---|
 | 项目路径 | `D:\dev\logiscope` |
+| 默认键位 | **F9**（改默认值不会覆盖 `run/options.txt` 里的旧绑定，注意） |
 | 开发实例 | `<项目>\run\`；第三方模组放 `run\mods\`（当前有 JEI 19.21.2.313） |
 | 构建命令 | `gradlew.bat build`（Windows）；Git Bash 下 `./gradlew` **不可用** |
 | 运行命令 | `gradlew.bat runClient` |
@@ -168,5 +175,5 @@ ClientHooks.onScreenCharTypedPost(...);              // 只有没人接手才发
 | 产物验收 | `python verify-jar.py build/libs/logiscope-0.1.0.jar` |
 | 资源缓存 | `~/.gradle/caches/neoformruntime/`（全局共享，无需重复下载） |
 | API 核实 | `~/.workbuddy/skills/neoforge-api-probe`（查本地 sources jar） |
-| 第三方 mod 反查 | `javap -p -cp run/mods/<mod>.jar <类名>`（本轮就是这么查出 JEI 的搜索框结构） |
+| 第三方 mod 反查 | `javap -p -cp run/mods/<mod>.jar <类名>` |
 | 排错参考 | 隔壁项目 `neoforge-1.21.1-walkthrough` 的 `WALKTHROUGH.md` |
