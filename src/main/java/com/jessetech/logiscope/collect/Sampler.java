@@ -44,6 +44,15 @@ import org.jetbrains.annotations.Nullable;
  *   关界面的那一 tick 记的是 lastKnown（上一 tick 的观测值），并把它垫进 WorldProbe 缓存，
  *   于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
  *   真读不到的时候才会记 no_data —— 该断的地方照样断。
+ *
+ * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12）】
+ *   样本的时间戳用 {@code Level#getGameTime()}（世界 tick 计数），不用客户端节拍。
+ *   为什么：`/tick rate` 改的是**服务端**流速，客户端 tick 仍是每秒 20 个 ——
+ *   按客户端节拍采样会得到"每 0.05s 一条、其中一大半是世界没动时的重复值"，
+ *   数据全错（第七轮实测）。按世界 tick 采样后：
+ *     · 世界没走 tick（流速调慢 / ESC 暂停）→ 跳过，不记重复样本
+ *     · 横轴单位恒为"世界 tick"，统计块速率恒为 n per tick
+ *   WorldProbe 的年龄判定、seed/request 也全部用同一刻度（世界没走 → 缓存不算陈旧）。
  */
 public final class Sampler {
 
@@ -85,6 +94,15 @@ public final class Sampler {
 
     /** 上一次给玩家发动作栏提示的 tick，用于去抖 */
     private long lastNotifyTick = Long.MIN_VALUE / 2;
+
+    /**
+     * 当前世界 tick（Level#getGameTime()，见类注释）。
+     * 主菜单等没有世界的场合退回客户端节拍 —— 此时采样照旧，但语义退化为"客户端 tick"。
+     */
+    private long curGameTime;
+
+    /** 上一次采样的世界 tick。世界没走 tick（流速调慢 / 暂停）就不记重复样本 */
+    private long lastSampledGameTime = Long.MIN_VALUE;
 
     /** "下标不可信"是否已经警告过。每个探头只警告一次，别跑马灯。 */
     private boolean warnedUnverifiedIndex;
@@ -138,6 +156,7 @@ public final class Sampler {
         this.manualPause = false;
         this.lastKnown = null;
         this.warnedUnverifiedIndex = false;
+        this.lastSampledGameTime = Long.MIN_VALUE;
         WorldProbe.reset();
         this.state = State.RECORDING;
     }
@@ -240,14 +259,14 @@ public final class Sampler {
     private void enterFollowing() {
         WorldProbe.resetReadCache();
         // 把最后一次已知值垫进缓存，抹掉异步管道的启动延迟（见 WorldProbe#seed）
-        WorldProbe.seed(lastKnown, tick);
+        WorldProbe.seed(lastKnown, curGameTime);
         // ★ 立刻发出第一次世界侧读取 ★
         // 不发的话，下一 tick 的 latest() 只能拿到 seed（上一 GUI 值）——
         // 旧值被续命 1~2 tick，1t IO 测试里表现为切换瞬间脉冲被拉宽（第六轮 M1）。
         // 提前发，异步真值最早在下一 tick 就接管；seed 退化成"异步失败时的兜底"。
         // 过渡 tick 本身仍记 lastKnown：那一 tick 我们手里只有它，
         // 记空洞或假 no_data 都更糟（这是物理极限，见 Sampler 类注释的接缝说明）。
-        WorldProbe.request(target, tick);
+        WorldProbe.request(target, curGameTime);
         state = State.FOLLOWING;
         notifyPlayer("logiscope.msg.following");
     }
@@ -263,11 +282,16 @@ public final class Sampler {
      * 这对一个观测工具是致命的。用动作栏（第二参数 true）不刷屏。
      *
      * 加 2 秒去抖：状态在边界附近来回跳时（例如玩家反复开关界面），
-     * 不该把动作栏刷成跑马灯。
+     * 不该把动作栏刷成跑马灯。**force = 重要警告，绕过去抖**
+     * （"下标不可信"紧跟在"转为坐标跟踪"后面，普通去抖会把它吞掉 —— 第七轮 N3）。
      */
     private void notifyPlayer(String key) {
+        notifyPlayer(key, false);
+    }
+
+    private void notifyPlayer(String key, boolean force) {
         Minecraft mc = Minecraft.getInstance();
-        if (mc.player == null || tick - lastNotifyTick < 40) {
+        if (mc.player == null || (!force && tick - lastNotifyTick < 40)) {
             return;
         }
         lastNotifyTick = tick;
@@ -286,6 +310,9 @@ public final class Sampler {
 
     public void tick() {
         tick++;
+        // 时间刻度 = 世界 tick（第七轮 N12，见类注释）。主菜单等无世界场合退回客户端节拍。
+        Minecraft mc = Minecraft.getInstance();
+        curGameTime = mc.level != null ? mc.level.getGameTime() : tick;
         switch (state) {
             case RECORDING -> tickRecording();
             case FOLLOWING -> tickFollowing();
@@ -303,6 +330,13 @@ public final class Sampler {
             return;
         }
 
+        // 世界这一 tick 还没走（`/tick rate` 调慢、ESC 暂停）→ 菜单同步也没动，
+        // 没有任何新信息。记重复样本只会让 tick rate ≠ 20 时数据全错（第七轮 N12）。
+        if (curGameTime == lastSampledGameTime) {
+            return;
+        }
+        lastSampledGameTime = curGameTime;
+
         if (!ContainerAccess.hasForeignContainerOpen()) {
             // 玩家关掉界面了
             if (followAfterClose && target.hasPersistentId()) {
@@ -311,7 +345,7 @@ public final class Sampler {
                 // 不补的话时间轴在这里断一格，而下一 tick 又会因为异步读取还没回来
                 // 记一条 no_data —— 合起来就是实机反馈的"关界面时冒出 1t 的 no-data"。
                 if (lastKnown != null) {
-                    store.add(new Sample(tick, lastKnown.itemId(), lastKnown.count()));
+                    store.add(new Sample(curGameTime, lastKnown.itemId(), lastKnown.count()));
                 }
                 enterFollowing();
             } else {
@@ -334,7 +368,7 @@ public final class Sampler {
         }
 
         lastKnown = view;
-        store.add(new Sample(tick, view.itemId(), view.count()));
+        store.add(new Sample(curGameTime, view.itemId(), view.count()));
     }
 
     /** 界面关着：按坐标读，读不到就记 no_data */
@@ -344,13 +378,20 @@ public final class Sampler {
             return;
         }
 
+        // 同 tickRecording：世界没走 tick 就没有新信息，跳过（第七轮 N12）
+        if (curGameTime == lastSampledGameTime) {
+            return;
+        }
+        lastSampledGameTime = curGameTime;
+
         // ★ 下标映射不可信的机器（MEK 这类自写槽位类的模组），必须明说 ★
         // 验证是挂探头那 1~2 tick 内在服务端做的（内容指纹匹配），
         // 匹配有歧义（例如对着空格子挂探头）就到此为止 —— 不瞎猜，让用户知道。
+        // force：警告紧跟"转为坐标跟踪"，普通去抖会把它吞掉（第七轮 N3）。
         if (!warnedUnverifiedIndex
                 && WorldProbe.mappingStatus(target) == WorldProbe.MappingStatus.UNVERIFIED) {
             warnedUnverifiedIndex = true;
-            notifyPlayer("logiscope.msg.index_unverified");
+            notifyPlayer("logiscope.msg.index_unverified", true);
         }
 
         if (ContainerAccess.hasForeignContainerOpen()) {
@@ -359,9 +400,9 @@ public final class Sampler {
                 // ★ 补住切换 tick ★
                 // 世界侧缓存里还留着切换前一刻的真值；不垫的话这一 tick 什么都不记，
                 // 时间轴断一格，波形在这里凭空断开（与关界面方向对称）。
-                ContainerAccess.SlotView bridge = WorldProbe.latest(tick, WORLD_READ_MAX_AGE);
+                ContainerAccess.SlotView bridge = WorldProbe.latest(curGameTime, WORLD_READ_MAX_AGE);
                 if (bridge != null) {
-                    store.add(new Sample(tick, bridge.itemId(), bridge.count()));
+                    store.add(new Sample(curGameTime, bridge.itemId(), bridge.count()));
                 }
                 state = State.RECORDING;
                 return;
@@ -369,13 +410,13 @@ public final class Sampler {
             // 开的是别的容器：继续按坐标跟踪，不打断
         }
 
-        WorldProbe.request(target, tick);
-        ContainerAccess.SlotView view = WorldProbe.latest(tick, WORLD_READ_MAX_AGE);
+        WorldProbe.request(target, curGameTime);
+        ContainerAccess.SlotView view = WorldProbe.latest(curGameTime, WORLD_READ_MAX_AGE);
         if (view == null) {
-            store.add(Sample.noData(tick));
+            store.add(Sample.noData(curGameTime));
         } else {
             lastKnown = view;
-            store.add(new Sample(tick, view.itemId(), view.count()));
+            store.add(new Sample(curGameTime, view.itemId(), view.count()));
         }
     }
 

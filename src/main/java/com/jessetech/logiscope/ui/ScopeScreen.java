@@ -74,8 +74,13 @@ public final class ScopeScreen extends Screen {
 
     /** 可见窗口宽度（tick）。默认 400 tick = 20 秒，是看"产线节奏"比较舒服的尺度 */
     private static int windowTicks = 400;
-    private static final int MIN_WINDOW = 40;
+    private static final int MIN_WINDOW = 20;
     private static final int MAX_WINDOW = 20 * 60 * 30;
+
+    /** 滚轮每格的缩放系数（>1 放大 = 看更短的时间）。老的 ×2 太猛，"一格就缩到头"就是它 */
+    private static final double WHEEL_ZOOM_FACTOR = 1.25;
+    /** 按钮一次的缩放系数（要有比滚轮更明确的步进感） */
+    private static final double BUTTON_ZOOM_FACTOR = 1.5;
 
     /** 图例里被关掉的物品线。跨开合保持：它是"看图的偏好"，不是数据 */
     private static final Set<String> hiddenItems = new HashSet<>();
@@ -103,6 +108,15 @@ public final class ScopeScreen extends Screen {
     /** 实时滚动 / 冻结。框选会自动切成冻结，见 mouseReleased */
     private boolean live = true;
     private long frozenEnd;
+    /**
+     * 用户是否主动缩放过（滚轮 / ± 按钮 / 全览之外的动作）。
+     *
+     * 为什么要记：window() 在"数据还没铺满窗口"时会把窗口起点钳到第一个数据点
+     * （否则刚接上探头时波形挤在右边一小条）。但用户**主动缩放**之后必须忠实反映
+     * windowTicks —— 不然数据未铺满窗口时怎么缩都看不见变化，
+     * 这就是第七轮"多按几次才动"的根因。attach / 清空 / 全览时复位。
+     */
+    private boolean userZoomed;
     @Nullable
     private ChartRenderer.Selection selection;
     private boolean selecting;
@@ -536,7 +550,9 @@ public final class ScopeScreen extends Screen {
         }
         long end = live ? Math.max(chartData.lastTick(), chartData.firstTick()) : frozenEnd;
         long start = end - windowTicks;
-        if (chartData.firstTick() > start) {
+        // 数据还不够铺满一个窗口时，从第一点开始画 —— 只在用户没主动缩放过时。
+        // 缩放后必须忠实反映 windowTicks，否则缩放没有反馈（第七轮 P5）。
+        if (!userZoomed && chartData.firstTick() > start) {
             start = chartData.firstTick();
         }
         if (end <= start) {
@@ -1001,6 +1017,7 @@ public final class ScopeScreen extends Screen {
         selection = null;
         selectionStats = List.of();
         live = true;
+        userZoomed = false;
         say(anchor == null ? tr("logiscope.flash.runtime_only") : tr("logiscope.flash.attached"));
     }
 
@@ -1034,6 +1051,7 @@ public final class ScopeScreen extends Screen {
                 selection = null;
                 selectionStats = List.of();
                 live = true;
+                userZoomed = false;
                 say(tr("logiscope.flash.cleared"));
             }
             case "follow" -> {
@@ -1055,6 +1073,7 @@ public final class ScopeScreen extends Screen {
                 windowTicks = (int) Math.min(MAX_WINDOW, span);
                 live = false;
                 frozenEnd = Math.max(chartData.lastTick(), chartData.firstTick());
+                userZoomed = false;
                 say(tr("logiscope.flash.fit"));
             }
             case "clear_sel" -> {
@@ -1074,24 +1093,73 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 缩放。冻结时以窗口中心为锚（你想细看的就是当前视野中间那段）；
-     * 实时时以右端为锚（最新数据必须一直在视野里）。
+     * 缩放（第七轮 P5 重做）。
+     *
+     * @param factor   >1 放大（看更短时间），<1 缩小
+     * @param anchorX  锚点像素。null = 实时态右端锚定 / 冻结态中心锚定；
+     *                 非 null = **冻结态光标锚定** —— 光标处的 t 值保持原位、两侧缩放，
+     *                 即视频编辑软件时间轨的操作方式
+     *
+     * 锚点约束满足不了时（窗口推到数据边界之外），**以数据起始/结束端点为准**；
+     * 冻结态窗口最大就是"全览"（= 数据跨度）。
      */
-    private void zoom(boolean in) {
-        int next = in
-                ? Math.max(MIN_WINDOW, windowTicks / 2)
-                : Math.min(MAX_WINDOW, windowTicks * 2);
-        if (next == windowTicks) {
+    private void zoomBy(double factor, @Nullable Integer anchorX) {
+        long[] win = window();
+        long start = win[0];
+        long end = win[1];
+        long span = Math.max(MIN_WINDOW, end - start);
+
+        long dataFirst = chartData.firstTick();
+        long dataLast = Math.max(chartData.lastTick(), chartData.firstTick());
+        long dataSpan = Math.max(1L, dataLast - dataFirst + 1);
+
+        long maxSpan = live ? MAX_WINDOW : Math.max(MIN_WINDOW, dataSpan);
+        long newSpan = Math.round(span / factor);
+        newSpan = Math.max(MIN_WINDOW, Math.min(maxSpan, newSpan));
+
+        if (dataSpan <= 1) {
+            // 还没有数据：只动窗口宽度，别碰锚点
+            windowTicks = (int) Math.max(MIN_WINDOW, Math.min(MAX_WINDOW, newSpan));
+            userZoomed = true;
             return;
         }
-        if (!live) {
-            long center = frozenEnd - windowTicks / 2;
-            frozenEnd = center + next / 2;
+
+        if (live) {
+            // 实时态：右端锚定（最新数据必须一直在视野里）
+            windowTicks = (int) newSpan;
+            userZoomed = true;
+            return;
         }
-        windowTicks = next;
+
+        // 冻结态：锚点保持
+        int cx = panelX + PAD;
+        int cw = panelW - 2 * PAD;
+        int anchor = anchorX == null ? cx + cw / 2 : anchorX;
+        double ratio = cw > 1 ? Math.max(0.0, Math.min(1.0, (anchor - cx) / (double) (cw - 1))) : 0.5;
+        long anchorTick = ChartRenderer.tickAtX(cx, cw, start, end, anchor);
+        long newStart = Math.round(anchorTick - ratio * newSpan);
+        long newEnd = newStart + newSpan;
+
+        // 锚点满足不了 → 贴数据端点（P5）
+        if (newStart < dataFirst) {
+            newStart = dataFirst;
+            newEnd = newStart + newSpan;
+        }
+        if (newEnd > dataLast) {
+            newEnd = dataLast;
+            newStart = newEnd - newSpan;
+        }
+
+        windowTicks = (int) newSpan;
+        frozenEnd = newEnd;
+        userZoomed = true;
         if (selection != null) {
             refreshSelectionStats();
         }
+    }
+
+    private void zoom(boolean in) {
+        zoomBy(in ? BUTTON_ZOOM_FACTOR : 1.0 / BUTTON_ZOOM_FACTOR, null);
     }
 
     @Override
@@ -1154,15 +1222,12 @@ public final class ScopeScreen extends Screen {
                 return true;
             }
             if (sampler.target() != null && L.hasChart()) {
-                if (live) {
-                    // 实时模式：滚轮 = 缩放（右端锚定）
-                    zoom(dir > 0);
-                } else {
-                    // 冻结模式：滚轮 = 左右平移，方便回头细看某一段
-                    long step = Math.max(1, windowTicks / 8);
-                    long min = chartData.firstTick();
-                    long max = Math.max(chartData.lastTick(), chartData.firstTick());
-                    frozenEnd = Math.max(min + 1, Math.min(max, frozenEnd - (long) dir * step));
+                // 滚轮 = 缩放（第七轮 P5 重做）：
+                //   实时态  右端锚定（最新数据必须一直在视野里）
+                //   冻结态  **光标锚定** —— 光标处的 t 值保持原位、两侧缩放
+                double factor = Math.pow(WHEEL_ZOOM_FACTOR, scrollY);
+                if (Math.abs(factor - 1.0) > 1e-9) {
+                    zoomBy(factor, live ? null : (int) mouseX);
                 }
                 return true;
             }

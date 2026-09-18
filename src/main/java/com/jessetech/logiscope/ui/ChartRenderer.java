@@ -673,8 +673,9 @@ public final class ChartRenderer {
         return String.format(Locale.ROOT, "%.1fs", ticks / 20.0);
     }
 
+    /** 速率单位是 **n per tick**（第七轮 N12：横轴是世界 tick，速率也按 tick 算才对得上） */
     private static String fmtRate(int delta, long spanTicks) {
-        return String.format(Locale.ROOT, "%.2f/s", delta / (spanTicks / 20.0));
+        return String.format(Locale.ROOT, "%.3f/t", delta / (double) Math.max(1L, spanTicks));
     }
 
     private static String signed(int v) {
