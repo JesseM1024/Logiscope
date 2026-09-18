@@ -148,9 +148,14 @@ git tag                        :: 列出所有安全点
 git stash                      :: 先把当前改动暂存起来（可恢复）
 git checkout g0-skeleton       :: 回到 G0 状态
 :: 想回来：
-git checkout main
+git checkout master            :: ★ 本项目的分支叫 master，不是 main
 git stash pop
 ```
+
+> ⚠️ `git checkout <某个标签>` 会进入 **detached HEAD**（"游离头指针"）状态：
+> 此时能看能编译，但**新提交不会被任何分支记住**，一转身就可能丢。
+> 所以看完之后**必须 `git checkout master` 回到分支上**再继续干活。
+> 新版 git 也可以用 `git switch`，语义更清楚：`git switch g0-skeleton` / `git switch master`。
 
 ### 场景 C：某个提交有问题，想撤销它但保留历史
 
