@@ -6,6 +6,8 @@ import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
+import com.jessetech.logiscope.archive.ArchiveData;
+import com.jessetech.logiscope.archive.Archives;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeContext;
 import com.jessetech.logiscope.bind.ProbeTarget;
@@ -87,9 +89,9 @@ import java.util.Set;
  */
 public final class ScopeScreen extends Screen {
 
-    /** 三个页面 */
+    /** 页面（REPLAY = 存档回放，第十一轮 / G5 加入） */
     public enum Page {
-        ROOT, PICKER, CHART
+        ROOT, PICKER, CHART, REPLAY
     }
 
     /** 选格页的"槽位清单从哪来" */
@@ -161,6 +163,8 @@ public final class ScopeScreen extends Screen {
     private static final int DEL_W = 13;
 
     private static final String SERIES_PREFIX = "series:";
+    /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
+    private static final int COLOR_ANALYZE = 0xFFE070D8;
 
     // ==================================================================
     // 会话状态（每次打开重置）
@@ -185,6 +189,23 @@ public final class ScopeScreen extends Screen {
      */
     @Nullable
     private String legendPopup;
+
+    // ---- 存档回放（REPLAY 页，第十一轮 / G5）----
+    /** 当前载入的存档；null = 没在回放。回放数据在打开面板期间驻留（存档读盘一次，之后全内存） */
+    @Nullable
+    private ArchiveData replayArchive;
+    /** 回放的波形标记：内存里编辑（加/删），不自动写回存档文件（重导出才会带上） */
+    private final List<Long> replayMarkers = new ArrayList<>();
+    /**
+     * 回放页里被「分析」选中的曲线（可扩展点）。
+     *
+     * 需求原文：回放逻辑要有可扩展性，"例如我可能需要选中某一个曲线，
+     * 进行下一步的数学计算操作"。本轮只把**选中**这件事做出来（图例弹窗里的
+     * 「分析」一项，选中后图例块描品红边），后续的数学运算（差值 / 滤波 / 对比）
+     * 都挂在这个字段上往前叠，不用再动采集与存储层。
+     */
+    @Nullable
+    private String replaySelectedItem;
 
     // ---- 可视化选格 ----
     /** 「选择容器格」开关：true = 光标只用于选格，不与容器交互 */
@@ -230,6 +251,10 @@ public final class ScopeScreen extends Screen {
     private int resizeGripX;
     private int resizeGripY;
     private int scrollRow;
+    /** 根页下半存档列表的滚动位置 */
+    private int scrollArchives;
+    /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
+    private List<Archives.Info> archiveList = List.of();
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -343,6 +368,9 @@ public final class ScopeScreen extends Screen {
         if (page == Page.CHART && mgr.active() == null) {
             page = Page.ROOT;
         }
+        if (page == Page.REPLAY && replayArchive == null) {
+            page = Page.ROOT;
+        }
         if (page == Page.PICKER) {
             ProbeInstance p = mgr.find(pickerProbeId);
             if (p == null) {
@@ -352,6 +380,8 @@ public final class ScopeScreen extends Screen {
             }
         }
         refreshSnapshots();
+        // 存档清单每次打开面板扫一次（只读各存档的 JSON 头，几 KB 级）
+        archiveList = Archives.scan();
 
         if (pendingFlashKey != null) {
             say(tr(pendingFlashKey));
@@ -515,6 +545,11 @@ public final class ScopeScreen extends Screen {
     // ==================================================================
 
     private void rebuildIfNeeded() {
+        if (page == Page.REPLAY) {
+            // 回放数据是静态的：loadReplay 时一次性建好（chartData/summary），
+            // 这里不重算 —— 回放页没有"新样本"可言
+            return;
+        }
         ProbeInstance p = currentProbe();
         if (p == null) {
             chartData = ChartData.EMPTY;
@@ -577,14 +612,24 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** 图例弹出菜单的一行：{@code forIo} = 这一行控制 IO 线（否则控制存量线） */
-    private record PopupRow(boolean forIo, String label, boolean on) {
+    /**
+     * 图例弹出菜单的一行。{@code kind}：0 = 数量（存量线）, 1 = IO（净流量线）,
+     * 2 = 分析（回放页的"选中这条曲线"扩展点，见 {@link #replaySelectedItem}）。
+     */
+    private record PopupRow(int kind, String label, boolean on) {
+        static final int QUANTITY = 0;
+        static final int IO = 1;
+        static final int ANALYZE = 2;
     }
 
+    /**
+     * 一帧布局。{@code archTop/archRows} 只有根页非 0：根页下半 = 存档列表（G5）。
+     */
     private record Layout(
             int x, int y, int w, int h,
             int infoTop, int infoRows,
             int listTop, int listRows,
+            int archTop, int archRows,
             int chartTop, int chartH,
             List<Chip> toolbar, List<Chip> legend, List<Chip> buttons) {
 
@@ -602,10 +647,10 @@ public final class ScopeScreen extends Screen {
         int buttonsTop = panelY + panelH - PAD - blockHeight(btnRows);
         List<Chip> buttons = place(btnRows, left, buttonsTop, 44, 12);
 
-        // ---- 图例（方块按钮之上，只有图表页有）----
+        // ---- 图例（方块按钮之上，图表页 / 回放页有）----
         List<Chip> legend = List.of();
         int legendH = 0;
-        if (page == Page.CHART && currentProbe() != null && !chartData.series().isEmpty()) {
+        if ((page == Page.CHART || page == Page.REPLAY) && !chartData.series().isEmpty()) {
             List<List<Item>> rows = capRows(wrap(legendItems(), cw, 0, 20), MAX_LEGEND_ROWS);
             legendH = blockHeight(rows);
             legend = place(rows, left, buttonsTop - legendH - 3, 0, 20);
@@ -615,11 +660,11 @@ public final class ScopeScreen extends Screen {
         int infoTop = panelY + TITLE_H + 2;
         int infoRows = infoRows();
 
-        // ---- 图表页：工具栏 + 波形 ----
+        // ---- 图表页 / 回放页：工具栏 + 波形 ----
         List<Chip> toolbar = List.of();
         int chartTop = 0;
         int chartH = 0;
-        if (page == Page.CHART) {
+        if (page == Page.CHART || page == Page.REPLAY) {
             List<List<Item>> tbRows = wrap(toolbarItems(), cw, 22, 10);
             int toolbarH = blockHeight(tbRows);
             toolbar = place(tbRows, left, infoTop + infoRows * ROW_H + 1, 22, 10);
@@ -631,13 +676,24 @@ public final class ScopeScreen extends Screen {
         int listTop = infoTop + infoRows * ROW_H + 4;
         int listRows = Math.max(1, (contentBottom - listTop) / ROW_H - 1);
 
+        // ---- 根页下半：存档列表（标题行 + N 行，N ≈ 总行数的 1/3）----
+        int archTop = 0;
+        int archRows = 0;
+        if (page == Page.ROOT) {
+            archRows = Math.max(1, listRows / 3);
+            archRows = Math.min(archRows, Math.max(0, (contentBottom - listTop) / ROW_H - 1));
+            // 探针列表让出下半（-1 是"存档"标题行）；再小也要给探针留 1 行
+            listRows = Math.max(1, listRows - archRows - 1);
+            archTop = listTop + listRows * ROW_H + ROW_H;
+        }
+
         return new Layout(panelX, panelY, panelW, panelH,
-                infoTop, infoRows, listTop, listRows, chartTop, chartH,
+                infoTop, infoRows, listTop, listRows, archTop, archRows, chartTop, chartH,
                 toolbar, legend, buttons);
     }
 
     private int infoRows() {
-        return page == Page.CHART ? 3 : 2;
+        return page == Page.CHART || page == Page.REPLAY ? 3 : 2;
     }
 
     private List<Item> buttonItems() {
@@ -671,6 +727,13 @@ public final class ScopeScreen extends Screen {
                 out.add(new Item("clear", tr("logiscope.btn.clear"),
                         p != null && p.store().size() > 0));
                 out.add(new Item("follow", followLabel(), true));
+                // G5：导出当前记录 → 存档并停止 → 直接进入回放页
+                out.add(new Item("archive", tr("logiscope.btn.archive"),
+                        p != null && p.store().size() > 0));
+            }
+            case REPLAY -> {
+                out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
+                out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
         }
         return out;
@@ -679,6 +742,14 @@ public final class ScopeScreen extends Screen {
     /** 图表工具栏。分两行放不下时会自动折行（见 wrap） */
     private List<Item> toolbarItems() {
         List<Item> out = new ArrayList<>();
+        if (page == Page.REPLAY) {
+            // 回放没有"实时滚动"可言：数据是死的
+            out.add(new Item("fit", tr("logiscope.tool.fit"), chartData.hasData()));
+            out.add(new Item("zoom_out", "-", true));
+            out.add(new Item("zoom_in", "+", true));
+            out.add(new Item("clear_sel", tr("logiscope.tool.clear_sel"), selection != null));
+            return out;
+        }
         out.add(new Item("live", live ? tr("logiscope.tool.live") : tr("logiscope.tool.frozen"), true));
         out.add(new Item("zoom_out", "-", true));
         out.add(new Item("zoom_in", "+", true));
@@ -712,12 +783,20 @@ public final class ScopeScreen extends Screen {
     // 图例弹出菜单（数量 / IO）
     // ------------------------------------------------------------------
 
-    /** 弹出菜单的行：一个物品固定有「数量」；(empty) 没有「IO」—— 空格子没有进出可言 */
+    /**
+     * 弹出菜单的行：一个物品固定有「数量」；(empty) 没有「IO」—— 空格子没有进出可言。
+     * 回放页多一项「分析」（G5 的可扩展点：选中曲线，后续数学运算挂在它上面）。
+     */
     private List<PopupRow> popupRows(String itemId) {
         List<PopupRow> rows = new ArrayList<>();
-        rows.add(new PopupRow(false, tr("logiscope.legend.quantity"), !hiddenItems.contains(itemId)));
+        rows.add(new PopupRow(PopupRow.QUANTITY, tr("logiscope.legend.quantity"),
+                !hiddenItems.contains(itemId)));
         if (!ChartData.EMPTY_ITEM.equals(itemId)) {
-            rows.add(new PopupRow(true, tr("logiscope.legend.io"), ioShown.contains(itemId)));
+            rows.add(new PopupRow(PopupRow.IO, tr("logiscope.legend.io"), ioShown.contains(itemId)));
+        }
+        if (page == Page.REPLAY) {
+            rows.add(new PopupRow(PopupRow.ANALYZE, tr("logiscope.legend.analyze"),
+                    itemId.equals(replaySelectedItem)));
         }
         return rows;
     }
@@ -856,9 +935,9 @@ public final class ScopeScreen extends Screen {
         renderInfo(g, L);
 
         switch (page) {
-            case ROOT -> renderProbeList(g, L, mouseX, mouseY);
+            case ROOT -> renderRoot(g, L, mouseX, mouseY);
             case PICKER -> renderSlotPicker(g, L, mouseX, mouseY);
-            case CHART -> {
+            case CHART, REPLAY -> {
                 if (L.hasChart()) {
                     chart.render(g, this.font, chartData,
                             x + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), chartView(L, mouseX, mouseY));
@@ -880,7 +959,7 @@ public final class ScopeScreen extends Screen {
         renderBackgroundTooltip(g, mouseX, mouseY);
     }
 
-    /** 组装这一帧要画的东西：可见窗口 + 隐藏集合 + 框选状态 */
+    /** 组装这一帧要画的东西：可见窗口 + 隐藏集合 + 框选状态 + 波形标记 */
     private ChartRenderer.View chartView(Layout L, int mouseX, int mouseY) {
         long[] win = window();
         long start = win[0];
@@ -890,8 +969,11 @@ public final class ScopeScreen extends Screen {
         if (selecting) {
             sel = draftSelection(L, start, end);
         }
+        List<Long> markers = page == Page.REPLAY
+                ? replayMarkers
+                : currentProbe() != null ? currentProbe().markers().toList() : List.of();
         return new ChartRenderer.View(start, end, hiddenItems, ioShown, sel, selecting, selectionStats,
-                mouseX, mouseY);
+                markers, mouseX, mouseY);
     }
 
     /**
@@ -931,6 +1013,7 @@ public final class ScopeScreen extends Screen {
             case ROOT -> "LogiScope";
             case PICKER -> "LogiScope · " + tr("logiscope.page.picker");
             case CHART -> "LogiScope · " + tr("logiscope.page.chart");
+            case REPLAY -> "LogiScope · " + tr("logiscope.page.replay");
         };
         g.drawString(this.font, title, x + 4, y + 4, 0xFFE6E6F0, false);
 
@@ -950,6 +1033,7 @@ public final class ScopeScreen extends Screen {
         return switch (page) {
             case ROOT -> "[ " + tr("logiscope.status.probes") + " " + mgr.count() + " ]";
             case PICKER -> "[ " + tr("logiscope.status.picking") + " " + selectionCount() + " ]";
+            case REPLAY -> "[ " + tr("logiscope.status.replay") + " ]";
             case CHART -> {
                 ProbeInstance p = currentProbe();
                 if (p == null) {
@@ -974,6 +1058,9 @@ public final class ScopeScreen extends Screen {
         }
         if (page == Page.PICKER) {
             return 0x3FE0A0;
+        }
+        if (page == Page.REPLAY) {
+            return COLOR_ANALYZE;
         }
         ProbeInstance p = currentProbe();
         if (p == null) {
@@ -1048,6 +1135,26 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, cut(mm, mmW), left, y, 0xC8C8D4, false);
                 g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
             }
+            case REPLAY -> {
+                // 回放页的信息区：存档名 / 探针来源 / 统计
+                ArchiveData a = replayArchive;
+                if (a != null) {
+                    g.drawString(this.font, cut(a.name() + "  ·  " + a.created(), L.w() - 2 * PAD),
+                            left, y, 0xE0B8E0, false);
+                    y += ROW_H;
+                    g.drawString(this.font, cut(a.probeName() + " " + a.probeDesc(), L.w() - 2 * PAD),
+                            left, y, 0xBFBFBF, false);
+                    y += ROW_H;
+                }
+                String counts = "ticks " + summary.dataTicks() + "  no-data " + summary.noDataTicks();
+                String sw = "series " + chartData.series().size();
+                if (replaySelectedItem != null) {
+                    sw += "  " + tr("logiscope.info.analyze")
+                            .replace("%s", ChartRenderer.label(chartData.indexOf(replaySelectedItem), replaySelectedItem));
+                }
+                g.drawString(this.font, counts, left, y, 0x808088, false);
+                g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
+            }
         }
     }
 
@@ -1090,8 +1197,61 @@ public final class ScopeScreen extends Screen {
     }
 
     // ------------------------------------------------------------------
-    // 根页：探针实例列表
+    // 根页：上半 = 正在运行的探针 / 下半 = 存档（G5）
     // ------------------------------------------------------------------
+
+    /** 根页的探针列表（上半部分）。下半部分的存档列表见 renderArchives */
+    private void renderRoot(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        renderProbeList(g, L, mouseX, mouseY);
+        renderArchives(g, L, mouseX, mouseY);
+    }
+
+    /** 根页下半：存档列表（读取分析数据）。默认高亮当前/最近一次的存档 */
+    private void renderArchives(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int x = L.x();
+        int y = L.archTop();
+        g.drawString(this.font, tr("logiscope.info.archives"), x + PAD, y, 0xE0B8E0, false);
+        if (L.archRows() <= 0) {
+            return;
+        }
+        List<Archives.Info> list = archiveList;
+        if (list.isEmpty()) {
+            g.drawString(this.font, tr("logiscope.hint.no_archives"), x + PAD + 4, y + ROW_H,
+                    0x8A8AA0, false);
+            return;
+        }
+        scrollArchives = Math.max(0, Math.min(scrollArchives, Math.max(0, list.size() - L.archRows())));
+        for (int i = 0; i < L.archRows(); i++) {
+            int idx = scrollArchives + i;
+            if (idx >= list.size()) {
+                break;
+            }
+            Archives.Info info = list.get(idx);
+            int ry = y + ROW_H + i * ROW_H;
+            boolean loaded = replayArchive != null && replayArchive.name().equals(info.dirName());
+            boolean over = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8, ROW_H);
+            if (over) {
+                g.fill(x + 4, ry - 1, x + L.w() - 4, ry + ROW_H - 1, 0x40FFFFFF);
+            }
+            if (loaded) {
+                g.fill(x + 4, ry - 1, x + 6, ry + ROW_H - 1, COLOR_ANALYZE);
+            }
+            String label = info.probeName().isBlank() ? info.dirName() : info.probeName();
+            String meta = info.dirName() + " · " + info.sampleCount();
+            g.drawString(this.font, cut(label, 110), x + 8, ry,
+                    loaded ? 0xFFF0E0F8 : 0xFFC8C8D8, false);
+            int mx = x + 8 + this.font.width(label) + 6;
+            int metaW = x + L.w() - 8 - mx;
+            if (metaW > 20) {
+                g.drawString(this.font, cut(meta, metaW), mx, ry, 0xFF9099A8, false);
+            }
+        }
+        if (list.size() > L.archRows()) {
+            String more = (scrollArchives + L.archRows()) + " / " + list.size()
+                    + "  " + tr("logiscope.hint.scroll");
+            g.drawString(this.font, more, x + PAD, y + ROW_H + L.archRows() * ROW_H, 0xFF707070, false);
+        }
+    }
 
     private void renderProbeList(GuiGraphics g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
@@ -1264,7 +1424,13 @@ public final class ScopeScreen extends Screen {
 
     /**
      * 图例：一行一个色块 + 名字，点一下弹出「数量 / IO」小菜单（见 {@link #legendPopup}）。
-     * 关掉的（数量关 / IO 关都算）用灰底 + 灰字表示，一眼能看出"这条线是我自己关的"而不是"它没数据"。
+     *
+     * ★ 图标分上下两半（第十一轮）★
+     * 一个物品有两层线（存量 / IO），只给一块色板表达不出来：
+     * 只开 IO 时整块都是暗的，用户会以为"这个物品关掉了"，其实 IO 线正开着。
+     * 所以色板劈成上下两半：**上半 = 存量线颜色，下半 = IO 线颜色（浅一档）**，
+     * 关掉的那层显示灰 —— 每一层开关的状态都直接写在图标上。
+     * 字体的明暗只服从一条规则：**两层全关才变暗**（单关一层时这行图例还活着）。
      */
     private void renderLegend(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
@@ -1273,10 +1439,15 @@ public final class ScopeScreen extends Screen {
                 continue;
             }
             String itemId = c.id().substring(SERIES_PREFIX.length());
-            boolean off = hiddenItems.contains(itemId);
+            boolean qOn = !hiddenItems.contains(itemId);
+            boolean empty = ChartData.EMPTY_ITEM.equals(itemId);
+            boolean ioOn = !empty && ioShown.contains(itemId);
+            boolean dim = !qOn && !ioOn;
+            boolean selected = page == Page.REPLAY && itemId.equals(replaySelectedItem);
             boolean hover = c.hit(mouseX, mouseY);
-            int bg = off ? 0xFF17171E : (hover ? 0xFF2A2A38 : 0xFF1C1C26);
-            int border = off ? 0xFF252530 : (hover ? 0xFF8A8AC8 : 0xFF3A3A4A);
+            int bg = dim ? 0xFF17171E : (hover ? 0xFF2A2A38 : 0xFF1C1C26);
+            int border = selected ? COLOR_ANALYZE
+                    : dim ? 0xFF252530 : (hover ? 0xFF8A8AC8 : 0xFF3A3A4A);
             g.fill(c.x(), c.y(), c.x() + c.w(), c.y() + c.h(), bg);
             g.fill(c.x(), c.y(), c.x() + c.w(), c.y() + 1, border);
             g.fill(c.x(), c.y() + c.h() - 1, c.x() + c.w(), c.y() + c.h(), border);
@@ -1284,8 +1455,18 @@ public final class ScopeScreen extends Screen {
             g.fill(c.x() + c.w() - 1, c.y(), c.x() + c.w(), c.y() + c.h(), border);
 
             int color = ChartRenderer.colorOf(chartData.indexOf(itemId), itemId);
-            g.fill(c.x() + 4, c.y() + 3, c.x() + 10, c.y() + 9, off ? 0xFF3A3A44 : color);
-            g.drawString(this.font, c.label(), c.x() + 13, c.y() + 2, off ? 0xFF70707A : 0xFFD8D8E4, false);
+            int ix = c.x() + 4;
+            int iy = c.y() + 2;
+            if (empty) {
+                // (empty) 没有 IO：保留原来的一整块
+                g.fill(ix, iy + 1, ix + 6, iy + 9, qOn ? color : 0xFF3A3A44);
+            } else {
+                int flow = ChartRenderer.flowColor(color);
+                g.fill(ix, iy + 1, ix + 6, iy + 5, qOn ? color : 0xFF3A3A44);
+                g.fill(ix, iy + 5, ix + 6, iy + 9, ioOn ? flow : 0xFF3A3A44);
+            }
+            g.drawString(this.font, c.label(), c.x() + 13, c.y() + 2,
+                    dim ? 0xFF70707A : 0xFFD8D8E4, false);
         }
     }
 
@@ -1312,8 +1493,13 @@ public final class ScopeScreen extends Screen {
             if (hover) {
                 g.fill(pr[0] + 1, ry, pr[0] + pr[2] - 1, ry + POPUP_ROW_H, 0xFF2E2E3E);
             }
-            // 状态色块：开 = 线的颜色（IO 用同色系浅一档），关 = 灰 —— 和图例一个语汇
-            int swatch = r.on() ? (r.forIo() ? ChartRenderer.flowColor(accent) : accent) : 0xFF3A3A44;
+            // 状态色块：数量 = 线色 / IO = 浅一档 / 分析 = 品红（标记同色系），关 = 灰
+            int swatch = !r.on() ? 0xFF3A3A44
+                    : switch (r.kind()) {
+                        case PopupRow.IO -> ChartRenderer.flowColor(accent);
+                        case PopupRow.ANALYZE -> COLOR_ANALYZE;
+                        default -> accent;
+                    };
             g.fill(pr[0] + 6, ry + 3, pr[0] + 12, ry + 9, swatch);
             g.drawString(this.font, r.label(), pr[0] + 16, ry + 2,
                     r.on() ? 0xFFE0E0EC : 0xFF8A8A9A, false);
@@ -1552,6 +1738,16 @@ public final class ScopeScreen extends Screen {
             return bg != null && bg.mouseClicked(mouseX, mouseY, button);
         }
 
+        // ★ 右键在波形上 = 加 / 删标记（G4）★
+        // 需求原文是"左击打标记、双击删除"，但左键已经用于框选区间，双击又很难
+        // 与两次单击区分 —— 用户自己提出改右键：右键空白处加标记，右键已有标记
+        // （±3px）删掉，加与删是同一个动作，也不用和框选抢键位。
+        if (button == 1 && (page == Page.CHART || page == Page.REPLAY) && L.hasChart()
+                && ChartRenderer.inPlot(L.x() + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), mouseX, mouseY)) {
+            toggleMarker((int) mouseX, L);
+            return true;
+        }
+
         if (button != 0) {
             return true;
         }
@@ -1587,10 +1783,12 @@ public final class ScopeScreen extends Screen {
                 List<PopupRow> rows = popupRows(legendPopup);
                 int row = (my - pr[1] - 2) / POPUP_ROW_H;
                 if (row >= 0 && row < rows.size()) {
-                    if (rows.get(row).forIo()) {
-                        toggleIo(legendPopup);
-                    } else {
-                        toggleSeries(legendPopup);
+                    PopupRow r = rows.get(row);
+                    switch (r.kind()) {
+                        case PopupRow.IO -> toggleIo(legendPopup);
+                        case PopupRow.ANALYZE -> replaySelectedItem =
+                                legendPopup.equals(replaySelectedItem) ? null : legendPopup;
+                        default -> toggleSeries(legendPopup);
                     }
                 }
                 return true;
@@ -1609,8 +1807,8 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // 3) 波形区 → 开始框选（只有图表页有波形）
-        if (page == Page.CHART && L.hasChart()
+        // 3) 波形区 → 开始框选（图表页 / 回放页有波形）
+        if ((page == Page.CHART || page == Page.REPLAY) && L.hasChart()
                 && ChartRenderer.inPlot(L.x() + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), mx, my)) {
             beginSelection(mx);
             return true;
@@ -1624,8 +1822,23 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // 5) 列表（根页的实例列表 / 选格页的槽位列表）
+        // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
         if (page == Page.ROOT) {
+            // 存档行（下半部分）先判：它几何上在探针列表之外
+            if (L.archRows() > 0 && !archiveList.isEmpty()) {
+                int shownFrom = scrollArchives;
+                for (int i = 0; i < L.archRows(); i++) {
+                    int idx = shownFrom + i;
+                    if (idx >= archiveList.size()) {
+                        break;
+                    }
+                    int ry = L.archTop() + ROW_H + i * ROW_H;
+                    if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8, ROW_H)) {
+                        openArchive(archiveList.get(idx));
+                        return true;
+                    }
+                }
+            }
             List<ProbeInstance> list = LogiScopeMod.probes().all();
             for (int i = 0; i < L.listRows(); i++) {
                 int idx = scrollRow + i;
@@ -1913,6 +2126,124 @@ public final class ScopeScreen extends Screen {
         page = Page.ROOT;
     }
 
+    // ------------------------------------------------------------------
+    // 存档与回放（G5）
+    // ------------------------------------------------------------------
+
+    /**
+     * 「存档并停止」：导出当前记录 → 停止记录并删除探针与缓存 → 直接进入回放页。
+     *
+     * ★ 顺序有讲究 ★
+     * 1. 先写文件 —— **写失败就什么都不动**（探针与数据原地保留），绝不出现
+     *    "探针删了、存档没写出来"的半途状态；
+     * 2. 写成功才删探针（`remove` 会停止记录并清掉缓存）；
+     * 3. 载入刚导出的数据进入 REPLAY 页 —— 用户要的"默认读取当前存档"就是这条直连路径。
+     */
+    private void stopAndArchive() {
+        ProbeInstance p = currentProbe();
+        if (p == null || p.store().size() == 0) {
+            return;
+        }
+        ArchiveData data;
+        try {
+            data = Archives.export(p);
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.error("[LogiScope] archive export failed", e);
+            say(tr("logiscope.flash.archive_failed"));
+            return;
+        }
+        LogiScopeMod.probes().remove(p.id());
+        archiveList = Archives.scan();
+        loadReplay(data);
+        say(tr("logiscope.flash.archived").replace("%s", data.name()));
+    }
+
+    /** 根页点了一个存档行 → 载入并进入回放页（跨存档读取就是这条路） */
+    private void openArchive(Archives.Info info) {
+        try {
+            loadReplay(Archives.load(info));
+            say(tr("logiscope.flash.replay_loaded").replace("%s", info.dirName()));
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.error("[LogiScope] archive load failed: {}", info.dirName(), e);
+            say(tr("logiscope.flash.archive_failed"));
+        }
+    }
+
+    /**
+     * 进入回放页：把存档数据一次性建好（ChartData / Summary / 标记 / 视图状态）。
+     *
+     * ★ 回放复用图表页的全部机制 ★
+     * 数据塞进同一个 {@code chartData} 字段之后，窗口 / 框选 / 十字线 / 图例 /
+     * 缩放全都不用改 —— "数据是活的还是回放的"只对采集层有意义，
+     * 呈现层拿到的都是 ChartData（这正是当初分层要买的 flexibility）。
+     */
+    private void loadReplay(ArchiveData data) {
+        replayArchive = data;
+        chartData = ChartData.build(0, data.samples(), LogiScopeConfig.maxItemKinds());
+        summary = Analyzer.summarize(data.samples());
+        replayMarkers.clear();
+        replayMarkers.addAll(data.markers());
+        replaySelectedItem = null;
+        hiddenItems.clear();
+        ioShown.clear();
+        legendPopup = null;
+        selection = null;
+        selectionStats = List.of();
+        live = false;
+        userZoomed = false;
+        // 全览整段：回放数据是死的，一进来就该看到全貌
+        windowTicks = (int) Math.min(MAX_WINDOW,
+                Math.max(MIN_WINDOW, chartData.spanTicks() + 1));
+        frozenEnd = chartData.lastTick();
+        builtVersion = Long.MIN_VALUE;   // 回图表页时强制重算探针数据
+        page = Page.REPLAY;
+    }
+
+    // ------------------------------------------------------------------
+    // 波形标记（G4）
+    // ------------------------------------------------------------------
+
+    /** 右键波形：点在已有标记附近（±3px）→ 删除；否则 → 在该 tick 加标记 */
+    private void toggleMarker(int mx, Layout L) {
+        int chartX = L.x() + PAD;
+        int chartW = L.w() - 2 * PAD;
+        long[] win = window();
+        // 先判"删"：光标附近的既有标记优先（否则密集标记区永远加不进新的）
+        List<Long> markers = page == Page.REPLAY ? replayMarkers
+                : currentProbe() != null ? currentProbe().markers().toList() : List.of();
+        for (long m : markers) {
+            long t = Math.max(win[0], Math.min(win[1], m));
+            int x = ChartRenderer.xOfTick(chartX, chartW, win[0], win[1], t);
+            if (Math.abs(x - mx) <= ChartRenderer.MARKER_HIT_PX) {
+                if (page == Page.REPLAY) {
+                    replayMarkers.remove(m);
+                } else if (currentProbe() != null) {
+                    currentProbe().markers().remove(m);
+                }
+                return;
+            }
+        }
+        long t = ChartRenderer.tickAtX(chartX, chartW, win[0], win[1], mx);
+        if (page == Page.REPLAY) {
+            // 回放的标记只改内存（重导出才会写进文件），存档文件保持"导出时的样子"
+            insertSorted(replayMarkers, t);
+        } else if (currentProbe() != null) {
+            currentProbe().markers().add(t);
+        }
+    }
+
+    /** 往升序列表里插入（回放标记的存放形式；同一 tick 不重复） */
+    private static void insertSorted(List<Long> list, long tick) {
+        int i = 0;
+        while (i < list.size() && list.get(i) < tick) {
+            i++;
+        }
+        if (i < list.size() && list.get(i) == tick) {
+            return;
+        }
+        list.add(i, tick);
+    }
+
     private void onChip(String id) {
         ProbeManager mgr = LogiScopeMod.probes();
         if (id.startsWith(SERIES_PREFIX)) {
@@ -1984,6 +2315,8 @@ public final class ScopeScreen extends Screen {
                 mgr.setFollowAfterClose(!mgr.followAfterClose());
                 say(followLabel());
             }
+            case "archive" -> stopAndArchive();
+            case "replay_back" -> page = Page.ROOT;
             case "close" -> closeScope();
             case "live" -> {
                 // 回到实时 = 放弃选择。两者不并存（选择会冻结视图，见 endSelection）
@@ -2199,11 +2532,16 @@ public final class ScopeScreen extends Screen {
             }
             // 根页 / 选格页：滚轮翻列表（需求要求保留"滚轮列表选择"这条路）
             if (page == Page.ROOT || page == Page.PICKER) {
-                scrollRow -= dir;
-                scrollRow = Math.max(0, scrollRow);
+                if (page == Page.ROOT && L.archRows() > 0 && mouseY >= L.archTop()) {
+                    // 光标在下半存档区 → 翻存档列表
+                    scrollArchives = Math.max(0, scrollArchives - dir);
+                } else {
+                    scrollRow -= dir;
+                    scrollRow = Math.max(0, scrollRow);
+                }
                 return true;
             }
-            if (page == Page.CHART && L.hasChart()) {
+            if ((page == Page.CHART || page == Page.REPLAY) && L.hasChart()) {
                 // 滚轮 = 缩放（第七轮 P5 重做）：
                 //   实时态  右端锚定（最新数据必须一直在视野里）
                 //   冻结态  **光标锚定** —— 光标处的 t 值保持原位、两侧缩放

@@ -31,6 +31,9 @@ import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
+import com.jessetech.logiscope.archive.ArchiveData;
+import com.jessetech.logiscope.archive.ArchiveFormat;
+import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
 
@@ -62,6 +65,8 @@ public class TestChart {
         t18LatestTick();
         t19FlowBasics();
         t21KindCap();
+        t23Markers();
+        t24ArchiveFormat();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -603,6 +608,65 @@ public class TestChart {
         st.resize(2);
         eq("再缩小仍然只留最新", 2, st.size());
         eq("最新还是那两条", "4..5", st.toList().get(0).count() + ".." + st.toList().get(1).count());
+    }
+
+    // 23) 波形标记（G4）：升序 / 同 tick 去重 / 删除
+    private static void t23Markers() {
+        MarkerList m = new MarkerList();
+        yes("空表无标记", m.toList().isEmpty());
+        yes("加 300", m.add(300));
+        yes("加 100", m.add(100));
+        yes("加 200", m.add(200));
+        no("同 tick 再加被忽略", m.add(200));
+        eq("始终升序 3 个", "100,200,300",
+                m.toList().get(0) + "," + m.toList().get(1) + "," + m.toList().get(2));
+        yes("contains 命中", m.contains(200));
+        no("contains 不命中", m.contains(250));
+        yes("删 200", m.remove(200));
+        no("删不存在的返回 false", m.remove(200));
+        eq("删完剩 2 个", 2, m.size());
+        m.clear();
+        eq("clear 后为空", 0, m.size());
+    }
+
+    // 24) 存档格式（G5）：CSV 的标记行 / JSON 的往返
+    private static void t24ArchiveFormat() {
+        List<Sample> samples = List.of(
+                new Sample(100, "minecraft:iron_ingot", 64),
+                Sample.noData(101),
+                new Sample(102, Sample.EMPTY_ITEM, 0),
+                Sample.gap(103));
+        ArchiveData d = new ArchiveData("2026-09-18_22-43-05", "2026-09-18 22:43:05", "Test World",
+                "barrel", "槽 0 · overworld 10,64,10", 100, 103,
+                List.of(101L, 102L), samples);
+
+        // CSV：数据行照常；no_data / gap 是标记行，count 留空（绝不写成 0）
+        // 头部 5 行：存档名 / created / probe / 列说明 / no_data 说明
+        List<String> csv = ArchiveFormat.csvLines(d);
+        eq("CSV 数据行", "100,minecraft:iron_ingot,64", csv.get(5));
+        eq("CSV no_data 标记行 count 留空", "101,logiscope:no_data,", csv.get(6));
+        eq("CSV 空槽行 count=0 照写", "102,minecraft:air,0", csv.get(7));
+        eq("CSV gap 标记行 count 留空", "103,logiscope:gap,", csv.get(8));
+        eq("CSV 标记注释行 1", "# marker 101", csv.get(9));
+        eq("CSV 标记注释行 2", "# marker 102", csv.get(10));
+
+        // JSON：写出去再读回来，逐字段相等（可扩展性的基础：读方逐字段取值 + 默认值）
+        ArchiveData back = ArchiveFormat.fromJson(ArchiveFormat.toJson(d));
+        yes("JSON 往返不为空", back != null);
+        if (back != null) {
+            eq("name 往返", d.name(), back.name());
+            eq("world 往返", d.world(), back.world());
+            eq("probeName 往返", d.probeName(), back.probeName());
+            eq("first/last 往返", d.firstTick() + ".." + d.lastTick(),
+                    back.firstTick() + ".." + back.lastTick());
+            eq("markers 往返 2 个", 2, back.markers().size());
+            eq("samples 往返 4 条", 4, back.samples().size());
+            eq("数据样本往返", "100,minecraft:iron_ingot,64",
+                    back.samples().get(0).tick() + "," + back.samples().get(0).itemId()
+                            + "," + back.samples().get(0).count());
+            yes("no_data 往返保种类", back.samples().get(1).isNoData());
+            yes("gap 往返保种类", back.samples().get(3).isGap());
+        }
     }
 
     // ---- 断言 ----

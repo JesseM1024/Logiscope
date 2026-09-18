@@ -75,5 +75,15 @@
   "logiscope.label.probe": "Probe",
   "logiscope.legend.io": "IO",
   "logiscope.legend.quantity": "Quantity",
-  "logiscope.info.kinds_dropped": "+%s hidden"
+  "logiscope.info.kinds_dropped": "+%s hidden",
+  "logiscope.page.replay": "Replay",
+  "logiscope.btn.archive": "Stop & archive",
+  "logiscope.info.archives": "Archives · analysis data",
+  "logiscope.info.analyze": "analyzing %s",
+  "logiscope.hint.no_archives": "No archives yet · use Stop & archive in chart view",
+  "logiscope.legend.analyze": "Analyze",
+  "logiscope.status.replay": "Replaying",
+  "logiscope.flash.archived": "Archived %s · probe stopped",
+  "logiscope.flash.replay_loaded": "Loaded archive %s",
+  "logiscope.flash.archive_failed": "Export failed · probe kept"
 }

@@ -1214,6 +1214,39 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 
 ---
 
+### CP19 · 存档与回放（G5）　风险：低
+
+**需求**：记录能离开游戏继续用；能回放；回放页要能选中某条曲线做后续数学运算。
+
+**路径**：
+
+```
+图表页「存档并停止」
+  → Archives.export(p)：store.toList() + markers + 目标信息 → ArchiveData
+  → 写 .minecraft/logiscope/<时间戳>/recording.json + recording.csv
+  → （写成功才）ProbeManager.remove(p)：停止记录 + 清缓存
+  → ScopeScreen.loadReplay(data)：ChartData.build(0, samples) → Page.REPLAY
+根页存档列表 → Archives.load(info) → 同一条 loadReplay 路径（跨存档读取）
+```
+
+**关键契约**：
+
+- **C19-1 回放复用呈现层**：回放数据塞进 `ScopeScreen#chartData`（与活数据同一个字段），
+  窗口 / 框选 / 十字线 / 图例 / 缩放全部零改动。`rebuildIfNeeded` 在 REPLAY 页直接跳过
+  （回放数据是静态的，没有"重算"可言）。回图表页时 `builtVersion` 已被置 MIN，强制重算。
+- **C19-2 导出的事务性**：先写文件、写成功才删探针。失败路径探针原地保留 +
+  动作栏提示。绝不允许"探针删了、存档没写出来"。
+- **C19-3 格式向前兼容**：JSON 带 `format` 版本号与 `kind` 指纹；
+  读取方**逐字段取值 + 默认值**（不用 Gson 反射绑定）——旧文件永远能被新代码读，
+  新增字段不需要迁移。这是"未来要增加更多功能"的落点。
+- **C19-4 CSV 的诚实性**：no_data / gap 是标记行、**count 留空**，绝不写成 0
+  （写成 0 = 编造"那一刻是空的"）。
+- **C19-5 回放可扩展点**：`replaySelectedItem`（图例弹窗「分析」一项选中曲线，
+  品红描边）。后续数学运算（差值 / 滤波 / 对比 / 导出派生数据）全部挂这个字段
+  与 `ArchiveData` 往前叠，不再动采集与存储层。
+
+---
+
 ## 三、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |
