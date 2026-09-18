@@ -1,4 +1,5 @@
 {
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -85,5 +86,16 @@
   "logiscope.status.replay": "Replaying",
   "logiscope.flash.archived": "Archived %s · probe stopped",
   "logiscope.flash.replay_loaded": "Loaded archive %s",
-  "logiscope.flash.archive_failed": "Export failed · probe kept"
+  "logiscope.flash.archive_failed": "Export failed · probe kept",
+  "logiscope.calc.obj": "Calc",
+  "logiscope.calc.op": "Op",
+  "logiscope.calc.quantity": "Quantity",
+  "logiscope.calc.io": "IO",
+  "logiscope.calc.op.none": "Off",
+  "logiscope.calc.op.extremes": "Extremes",
+  "logiscope.calc.op.stats": "Stats",
+  "logiscope.calc.op.total": "Total change",
+  "logiscope.calc.op.events": "Change events",
+  "logiscope.calc.no_data": "no samples in range",
+  "logiscope.calc.no_flow": "no IO data for this series"
 }

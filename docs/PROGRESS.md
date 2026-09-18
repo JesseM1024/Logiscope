@@ -320,6 +320,23 @@ jar 已随项目提交）。
 
 ---
 
+## 第十一轮②（回放计算：CurveMath + 对象开关 + 运算弹窗 + 结果框）
+
+| # | 需求 | 落地 |
+|---|---|---|
+| 1 | 计算 quantity / IO 的开关（一次算一个） | 工具栏「计算 数量/IO」chip（`analyzeIo`），未选中曲线时置灰 |
+| 2 | 数学运算按钮 + 列表 | 「运算」chip 弹 5 项列表（`opPopupOpen` / `OP_VALUES`）：关闭 / 极值 / 简单统计 / 变化总量 / 变更区间 |
+| 3 | 极值 | `CurveMath#extremes`：min/max 含所在 tick（取值相等时先出现的） |
+| 4 | 简单统计 | `CurveMath#stats`：mean / med / **总体方差**（除以 n） |
+| 5 | 变化总量 | `CurveMath#totalChange / flowTotal`：Σ升 + Σ降 = Δ；**断档不计**并单独报缺口数（诚实原则：断档处的变化没留在观测里，不该被算进任何一栏） |
+| 6 | 变更区间 | `CurveMath#changeEvents / flowEvents`：变更次数 / 变化量 mean·var / 周期 mean·var（周期 = 相邻变更的 tick 间隔） |
+| 7 | 框选自动出结果 | 结果框画在绘图区**右上角**（`ChartRenderer#plotRect` 同源几何），框选统计在左上角，两块并存；结果按「区间×曲线×对象×运算」缓存，拖动中不出、静止零开销 |
+
+**IO 段内口径**：只统计严格在段内的流量（段首采样 tick 的流量是从区间外带进来的，
+算进去会与 Δ 对不上）；`CurveMath` 是纯类，TestChart 211 → **236 条**。
+
+---
+
 ## 已知问题 / 已接受的限制
 
 完整列表在 [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md) 第三节。这里只列**值得记住**的几条：

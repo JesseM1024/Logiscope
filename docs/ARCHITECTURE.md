@@ -1242,6 +1242,14 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 - **C19-4 CSV 的诚实性**：no_data / gap 是标记行、**count 留空**，绝不写成 0
   （写成 0 = 编造"那一刻是空的"）。
 - **C19-5 回放可扩展点**：`replaySelectedItem`（图例弹窗「分析」一项选中曲线，
+- **C19-6 回放计算（第十一轮②）**：计算引擎 `analysis/CurveMath` 是**纯类**
+  （输入 `SeriesPoint` 列表、输出不可变 record，离线断言覆盖）。四种运算：
+  极值 / 简单统计（mean·med·总体方差）/ 变化总量（Σ升+Σ降，断档不计并报缺口）/
+  变更区间（变化量与周期的 mean·var）。两条诚实性规则：
+  ① 断档处的变化没留在观测里，**不计入任何一栏**（Σ升+Σ降 可 ≠ Δ，缺口数单独报出）；
+  ② IO 只统计**严格在段内**的流量（段首采样 tick 的流量是从区间外带进来的）。
+  UI 侧：结果按「区间×曲线×对象×运算」四元组缓存（`refreshAnalyze`），
+  结果框画在绘图区右上角（`ChartRenderer#plotRect` 同源几何），与左上角的框选统计并存。
   品红描边）。后续数学运算（差值 / 滤波 / 对比 / 导出派生数据）全部挂这个字段
   与 `ArchiveData` 往前叠，不再动采集与存储层。
 

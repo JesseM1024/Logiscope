@@ -5,7 +5,9 @@ import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
+import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
+import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.Archives;
 import com.jessetech.logiscope.bind.ContainerAnchor;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -206,6 +209,91 @@ public final class ScopeScreen extends Screen {
      */
     @Nullable
     private String replaySelectedItem;
+
+    // ---- 回放计算（第十一轮②）----
+    /** 运算选择（工具栏「运算」弹窗）。OP_* 常量见下 */
+    private int analyzeOp = OP_NONE;
+    /** 计算对象：false = 数量（存量线），true = IO（净流量线）。**一次只算一个** */
+    private boolean analyzeIo;
+    /** 「运算」弹窗是否开着 */
+    private boolean opPopupOpen;
+    /** 计算结果（框选 + 曲线 + 对象 + 运算 四元组变化时才重算，其余帧直接用缓存） */
+    private String analyzeTitle = "";
+    private List<String> analyzeLines = List.of();
+    private long aLo = Long.MIN_VALUE;
+    private long aHi;
+    private String aItem = "";
+    private boolean aIo;
+    private int aOp;
+
+    /** 运算选择（与 {@link CurveMath} 的四种运算一一对应） */
+    private static final int OP_NONE = 0;
+    private static final int OP_EXTREMES = 1;
+    private static final int OP_STATS = 2;
+    private static final int OP_TOTAL = 3;
+    private static final int OP_EVENTS = 4;
+
+    private static String opKey(int op) {
+        return switch (op) {
+            case OP_EXTREMES -> "logiscope.calc.op.extremes";
+            case OP_STATS -> "logiscope.calc.op.stats";
+            case OP_TOTAL -> "logiscope.calc.op.total";
+            case OP_EVENTS -> "logiscope.calc.op.events";
+            default -> "logiscope.calc.op.none";
+        };
+    }
+
+    private static final int[] OP_VALUES = {OP_NONE, OP_EXTREMES, OP_STATS, OP_TOTAL, OP_EVENTS};
+
+    /** 「运算」弹窗矩形（渲染与命中共用；锚在工具栏 calc_op 块下方，底部放不下就往上弹） */
+    @Nullable
+    private int[] opPopupRect(Layout L) {
+        if (!opPopupOpen) {
+            return null;
+        }
+        for (Chip c : L.toolbar()) {
+            if (!"calc_op".equals(c.id())) {
+                continue;
+            }
+            int w = 0;
+            for (int op : OP_VALUES) {
+                w = Math.max(w, this.font.width(tr(opKey(op))) + 30);
+            }
+            int h = OP_VALUES.length * POPUP_ROW_H + 4;
+            int x = Math.min(c.x(), L.x() + L.w() - w - 4);
+            int y = c.y() + c.h() + 1;
+            if (y + h > L.y() + L.h()) {
+                y = c.y() - h - 1;
+            }
+            return new int[]{x, y, w, h};
+        }
+        return null;
+    }
+
+    /** 「运算」弹窗：压在工具栏 / 波形之上渲染 */
+    private void renderOpPopup(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int[] pr = opPopupRect(L);
+        if (pr == null) {
+            return;
+        }
+        g.fill(pr[0], pr[1], pr[0] + pr[2], pr[1] + pr[3], 0xF2181822);
+        ring(g, pr[0], pr[1], pr[2], pr[3], 0xFF3A3A4A);
+        g.fill(pr[0], pr[1], pr[0] + pr[2], pr[1] + 1, COLOR_ANALYZE);
+        int ry = pr[1] + 2;
+        for (int op : OP_VALUES) {
+            String label = tr(opKey(op));
+            boolean hover = isIn(mouseX, mouseY, pr[0] + 1, ry, pr[2] - 2, POPUP_ROW_H);
+            if (hover) {
+                g.fill(pr[0] + 1, ry, pr[0] + pr[2] - 1, ry + POPUP_ROW_H, 0xFF2E2E3E);
+            }
+            // 当前选中项：品红方块（与「分析」选中曲线同一语汇）
+            g.fill(pr[0] + 6, ry + 3, pr[0] + 12, ry + 9,
+                    op == analyzeOp ? COLOR_ANALYZE : 0xFF3A3A44);
+            g.drawString(this.font, label, pr[0] + 16, ry + 2,
+                    op == analyzeOp ? 0xFFE0E0EC : 0xFFB8B8C8, false);
+            ry += POPUP_ROW_H;
+        }
+    }
 
     // ---- 可视化选格 ----
     /** 「选择容器格」开关：true = 光标只用于选格，不与容器交互 */
@@ -748,6 +836,11 @@ public final class ScopeScreen extends Screen {
             out.add(new Item("zoom_out", "-", true));
             out.add(new Item("zoom_in", "+", true));
             out.add(new Item("clear_sel", tr("logiscope.tool.clear_sel"), selection != null));
+            // 回放计算（第十一轮②）：对象开关 + 运算选择。没选中曲线时置灰
+            boolean calcReady = replaySelectedItem != null;
+            out.add(new Item("calc_obj", tr("logiscope.calc.obj") + " "
+                    + (analyzeIo ? tr("logiscope.calc.io") : tr("logiscope.calc.quantity")), calcReady));
+            out.add(new Item("calc_op", tr("logiscope.calc.op") + " " + tr(opKey(analyzeOp)), calcReady));
             return out;
         }
         out.add(new Item("live", live ? tr("logiscope.tool.live") : tr("logiscope.tool.frozen"), true));
@@ -914,6 +1007,7 @@ public final class ScopeScreen extends Screen {
     @Override
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         rebuildIfNeeded();
+        refreshAnalyze();
         Layout L = layout();
         int x = L.x();
         int y = L.y();
@@ -941,6 +1035,7 @@ public final class ScopeScreen extends Screen {
                 if (L.hasChart()) {
                     chart.render(g, this.font, chartData,
                             x + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), chartView(L, mouseX, mouseY));
+                    renderAnalyzeBox(g, L);
                 }
                 renderToolbar(g, L.toolbar(), mouseX, mouseY);
                 renderLegend(g, L.legend(), mouseX, mouseY);
@@ -950,6 +1045,7 @@ public final class ScopeScreen extends Screen {
         renderButtons(g, L.buttons(), mouseX, mouseY);
         // 弹出菜单压在按钮之上（它经常盖住底部按钮区）
         renderLegendPopup(g, L, mouseX, mouseY);
+        renderOpPopup(g, L, mouseX, mouseY);
         renderResizeGrip(g, L, mouseX, mouseY);
         renderFlash(g, y);
 
@@ -1513,6 +1609,201 @@ public final class ScopeScreen extends Screen {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 回放计算（第十一轮②）
+    // ------------------------------------------------------------------
+
+    /**
+     * 重算缓存：结果随 **框选区间 × 曲线 × 对象（数量/IO）× 运算** 四元组变化才重算，
+     * 其余帧直接用缓存 —— 框选拖动时不重算（拖完才出结果），静止时零开销。
+     */
+    private void refreshAnalyze() {
+        String item = replaySelectedItem;
+        if (page != Page.REPLAY || selection == null || item == null
+                || chartData.byItem(item) == null) {
+            analyzeTitle = "";
+            analyzeLines = List.of();
+            aLo = Long.MIN_VALUE;
+            return;
+        }
+        long lo = selection.lo();
+        long hi = selection.hi();
+        if (lo == aLo && hi == aHi && item.equals(aItem) && aIo == analyzeIo && aOp == analyzeOp) {
+            return;
+        }
+        aLo = lo;
+        aHi = hi;
+        aItem = item;
+        aIo = analyzeIo;
+        aOp = analyzeOp;
+        analyzeTitle = "计算 · " + ChartRenderer.label(chartData.indexOf(item), item)
+                + " · " + (analyzeIo ? tr("logiscope.calc.io") : tr("logiscope.calc.quantity"))
+                + " · " + tr(opKey(analyzeOp));
+        analyzeLines = computeAnalyzeLines(chartData.byItem(item), lo, hi);
+    }
+
+    private List<String> computeAnalyzeLines(Series s, long lo, long hi) {
+        List<String> out = new ArrayList<>();
+        if (analyzeOp == OP_NONE) {
+            return List.of();
+        }
+        if (!analyzeIo) {
+            List<SeriesPoint> pts = inRange(s.points(), lo, hi);
+            if (pts.isEmpty()) {
+                out.add(tr("logiscope.calc.no_data"));
+                return out;
+            }
+            switch (analyzeOp) {
+                case OP_EXTREMES -> {
+                    CurveMath.Extremes e = CurveMath.extremes(pts);
+                    out.add("min " + ChartRenderer.fmtExact(e.min()) + " @t" + e.minTick());
+                    out.add("max " + ChartRenderer.fmtExact(e.max()) + " @t" + e.maxTick());
+                }
+                case OP_STATS -> {
+                    CurveMath.Stats st = CurveMath.stats(pts);
+                    out.add("mean " + fmtNum(st.mean()));
+                    out.add("med " + fmtNum(st.med()));
+                    out.add("var " + fmtNum(st.var()));
+                }
+                case OP_TOTAL -> {
+                    CurveMath.TotalChange t = CurveMath.totalChange(pts);
+                    out.add("上升 " + signedNum(t.rise()));
+                    out.add("下降 " + signedNum(t.fall()));
+                    out.add("合计 Δ" + signedNum(t.net()));
+                    if (t.gaps() > 0) {
+                        out.add("断档 " + t.gaps() + " 处未计入");
+                    }
+                }
+                case OP_EVENTS -> {
+                    CurveMath.Events ev = CurveMath.changeEvents(pts);
+                    out.add("变更 " + ev.count() + " 次");
+                    if (ev.count() > 0) {
+                        out.add("变化量 mean " + signedNum(ev.dMean()) + " var " + fmtNum(ev.dVar()));
+                        out.add("周期 mean " + fmtNum(ev.pMean()) + "t var " + fmtNum(ev.pVar()) + "t");
+                    }
+                }
+                default -> {
+                }
+            }
+            return out;
+        }
+
+        // ---- IO：流量线（值本身就是变化量）----
+        if (!s.hasFlow()) {
+            out.add(tr("logiscope.calc.no_flow"));
+            return out;
+        }
+        // 段内口径：只统计**严格在段内**发生的变化 —— 流量在"段首采样那个 tick"上
+        // 是从区间外带进来的变化，算进去会和 Δ 对不上。段首取区间内第一个存量样本的 tick。
+        List<SeriesPoint> qty = inRange(s.points(), lo, hi);
+        long bound = qty.isEmpty() ? lo - 1 : qty.get(0).tick();
+        List<SeriesPoint> flow = new ArrayList<>();
+        for (SeriesPoint p : s.flow()) {
+            if (p.tick() <= bound) {
+                continue;
+            }
+            if (p.tick() > hi) {
+                break;
+            }
+            flow.add(p);
+        }
+        if (flow.isEmpty()) {
+            out.add(tr("logiscope.calc.no_data"));
+            return out;
+        }
+        switch (analyzeOp) {
+            case OP_EXTREMES -> {
+                CurveMath.Extremes e = CurveMath.extremes(flow);
+                out.add("min " + signedNum(e.min()) + " @t" + e.minTick());
+                out.add("max " + signedNum(e.max()) + " @t" + e.maxTick());
+            }
+            case OP_STATS -> {
+                CurveMath.Stats st = CurveMath.stats(flow);
+                out.add("mean " + signedNum(st.mean()));
+                out.add("med " + signedNum(st.med()));
+                out.add("var " + fmtNum(st.var()));
+            }
+            case OP_TOTAL -> {
+                CurveMath.TotalChange t = CurveMath.flowTotal(flow);
+                out.add("上升 " + signedNum(t.rise()));
+                out.add("下降 " + signedNum(t.fall()));
+                out.add("合计 Δ" + signedNum(t.net()));
+                if (t.gaps() > 0) {
+                    out.add("断档 " + t.gaps() + " 处未计入");
+                }
+            }
+            case OP_EVENTS -> {
+                CurveMath.Events ev = CurveMath.flowEvents(flow);
+                out.add("变更 " + ev.count() + " 次");
+                if (ev.count() > 0) {
+                    out.add("变化量 mean " + signedNum(ev.dMean()) + " var " + fmtNum(ev.dVar()));
+                    out.add("周期 mean " + fmtNum(ev.pMean()) + "t var " + fmtNum(ev.pVar()) + "t");
+                }
+            }
+            default -> {
+            }
+        }
+        return out;
+    }
+
+    /** 裁出 [lo, hi] 内的采样点（点按 tick 升序，可提前 break） */
+    private static List<SeriesPoint> inRange(List<SeriesPoint> pts, long lo, long hi) {
+        List<SeriesPoint> out = new ArrayList<>();
+        for (SeriesPoint p : pts) {
+            if (p.tick() < lo) {
+                continue;
+            }
+            if (p.tick() > hi) {
+                break;
+            }
+            out.add(p);
+        }
+        return out;
+    }
+
+    /**
+     * 计算结果框：画在绘图区**右上角**（框选统计在左上角）——
+     * 两块并存、互不覆盖，"计算结果不影响区间选中的基础信息"就是这么落地的。
+     * 纯展示、无命中，不会挡框选。
+     */
+    private void renderAnalyzeBox(GuiGraphics g, Layout L) {
+        if (page != Page.REPLAY || analyzeLines.isEmpty()) {
+            return;
+        }
+        int[] pr = ChartRenderer.plotRect(L.x() + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH());
+        int w = this.font.width(analyzeTitle) + 8;
+        for (String line : analyzeLines) {
+            w = Math.max(w, this.font.width(line) + 8);
+        }
+        int h = (analyzeLines.size() + 1) * 10 + 4;
+        int bx = pr[0] + pr[2] - w - 4;
+        int by = pr[1] + 4;
+        g.fill(bx - 2, by - 2, bx + w + 2, by + h, 0xE0181822);
+        g.fill(bx - 2, by - 2, bx + w + 2, by - 1, COLOR_ANALYZE);
+        g.drawString(this.font, analyzeTitle, bx, by, COLOR_ANALYZE, false);
+        int ly = by + 11;
+        for (String line : analyzeLines) {
+            g.drawString(this.font, line, bx, ly, 0xFFE0E0EC, false);
+            ly += 10;
+        }
+    }
+
+    /** 数字读数：整数原样，小数保留 3 位（与框选统计的"读数精确"一个原则，mean/var 允许小数） */
+    private static String fmtNum(double v) {
+        if (Double.isNaN(v)) {
+            return "-";
+        }
+        if (Math.abs(v - Math.rint(v)) < 1e-9) {
+            return String.valueOf((long) Math.rint(v));
+        }
+        return String.format(Locale.ROOT, "%.3f", v);
+    }
+
+    /** 带正负号的数字读数（正值显式加 +，负值自带 -，0 原样） */
+    private static String signedNum(double v) {
+        return v > 0 ? "+" + fmtNum(v) : fmtNum(v);
+    }
+
     private void renderChip(GuiGraphics g, Chip c, int mouseX, int mouseY, boolean hover, int accent) {
         int bg = !c.enabled() ? 0xFF1A1A22 : (hover ? 0xFF41415A : 0xFF2A2A38);
         int border = !c.enabled() ? 0xFF2A2A34 : (hover ? 0xFF8A8AC8 : 0xFF4A4A5E);
@@ -1802,6 +2093,35 @@ public final class ScopeScreen extends Screen {
                 }
                 if (!onOwnerChip) {
                     legendPopup = null;
+                    return true;
+                }
+            }
+        }
+
+        // 2.6) 「运算」弹窗（回放计算）：语义与图例弹窗一致
+        //   点在菜单里 → 选中那个运算并关闭；点在所属工具栏块上 → 交给 chip 循环收起；
+        //   点在其余任何地方 → 关掉并吃掉这次点击。
+        if (opPopupOpen) {
+            int[] pr = opPopupRect(L);
+            if (pr == null) {
+                opPopupOpen = false;
+            } else if (isIn(mx, my, pr[0], pr[1], pr[2], pr[3])) {
+                int row = (my - pr[1] - 2) / POPUP_ROW_H;
+                if (row >= 0 && row < OP_VALUES.length) {
+                    analyzeOp = OP_VALUES[row];
+                    opPopupOpen = false;
+                }
+                return true;
+            } else {
+                boolean onOwnerChip = false;
+                for (Chip c : L.toolbar()) {
+                    if ("calc_op".equals(c.id()) && c.hit(mx, my)) {
+                        onOwnerChip = true;
+                        break;
+                    }
+                }
+                if (!onOwnerChip) {
+                    opPopupOpen = false;
                     return true;
                 }
             }
@@ -2184,6 +2504,8 @@ public final class ScopeScreen extends Screen {
         replayMarkers.clear();
         replayMarkers.addAll(data.markers());
         replaySelectedItem = null;
+        opPopupOpen = false;
+        aLo = Long.MIN_VALUE;   // 计算结果缓存失效（框选也清了，结果框自然消失）
         hiddenItems.clear();
         ioShown.clear();
         legendPopup = null;
@@ -2317,6 +2639,11 @@ public final class ScopeScreen extends Screen {
             }
             case "archive" -> stopAndArchive();
             case "replay_back" -> page = Page.ROOT;
+            case "calc_obj" -> {
+                // 数量 ↔ IO，一次只算一个（切过去时缓存键变了，结果框自动重算）
+                analyzeIo = !analyzeIo;
+            }
+            case "calc_op" -> opPopupOpen = !opPopupOpen;
             case "close" -> closeScope();
             case "live" -> {
                 // 回到实时 = 放弃选择。两者不并存（选择会冻结视图，见 endSelection）
