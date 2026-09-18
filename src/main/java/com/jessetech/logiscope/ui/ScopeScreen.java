@@ -153,17 +153,14 @@ public final class ScopeScreen extends Screen {
     private static final int PAD = 5;
     private static final int RESIZE_GRIP = 12;
     private static final int MAX_LEGEND_ROWS = 3;
+    /** 图例弹出菜单每行的高度 */
+    private static final int POPUP_ROW_H = 13;
     /** 波形区低于这个高度就不画了 —— 画出来的东西没有信息量，只会误导 */
     private static final int MIN_CHART_H = 44;
     /** 列表行末尾删除按钮的宽度 */
     private static final int DEL_W = 13;
 
     private static final String SERIES_PREFIX = "series:";
-    /**
-     * 图例里 IO 子行的前缀。**是物品行的子级**：父行控制存量线，子行控制 IO 线。
-     * 默认 IO 关着（图看起来和以前一样），点一下子行才把它画出来。
-     */
-    private static final String IO_PREFIX = "io:";
 
     // ==================================================================
     // 会话状态（每次打开重置）
@@ -172,6 +169,22 @@ public final class ScopeScreen extends Screen {
     private Page page;
     /** 选格页正在配置哪个实例（-1 = 没有） */
     private int pickerProbeId;
+
+    // ---- 图例弹出菜单 ----
+    /**
+     * 当前弹出菜单对应的物品（null = 没弹）。
+     *
+     * ★ 第十轮⑥：IO 不再是图例条上独立的子格，而是**并入物品图例** ★
+     * 点物品图例 → 弹出「数量 / IO」两项的小菜单，两项分别控制存量线与 IO 线。
+     * 为什么改成弹窗：图例条是流式换行的色块带，"父格 + IO 子格"成对出现
+     * 让条目数翻倍（截图实测 9 种物品挤满 3 行上限），而且 IO 子格和物品格
+     * 长得几乎一样，层级关系要靠猜。弹窗把"每个物品有两层开关"这件事
+     * 收进第二次点击里，图例条本身永远一行一个物品。
+     *
+     * 它是**瞬态 UI 状态**（不是用户偏好），所以是实例字段，重开面板即复位。
+     */
+    @Nullable
+    private String legendPopup;
 
     // ---- 可视化选格 ----
     /** 「选择容器格」开关：true = 光标只用于选格，不与容器交互 */
@@ -536,6 +549,10 @@ public final class ScopeScreen extends Screen {
                 ioShown.remove(id);
             }
         }
+        // 弹出菜单指着一个已经消失的物品 → 收起
+        if (legendPopup != null && chartData.byItem(legendPopup) == null) {
+            legendPopup = null;
+        }
     }
 
     private void refreshSelectionStats() {
@@ -558,6 +575,10 @@ public final class ScopeScreen extends Screen {
         boolean hit(int mx, int my) {
             return mx >= x && mx < x + w && my >= y && my < y + h;
         }
+    }
+
+    /** 图例弹出菜单的一行：{@code forIo} = 这一行控制 IO 线（否则控制存量线） */
+    private record PopupRow(boolean forIo, String label, boolean on) {
     }
 
     private record Layout(
@@ -667,18 +688,16 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 图例条目：**每个物品两格** —— 物品行（存量线）+ 紧挨着的 IO 子行（单 tick 净流量）。
+     * 图例条目：**一个物品一格**（第十轮⑥起）。
      *
-     * 为什么摆成"相邻两格"而不是真做一棵树：图例是流式换行的色块带，
-     * 做成缩进的树要占两倍行高（面板是浮层，高度很贵）。
-     * 子行紧跟父行、且只写 "IO"、颜色用同色系浅色 —— 层级关系一眼能看出来。
+     * 点它弹出「数量 / IO」小菜单（见 {@link #legendPopup}），两级开关收进弹窗里；
+     * (empty) 只有「数量」一项 —— 空格子没有进出可言，IO 对它没有意义。
      */
     private List<Item> legendItems() {
         List<Item> out = new ArrayList<>();
         for (Series s : chartData.series()) {
             out.add(new Item(SERIES_PREFIX + s.itemId(),
                     ChartRenderer.label(chartData.indexOf(s.itemId()), s.itemId()), true));
-            out.add(new Item(IO_PREFIX + s.itemId(), tr("logiscope.legend.io"), true));
         }
         return out;
     }
@@ -687,6 +706,50 @@ public final class ScopeScreen extends Screen {
         return LogiScopeMod.probes().followAfterClose()
                 ? tr("logiscope.btn.follow_on")
                 : tr("logiscope.btn.follow_off");
+    }
+
+    // ------------------------------------------------------------------
+    // 图例弹出菜单（数量 / IO）
+    // ------------------------------------------------------------------
+
+    /** 弹出菜单的行：一个物品固定有「数量」；(empty) 没有「IO」—— 空格子没有进出可言 */
+    private List<PopupRow> popupRows(String itemId) {
+        List<PopupRow> rows = new ArrayList<>();
+        rows.add(new PopupRow(false, tr("logiscope.legend.quantity"), !hiddenItems.contains(itemId)));
+        if (!ChartData.EMPTY_ITEM.equals(itemId)) {
+            rows.add(new PopupRow(true, tr("logiscope.legend.io"), ioShown.contains(itemId)));
+        }
+        return rows;
+    }
+
+    /**
+     * 弹出菜单的矩形（渲染与命中判定**共用这一份几何**，不会错位）。
+     * 从所属图例块的下方弹出；底部放不下（贴近面板下缘）就往上弹；
+     * 右缘夹回面板内。图例块找不到（被 `+N` 收起 / 物品刚消失）返回 null。
+     */
+    @Nullable
+    private int[] popupRect(Layout L) {
+        if (legendPopup == null) {
+            return null;
+        }
+        for (Chip c : L.legend()) {
+            if (!c.id().equals(SERIES_PREFIX + legendPopup)) {
+                continue;
+            }
+            List<PopupRow> rows = popupRows(legendPopup);
+            int w = 0;
+            for (PopupRow r : rows) {
+                w = Math.max(w, this.font.width(r.label()) + 30);
+            }
+            int h = rows.size() * POPUP_ROW_H + 4;
+            int x = Math.min(c.x(), L.x() + L.w() - w - 4);
+            int y = c.y() + c.h() + 1;
+            if (y + h > L.y() + L.h()) {
+                y = c.y() - h - 1;
+            }
+            return new int[]{x, y, w, h};
+        }
+        return null;
     }
 
     // ---- 折行与摆放（按钮、工具栏、图例共用）----
@@ -806,6 +869,8 @@ public final class ScopeScreen extends Screen {
         }
 
         renderButtons(g, L.buttons(), mouseX, mouseY);
+        // 弹出菜单压在按钮之上（它经常盖住底部按钮区）
+        renderLegendPopup(g, L, mouseX, mouseY);
         renderResizeGrip(g, L, mouseX, mouseY);
         renderFlash(g, y);
 
@@ -1198,15 +1263,11 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 图例：一行一个色块 + 名字，点一下开关这条数据线的渲染。
-     * 关掉的用灰底 + 灰字表示，一眼能看出"这条线是我自己关的"而不是"它没数据"。
+     * 图例：一行一个色块 + 名字，点一下弹出「数量 / IO」小菜单（见 {@link #legendPopup}）。
+     * 关掉的（数量关 / IO 关都算）用灰底 + 灰字表示，一眼能看出"这条线是我自己关的"而不是"它没数据"。
      */
     private void renderLegend(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
-            if (c.id().startsWith(IO_PREFIX)) {
-                renderLegendIo(g, c, mouseX, mouseY);
-                continue;
-            }
             if (!c.id().startsWith(SERIES_PREFIX)) {
                 renderChip(g, c, mouseX, mouseY, false, 0);
                 continue;
@@ -1229,27 +1290,35 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 图例里的 IO 子行：小一格、缩进两像素、同色系浅色块 —— 明确是上面那个物品的子级。
-     * 关着的时候是灰的（和图例里"被关掉的线"一个语汇）。
+     * 图例弹出菜单：列在弹窗渲染**之后**调用（压在最上层，不然会被底部按钮盖住）。
      */
-    private void renderLegendIo(GuiGraphics g, Chip c, int mouseX, int mouseY) {
-        String itemId = c.id().substring(IO_PREFIX.length());
-        boolean on = ioShown.contains(itemId);
-        boolean hover = c.hit(mouseX, mouseY);
-        int bg = !on ? 0xFF17171E : (hover ? 0xFF31313F : 0xFF22222C);
-        int border = !on ? 0xFF252530 : (hover ? 0xFF8A8AC8 : 0xFF44445A);
-        int x = c.x();
-        int y = c.y() + 2;
-        int w = c.w();
-        int h = c.h() - 3;
-        g.fill(x, y, x + w, y + h, bg);
-        g.fill(x, y, x + w, y + 1, border);
-        g.fill(x, y + h - 1, x + w, y + h, border);
-        g.fill(x, y, x + 1, y + h, border);
-        g.fill(x + w - 1, y, x + w, y + h, border);
-        int color = ChartRenderer.flowColor(ChartRenderer.colorOf(chartData.indexOf(itemId), itemId));
-        g.fill(x + 4, y + 3, x + 9, y + 8, on ? color : 0xFF3A3A44);
-        g.drawString(this.font, c.label(), x + 12, y + 2, on ? 0xFFE0E0EC : 0xFF70707A, false);
+    private void renderLegendPopup(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int[] pr = popupRect(L);
+        if (pr == null) {
+            return;
+        }
+        String itemId = legendPopup;
+        List<PopupRow> rows = popupRows(itemId);
+        int accent = ChartRenderer.colorOf(chartData.indexOf(itemId), itemId);
+
+        g.fill(pr[0], pr[1], pr[0] + pr[2], pr[1] + pr[3], 0xF2181822);
+        ring(g, pr[0], pr[1], pr[2], pr[3], 0xFF3A3A4A);
+        // 顶边一条物品色：标明这个菜单是哪个物品的（和图例色块同色）
+        g.fill(pr[0], pr[1], pr[0] + pr[2], pr[1] + 1, accent);
+
+        int ry = pr[1] + 2;
+        for (PopupRow r : rows) {
+            boolean hover = isIn(mouseX, mouseY, pr[0] + 1, ry, pr[2] - 2, POPUP_ROW_H);
+            if (hover) {
+                g.fill(pr[0] + 1, ry, pr[0] + pr[2] - 1, ry + POPUP_ROW_H, 0xFF2E2E3E);
+            }
+            // 状态色块：开 = 线的颜色（IO 用同色系浅一档），关 = 灰 —— 和图例一个语汇
+            int swatch = r.on() ? (r.forIo() ? ChartRenderer.flowColor(accent) : accent) : 0xFF3A3A44;
+            g.fill(pr[0] + 6, ry + 3, pr[0] + 12, ry + 9, swatch);
+            g.drawString(this.font, r.label(), pr[0] + 16, ry + 2,
+                    r.on() ? 0xFFE0E0EC : 0xFF8A8A9A, false);
+            ry += POPUP_ROW_H;
+        }
     }
 
     private void renderButtons(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
@@ -1506,6 +1575,40 @@ public final class ScopeScreen extends Screen {
             return true;
         }
 
+        // 2.5) 图例弹出菜单：优先于它盖住的一切控件。
+        //   点在菜单里 → 切换那一行的开关（菜单保持开着，好连着切 IO）；
+        //   点在所属图例块上 → 交给下面的 chip 循环去收起/切换；
+        //   点在其余任何地方 → 关掉菜单并吃掉这次点击（标准菜单语义）。
+        if (legendPopup != null) {
+            int[] pr = popupRect(L);
+            if (pr == null) {
+                legendPopup = null;   // 物品消失 / 图例被 +N 收起，菜单失效
+            } else if (isIn(mx, my, pr[0], pr[1], pr[2], pr[3])) {
+                List<PopupRow> rows = popupRows(legendPopup);
+                int row = (my - pr[1] - 2) / POPUP_ROW_H;
+                if (row >= 0 && row < rows.size()) {
+                    if (rows.get(row).forIo()) {
+                        toggleIo(legendPopup);
+                    } else {
+                        toggleSeries(legendPopup);
+                    }
+                }
+                return true;
+            } else {
+                boolean onOwnerChip = false;
+                for (Chip c : L.legend()) {
+                    if (c.id().equals(SERIES_PREFIX + legendPopup) && c.hit(mx, my)) {
+                        onOwnerChip = true;
+                        break;
+                    }
+                }
+                if (!onOwnerChip) {
+                    legendPopup = null;
+                    return true;
+                }
+            }
+        }
+
         // 3) 波形区 → 开始框选（只有图表页有波形）
         if (page == Page.CHART && L.hasChart()
                 && ChartRenderer.inPlot(L.x() + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), mx, my)) {
@@ -1583,6 +1686,7 @@ public final class ScopeScreen extends Screen {
         } else {
             enterPicker(p);
         }
+        legendPopup = null;
         builtVersion = Long.MIN_VALUE;
     }
 
@@ -1787,6 +1891,7 @@ public final class ScopeScreen extends Screen {
 
         hiddenItems.clear();
         ioShown.clear();
+        legendPopup = null;
         selection = null;
         selectionStats = List.of();
         live = true;
@@ -1810,10 +1915,10 @@ public final class ScopeScreen extends Screen {
 
     private void onChip(String id) {
         ProbeManager mgr = LogiScopeMod.probes();
-        if (id.startsWith(IO_PREFIX)) {
-            toggleIo(id.substring(IO_PREFIX.length()));
-        } else if (id.startsWith(SERIES_PREFIX)) {
-            toggleSeries(id.substring(SERIES_PREFIX.length()));
+        if (id.startsWith(SERIES_PREFIX)) {
+            // 点图例 = 切换这个物品的弹出菜单（开关在菜单里点，见 mouseClicked 2.5）
+            String itemId = id.substring(SERIES_PREFIX.length());
+            legendPopup = itemId.equals(legendPopup) ? null : itemId;
             return;
         }
         switch (id) {

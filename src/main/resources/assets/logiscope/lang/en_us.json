@@ -74,5 +74,6 @@
   "logiscope.msg.index_unverified": "LogiScope: WARNING - slot index could not be verified; background tracking may read a different slot",
   "logiscope.label.probe": "Probe",
   "logiscope.legend.io": "IO",
+  "logiscope.legend.quantity": "Quantity",
   "logiscope.info.kinds_dropped": "+%s hidden"
 }
