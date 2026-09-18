@@ -17,12 +17,13 @@ import java.util.List;
  *
  * 原理：玩家打开任意容器时，服务端会通过
  *   ClientboundContainerSetContentPacket / ClientboundContainerSetSlotPacket
- * 把槽位内容同步下来，落在 AbstractContainerMenu.slots（public 字段）里。
- * 所以本模组【不需要发任何网络包、不需要服务端配合】，
- * 直接读 player.containerMenu.slots.get(i).getItem() 就是当前真实内容。
+ *   把槽位内容同步下来，落在 AbstractContainerMenu.slots（public 字段）里。
+ *   所以本模组【不需要发任何网络包、不需要服务端配合】，
+ *   直接读 player.containerMenu.slots.get(i).getItem() 就是当前真实内容。
  *
  * 代价（必须写清楚，否则会误判成 bug）：
- *   1. 只能看到容器界面【打开着】的这段时间。界面一关，菜单对象被替换，数据源消失。
+ *   1. 同步只在**界面打开着**的这段时间有效。界面一关，客户端这边就没有内容了。
+ *      ——关掉界面之后的取值走 WorldProbe（集成服务端），见那个类。
  *   2. 若某个模组不用 AbstractContainerMenu 承载内容（例如自绘界面 + 自定义包），
  *      它的槽位在本模组看来可能是空的。这是"只读客户端同步数据"的固有边界。
  *   3. 与真实值存在一个网络往返的延迟（约 1 个 tick 量级），做速率分析时要记住这点。
@@ -49,9 +50,19 @@ public final class ContainerAccess {
         return menu == null ? -1 : menu.containerId;
     }
 
-    /** 列出所有槽位的快照，供界面展示与选择 */
+    /**
+     * 列出所有槽位的快照，供界面展示与选择。
+     *
+     * ★ 只列「外部设备」的槽位 ★
+     * 面板可以在"关掉容器界面之后"单独打开（见 ScopeScreen 的独立模式），
+     * 那时 player.containerMenu 是玩家自己的背包。若不排除，
+     * 玩家会在列表里看到自己背包的 36 个格子并误以为那是机器 —— 语义是错的。
+     */
     public static List<SlotView> snapshot() {
         List<SlotView> out = new ArrayList<>();
+        if (!hasForeignContainerOpen()) {
+            return out;
+        }
         AbstractContainerMenu menu = currentMenu();
         if (menu == null) {
             return out;
@@ -76,12 +87,19 @@ public final class ContainerAccess {
 
     private static SlotView toView(AbstractContainerMenu menu, int index) {
         Slot slot = menu.slots.get(index);
-        ItemStack stack = slot.getItem();
+        return make(index, slot.getContainerSlot(), slot.getItem());
+    }
+
+    /**
+     * 从任意 ItemStack 造一个快照。WorldProbe 走方块实体读值时也用它，
+     * 这样"界面打开"和"坐标跟踪"两条路径产出的数据类型完全一致。
+     */
+    public static SlotView make(int menuSlotIndex, int containerSlotIndex, ItemStack stack) {
         boolean empty = stack.isEmpty();
         ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
         return new SlotView(
-                index,                              // 菜单内下标，用于定位
-                slot.getContainerSlot(),            // 容器内下标，用于界面显示
+                menuSlotIndex,
+                containerSlotIndex,
                 id == null ? "unknown" : id.toString(),
                 empty ? 0 : stack.getCount(),
                 empty);
