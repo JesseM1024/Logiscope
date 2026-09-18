@@ -5,6 +5,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
@@ -43,8 +44,157 @@ public final class WorldProbe {
     private WorldProbe() {
     }
 
-    /** 丢掉缓存。切换探针 / 重新开始记录时调用，避免读到上一个目标的残值。 */
+    // ==================================================================
+    // 下标映射验证（第六轮 M4：MEK 等模组机器的槽位下标不可信）
+    // ==================================================================
+
+    /**
+     * 菜单槽下标 → 方块实体真实槽位下标 的映射状态。
+     *
+     * 为什么需要它：菜单槽的 {@code getContainerSlot()} 只有对 vanilla 才有
+     * "容器内下标"的保证。实测（javap 反查，第六轮）：Mekanism 的
+     * InventoryContainerSlot 构造是 {@code super(emptyInventory, 0, x, y)} ——
+     * **下标硬编码 0**，且它包装的 IInventorySlot 是单槽接口、不带位置信息，
+     * 客户端从槽位对象里**根本拿不到**真下标。用户实测：MEK 机器所有槽显示 #0，
+     * 关界面后跟踪的全是别的格子。
+     */
+    public enum MappingStatus {
+        /** 验证还没回来（异步，1~2 tick） */
+        PENDING,
+        /** 下标可信：vanilla Container（vanilla 保证），或服务端内容匹配唯一命中 */
+        VERIFIED,
+        /** 下标不可信：内容匹配有歧义（例如对着空格子挂探头，机器里空格子不止一个） */
+        UNVERIFIED,
+        /** 这台机器既不是 Container 也没有 item handler，关界面后必然读不到 */
+        UNAVAILABLE
+    }
+
+    private record Mapping(ProbeTarget target, int index, MappingStatus status) {
+    }
+
+    /** 最近一次验证结果。同一时刻只有一个探头，单个槽位足够。 */
+    private static volatile Mapping mapping;
+
+    /**
+     * 挂探头的瞬间调用（此时 GUI 还开着，菜单内容与服务端真值同步）。
+     * 在服务端线程做一次"内容指纹匹配"：拿着菜单槽当前内容去能力 handler 里找，
+     * 唯一命中 → 那个下标就是真下标。
+     *
+     * 匹配策略（宽松到严格回退）：
+     *   1. 物品 + 数量都相同的槽位若唯一 → 采用
+     *   2. 仅物品相同的槽位若唯一 → 采用（容忍挂探头瞬间 1 tick 的同步差）
+     *   3. 否则 UNVERIFIED —— 宁可明确告诉用户"不可信"，也不要瞎猜
+     *
+     * 注意匹配只在挂探头这一刻做一次：下标是结构性信息，内容只是用来"指认"它，
+     * 之后内容怎么变都不影响。vanilla Container 路径直接跳过匹配（vanilla 保证下标）。
+     */
+    public static void verifyIndex(ProbeTarget target, @Nullable ContainerAccess.SlotView view) {
+        if (target == null || !target.hasPersistentId()) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        IntegratedServer server = mc.getSingleplayerServer();
+        if (server == null) {
+            return;
+        }
+        try {
+            server.execute(() -> mapping = verifyNow(server, target, view));
+        } catch (Throwable ignored) {
+            // 服务器正在关闭：FOLLOWING 也跑不了，无所谓
+        }
+    }
+
+    /** ★ 必须在服务端线程执行 ★ */
+    private static Mapping verifyNow(MinecraftServer server, ProbeTarget target,
+                                     @Nullable ContainerAccess.SlotView view) {
+        ServerLevel level = server.getLevel(target.dimension());
+        if (level == null || !level.isLoaded(target.pos())) {
+            return new Mapping(target, -1, MappingStatus.UNAVAILABLE);
+        }
+        BlockEntity be = level.getBlockEntity(target.pos());
+
+        // vanilla Container：getContainerSlot() 就是容器内下标，vanilla 保证，直接可信
+        if (be instanceof Container container) {
+            int idx = target.containerSlotIndex();
+            boolean ok = idx >= 0 && idx < container.getContainerSize();
+            return new Mapping(target, ok ? idx : -1, ok ? MappingStatus.VERIFIED : MappingStatus.UNVERIFIED);
+        }
+
+        IItemHandler handler = itemHandler(level, target.pos(), be);
+        if (handler == null) {
+            return new Mapping(target, -1, MappingStatus.UNAVAILABLE);
+        }
+        if (view == null) {
+            return new Mapping(target, -1, MappingStatus.UNVERIFIED);
+        }
+
+        String wantItem = view.itemId();
+        int wantCount = view.count();
+        int exact = -1;
+        int byItem = -1;
+        int exactHits = 0;
+        int itemHits = 0;
+        for (int i = 0; i < handler.getSlots(); i++) {
+            ItemStack s = handler.getStackInSlot(i);
+            if (view.empty()) {
+                // 对着空格子挂探头：只有"机器里唯一一个空格子"时才能指认
+                if (s.isEmpty()) {
+                    exactHits++;
+                    exact = i;
+                }
+                continue;
+            }
+            if (s.isEmpty()) {
+                continue;
+            }
+            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+            if (!id.equals(wantItem)) {
+                continue;
+            }
+            itemHits++;
+            byItem = i;
+            if (s.getCount() == wantCount) {
+                exactHits++;
+                exact = i;
+            }
+        }
+        if (exactHits == 1) {
+            return new Mapping(target, exact, MappingStatus.VERIFIED);
+        }
+        if (itemHits == 1) {
+            return new Mapping(target, byItem, MappingStatus.VERIFIED);
+        }
+        return new Mapping(target, -1, MappingStatus.UNVERIFIED);
+    }
+
+    /** 这个探头的下标映射状态（探头不匹配时视为 PENDING） */
+    public static MappingStatus mappingStatus(@Nullable ProbeTarget target) {
+        Mapping m = mapping;
+        return m != null && m.target() == target ? m.status() : MappingStatus.PENDING;
+    }
+
+    /** readNow 用的"真下标"：验证过的优先，否则退回菜单槽的 getContainerSlot() */
+    private static int effectiveIndex(ProbeTarget target) {
+        Mapping m = mapping;
+        if (m != null && m.target() == target && m.status() == MappingStatus.VERIFIED && m.index() >= 0) {
+            return m.index();
+        }
+        return target.containerSlotIndex();
+    }
+
+    /** 丢掉全部缓存（读值缓存 + 下标验证）。切换探针 / 拔探头时调用。 */
     public static void reset() {
+        cached = null;
+        pending = false;
+        mapping = null;
+    }
+
+    /**
+     * 只丢读值缓存，**保留下标验证**。
+     * 关界面转 FOLLOWING 时用：验证是挂探头时做的（GUI 开着才能做），
+     * 之后每次开关界面都不能丢 —— 否则模组机器关界面后立刻退化回不可信下标。
+     */
+    public static void resetReadCache() {
         cached = null;
         pending = false;
     }
@@ -127,7 +277,7 @@ public final class WorldProbe {
         if (level == null || !level.isLoaded(target.pos())) {
             return null;
         }
-        int idx = target.containerSlotIndex();
+        int idx = effectiveIndex(target);
         if (idx < 0) {
             return null;
         }
@@ -144,12 +294,13 @@ public final class WorldProbe {
         // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
         // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
         // 但为了能和漏斗/管道交互，模组机器几乎都会注册 ItemHandler.BLOCK 能力，
-        // 这条路在服务端永远可用。下标沿用菜单槽的 getContainerSlot()：
-        //   · 对 NeoForge 的 SlotItemHandler，它把 handler 下标传给 super，
-        //     所以 getContainerSlot() 恰好就是 handler 的槽位下标（已核实源码）
-        //   · 对自写槽位类的模组（如 Mekanism 的 InventoryContainerSlot，未覆写
-        //     getContainerSlot）同样返回构造时传入的下标 —— 是否与机器总表对齐
-        //     取决于该模组，个别模组可能需要单独适配（见 ARCHITECTURE.md 待决问题）
+        // 这条路在服务端永远可用。
+        //
+        // ★ 下标用 verifyIndex 验证过的（第六轮 M4）★
+        // Mekanism 的 InventoryContainerSlot 构造是 super(emptyInventory, 0, x, y)，
+        // 下标硬编码 0 —— 直接用 getContainerSlot() 会跟踪到别的格子。
+        // 验证不了（内容匹配有歧义）时退回 getContainerSlot()，
+        // 但 Sampler 会向用户弹"下标不可信"的提示。
         IItemHandler handler = itemHandler(level, target.pos(), be);
         if (handler != null && idx < handler.getSlots()) {
             return ContainerAccess.make(-1, idx, handler.getStackInSlot(idx));

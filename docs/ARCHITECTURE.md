@@ -464,6 +464,12 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 |---|---|
 | 过渡那一 tick | `Sampler` 持有 `lastKnown`（上一 tick 刚读到的值，最多 50 ms 旧），在检测到界面关闭时**先把它记下去**，补住空洞 |
 | 下一 tick 的取值 | `WorldProbe.seed(lastKnown, tick)` 把这个值垫进缓存，`latest()` 的年龄判定（≤ `WORLD_READ_MAX_AGE`）让它算"新鲜"，于是异步结果到达前时间轴是连续的 |
+| **第六轮补充：过渡 tick 立刻 `request()`** | 只靠 seed 的话，下一 tick 的 `latest()` 拿到的仍是 seed（旧值被续命 1~2 tick，1t IO 测试里脉冲被拉宽，第六轮 M1）。过渡 tick 就把读取任务发给服务端，异步真值最早在下一 tick 接管，seed 退化成"异步失败时的兜底" |
+| **第六轮补充：重开界面也垫一格** | FOLLOWING → RECORDING 的切换 tick 原来什么都不记，时间轴断一格。用手头最新的世界侧读值垫上（与关界面方向对称） |
+
+**接缝的物理极限**：过渡 tick 手里只有 lastKnown（GUI 最后一拍），
+它最多把真实变化"晚看到"1 tick —— 要消除它只能记空洞或假 no_data，都更糟。
+第六轮修完后，接缝两侧各剩**至多 1 tick** 的承载，这是不造假数据的前提下的最小值。
 
 **这不是把 no_data 藏起来**：垫值会在 `WORLD_READ_MAX_AGE`（5 tick）后自然过期。
 区块卸载、方块被拆、多人读不到这些情况，该记 no_data 还是照记 ——
@@ -510,10 +516,34 @@ if (handler != null && idx < handler.getSlots()) {
 |---|---|
 | **Container 优先，capability 兜底** | Container 的下标语义由 vanilla 保证（`getContainerSlot()` == 容器内下标），最准；capability 只在 Container 缺席时启用 |
 | **先问 `side=null`，问不到再按六个方向试** | null = "内部视角"，通常是完整库存；有些模组只给面向某一面的分视图。查询命中 NeoForge 的能力缓存，每 tick 七次成本可忽略 |
-| **下标沿用菜单槽的 `getContainerSlot()`** | 对 NeoForge 的 `SlotItemHandler`，它把 handler 下标传给 `super`，所以 `getContainerSlot()` **恰好就是 handler 的槽位下标**（已核实源码）。自写槽位类的模组未覆写时同样返回构造下标 —— 但**是否等于机器总表下标取决于该模组**，个别机器可能要单独适配（见待决问题 8） |
+| **下标不能直接信 `getContainerSlot()`（第六轮 M4 实锤）** | 对 NeoForge 的 `SlotItemHandler`，它把 handler 下标传给 `super`，`getContainerSlot()` 恰好就是 handler 下标；**但 Mekanism 的 `InventoryContainerSlot` 构造是 `super(emptyInventory, 0, x, y)` —— 下标硬编码 0**（javap -c 实锤），且它包装的 `IInventorySlot` 是单槽接口、不带位置信息，客户端**拿不到**真下标。解法见下：挂探头瞬间在服务端做内容指纹验证 |
 
 > 反查方法（这次用的）：`javap -p -cp run/mods/<mod>.jar <BE全类名>` 看它 implements 什么；
 > 再在 jar 里按 `capabilit|ItemHandler` 搜类名，确认它走哪条能力注册路径。
+
+#### CP9 之三：下标映射验证（第六轮 M4 的解法）
+
+模组机器的槽位下标不可信（见上表第三行），解法是**验证，而不是逐模组适配**：
+
+```
+挂探头的瞬间（GUI 开着，菜单内容与服务端同步）：
+  服务端线程做一次"内容指纹匹配"：
+    1. vanilla Container        → getContainerSlot() 直接可信（vanilla 保证）
+    2. 拿菜单槽当前内容去 capability handler 里找：
+         物品+数量 唯一命中     → 那个下标就是真下标（VERIFIED）
+         仅物品     唯一命中    → 也算（容忍挂探头瞬间 1 tick 的同步差）
+         命中 0 个或多个      → UNVERIFIED（宁可明说，也不瞎猜）
+    3. 既非 Container 也无 handler → UNAVAILABLE（关界面必然读不到）
+  结果存 volatile，readNow 每次读取都用验证过的下标。
+```
+
+**为什么匹配只在挂探头这一刻做一次**：下标是结构性信息，内容只是用来"指认"它；
+之后内容怎么变都不影响。而"GUI 开着"是唯一能同时看到两侧内容的时机窗口。
+
+**验证不了时的行为（用户要求的退路）**：FOLLOWING 状态下弹一次动作栏警告
+（`logiscope.msg.index_unverified`，每探头只弹一次），读取退回 `getContainerSlot()`
+并如实记录 —— 用户至少知道"跟踪的可能不是那一格"。
+典型歧义场景：对着**空格子**挂探头、机器里多个格子装着同种等量的物品。
 
 ---
 
@@ -663,6 +693,26 @@ if (handler != null && idx < handler.getSlots()) {
 松开手时按"锁住的那个窗口"把像素换算成 tick —— **不能重算窗口**，
 否则松手那一帧窗口已经变了，选框会跳一下。
 
+#### 第六轮实测抓到的一个隐蔽 bug：先改状态、再调"读状态的函数"
+
+`beginSelection` 原来的顺序是错的：
+
+```java
+selecting = true;        // ← 先置位
+long[] win = window();   // ← window() 第一分支就是 "if (selecting) 返回锁住的窗口"
+selectWindowStart = win[0];
+```
+
+首次框选时 `selectWindowStart/End` 还是初始值 0 ——
+`window()` 读到的是**自己正要写入的旧值**，窗口被锁成 `[0,0]`，
+波形瞬间变"这一区间没有数据"。且永远进不了冻结态，
+连带的假象是「实时」按钮"点不动"（它只在冻结态才有可见变化）。
+第六轮 M12/M13/M14/M16 四条失败全是这一个根因。
+
+> 教训：**给"读状态的函数"加分支时，先查所有调用点有没有"边改状态边调它"。**
+> 修法很简单（先取窗口再置位），难在症状离根因太远 ——
+> "按下就显示无数据"看起来像数据问题，实际是交互层的顺序问题。
+
 #### 布局只有一份
 
 `ScopeScreen#layout()` 产出这一帧的全部矩形（含每个按钮/图例块的位置），
@@ -754,11 +804,10 @@ if (handler != null && idx < handler.getSlots()) {
    真出现"一个槽位里轮换了十几种物品"的场景时，需要给图例加翻页。
 7. **时间轴对齐参考**：目前所有系列的横轴都是绝对 tick。
    若以后支持"多探针对比"，可能需要"以某个事件为 0 点"的相对时间轴。
-8. **模组机器的下标映射**：CP9 之二的 capability 路径沿用菜单槽的 `getContainerSlot()`
-   当作 handler 下标。对 NeoForge 的 `SlotItemHandler` 严格成立；自写槽位类的模组
-   （如 Mekanism）未覆写时也成立，但"构造下标是否等于机器总表下标"要逐模组确认。
-   若实测某台机器某槽跟踪的不是那一格：在 `WorldProbe` 加该模组的下标适配
-   （按 `BlockEntity` 类型分流），不要动通用路径。
+8. **~~模组机器的下标映射~~**（**第六轮已解决**）：实测 MEK 的槽位下标硬编码 0
+   （构造 `super(emptyInventory, 0, x, y)`），逐模组适配不可行也不必要。
+   已改为通用解法：挂探头瞬间在服务端做"内容指纹匹配"验证下标
+   （见 CP9 之三）；验证不了（歧义）就明说，不瞎猜。
 
 ---
 

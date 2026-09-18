@@ -933,11 +933,17 @@ public final class ScopeScreen extends Screen {
     }
 
     private void beginSelection(int mx) {
+        // ★ 必须先取窗口、再置 selecting ★
+        // window() 的第一分支就是"框选中 → 返回锁住的窗口"，
+        // 先置位的话这里读到的是上一次的残留值（本会话首次是初始值 0,0）
+        // → 窗口被锁成 [0,0] → 波形立刻变"这一区间没有数据"，
+        //   且永远进不了冻结态（下游表现：M16 的"实时"按钮看起来点不动）。
+        // 这正是第六轮 M12/M13/M14/M16 四条的共同根因 ——
+        // 教训：给"读状态的函数"加分支时，先查所有调用点有没有"边改状态边调它"。
+        long[] win = window();
         selecting = true;
         selAnchorX = mx;
         selCurrentX = mx;
-        // 锁住窗口：否则波形在拖的过程中持续往前滚，"框住的那段"会一直变
-        long[] win = window();
         selectWindowStart = win[0];
         selectWindowEnd = win[1];
     }
@@ -979,12 +985,17 @@ public final class ScopeScreen extends Screen {
         // 持久身份（维度 + 坐标）来自"玩家右键的那个方块"，见 ContainerAnchor。
         // 拿不到就退化成纯运行时身份：关掉界面只能暂停，不会瞎记。
         ContainerAnchor.Anchor anchor = ContainerAnchor.activeFor(ContainerAccess.currentContainerId());
-        sampler.attach(new ProbeTarget(
+        ProbeTarget target = new ProbeTarget(
                 view.menuSlotIndex(),
                 view.containerSlotIndex(),
                 view.itemId(),
                 anchor == null ? null : anchor.dimension(),
-                anchor == null ? null : anchor.pos()));
+                anchor == null ? null : anchor.pos());
+        sampler.attach(target);
+        // ★ 立刻在服务端验证"菜单槽下标 → 方块实体真下标"的映射（第六轮 M4）★
+        // MEK 这类模组的槽位下标是硬编码 0，不验证的话关界面后跟踪的是别的格子。
+        // 此时 GUI 开着，菜单内容与服务端同步 —— 是内容指纹匹配唯一可靠的时机窗口。
+        WorldProbe.verifyIndex(target, view);
         // 换了目标 = 换了一套数据线，上一套的隐藏记录没有意义了
         hiddenItems.clear();
         selection = null;

@@ -46,5 +46,6 @@
   "logiscope.flash.sel_cleared": "Selection cleared",
 
   "logiscope.msg.following": "LogiScope: GUI closed, tracking by position",
-  "logiscope.msg.paused_auto": "LogiScope: data source lost, paused"
+  "logiscope.msg.paused_auto": "LogiScope: data source lost, paused",
+  "logiscope.msg.index_unverified": "LogiScope: WARNING - slot index could not be verified; background tracking may read a different slot"
 }

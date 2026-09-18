@@ -86,6 +86,9 @@ public final class Sampler {
     /** 上一次给玩家发动作栏提示的 tick，用于去抖 */
     private long lastNotifyTick = Long.MIN_VALUE / 2;
 
+    /** "下标不可信"是否已经警告过。每个探头只警告一次，别跑马灯。 */
+    private boolean warnedUnverifiedIndex;
+
     public SampleStore store() {
         return store;
     }
@@ -134,6 +137,7 @@ public final class Sampler {
         this.store.clear();
         this.manualPause = false;
         this.lastKnown = null;
+        this.warnedUnverifiedIndex = false;
         WorldProbe.reset();
         this.state = State.RECORDING;
     }
@@ -234,9 +238,16 @@ public final class Sampler {
     }
 
     private void enterFollowing() {
-        WorldProbe.reset();
+        WorldProbe.resetReadCache();
         // 把最后一次已知值垫进缓存，抹掉异步管道的启动延迟（见 WorldProbe#seed）
         WorldProbe.seed(lastKnown, tick);
+        // ★ 立刻发出第一次世界侧读取 ★
+        // 不发的话，下一 tick 的 latest() 只能拿到 seed（上一 GUI 值）——
+        // 旧值被续命 1~2 tick，1t IO 测试里表现为切换瞬间脉冲被拉宽（第六轮 M1）。
+        // 提前发，异步真值最早在下一 tick 就接管；seed 退化成"异步失败时的兜底"。
+        // 过渡 tick 本身仍记 lastKnown：那一 tick 我们手里只有它，
+        // 记空洞或假 no_data 都更糟（这是物理极限，见 Sampler 类注释的接缝说明）。
+        WorldProbe.request(target, tick);
         state = State.FOLLOWING;
         notifyPlayer("logiscope.msg.following");
     }
@@ -333,9 +344,25 @@ public final class Sampler {
             return;
         }
 
+        // ★ 下标映射不可信的机器（MEK 这类自写槽位类的模组），必须明说 ★
+        // 验证是挂探头那 1~2 tick 内在服务端做的（内容指纹匹配），
+        // 匹配有歧义（例如对着空格子挂探头）就到此为止 —— 不瞎猜，让用户知道。
+        if (!warnedUnverifiedIndex
+                && WorldProbe.mappingStatus(target) == WorldProbe.MappingStatus.UNVERIFIED) {
+            warnedUnverifiedIndex = true;
+            notifyPlayer("logiscope.msg.index_unverified");
+        }
+
         if (ContainerAccess.hasForeignContainerOpen()) {
             // 玩家又把界面打开了 —— 优先回到最准的那条路径
             if (ContainerAccess.currentContainerId() == watchedContainerId || tryRebind()) {
+                // ★ 补住切换 tick ★
+                // 世界侧缓存里还留着切换前一刻的真值；不垫的话这一 tick 什么都不记，
+                // 时间轴断一格，波形在这里凭空断开（与关界面方向对称）。
+                ContainerAccess.SlotView bridge = WorldProbe.latest(tick, WORLD_READ_MAX_AGE);
+                if (bridge != null) {
+                    store.add(new Sample(tick, bridge.itemId(), bridge.count()));
+                }
                 state = State.RECORDING;
                 return;
             }
