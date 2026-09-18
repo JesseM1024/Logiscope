@@ -478,6 +478,43 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 → 退化成纯运行时身份，关掉界面只能 `PAUSED`。这是刻意的：
 **宁可明确停住，也不要往别的方块上记。**
 
+#### CP9 之二：模组机器的世界侧读取（capability 回退）
+
+`readNow` 原来只认原版 `Container`。第五轮实测暴露了它的边界：
+**绝大多数模组机器不实现 `net.minecraft.world.Container`**。javap 反查实锤：
+
+| 模组（版本） | 方块实体 | 实现的原版接口 |
+|---|---|---|
+| Sophisticated Storage 1.5.20 | `net.p3pp3rf1y.sophisticatedstorage.block.StorageBlockEntity` | 只有模组自己的接口（`IControllableStorage`、`ILockable`…），**没有 `Container`** |
+| Mekanism 10.7.17 | `mekanism.common.tile.machine.TileEntityEnergizedSmelter` | 走 `TileEntityElectricMachine` 一族，**没有 `Container`** |
+
+这类机器的容器内容只在界面打开期间由菜单包同步到客户端；界面一关，客户端手里什么都没有。
+原路径 `readNow` 直接返回 null → 全部记成 no_data。
+
+**修法：加第二条读取路径 —— NeoForge 的方块能力。**
+
+```java
+// 已核实（neoforge-21.1.209-sources.jar）：
+//   Capabilities.ItemHandler.BLOCK : BlockCapability<IItemHandler, @Nullable Direction>
+//   ILevelExtension#getCapability(BlockCapability<T,C>, BlockPos, C)   ← Level 实现了它
+//   IItemHandler#getSlots() / getStackInSlot(int)
+IItemHandler handler = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, null);
+if (handler != null && idx < handler.getSlots()) {
+    return ContainerAccess.make(-1, idx, handler.getStackInSlot(idx));
+}
+```
+
+三条设计决定：
+
+| 决定 | 理由 |
+|---|---|
+| **Container 优先，capability 兜底** | Container 的下标语义由 vanilla 保证（`getContainerSlot()` == 容器内下标），最准；capability 只在 Container 缺席时启用 |
+| **先问 `side=null`，问不到再按六个方向试** | null = "内部视角"，通常是完整库存；有些模组只给面向某一面的分视图。查询命中 NeoForge 的能力缓存，每 tick 七次成本可忽略 |
+| **下标沿用菜单槽的 `getContainerSlot()`** | 对 NeoForge 的 `SlotItemHandler`，它把 handler 下标传给 `super`，所以 `getContainerSlot()` **恰好就是 handler 的槽位下标**（已核实源码）。自写槽位类的模组未覆写时同样返回构造下标 —— 但**是否等于机器总表下标取决于该模组**，个别机器可能要单独适配（见待决问题 8） |
+
+> 反查方法（这次用的）：`javap -p -cp run/mods/<mod>.jar <BE全类名>` 看它 implements 什么；
+> 再在 jar 里按 `capabilit|ItemHandler` 搜类名，确认它走哪条能力注册路径。
+
 ---
 
 ### CP10 · 把时间序列变成「多条按物品分组的数据线」　风险：中 ⚠️
@@ -585,6 +622,22 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 **一个已知的、故意不修的边界**：若在同一个像素列里发生了物品切换（要求缩放到
 极远 + 恰好切换），旧颜色会在这一列多画一小截。列宽 1px，肉眼不可见，
 不值得为它把聚合逻辑复杂化。
+
+#### ★ 第五轮实机的教训：`fill` 的颜色必须带 alpha 位 ★
+
+第五轮"图里没有任何线"，数据层 47 条断言全过、渲染逻辑复查无误，最后发现是
+**调色板写成了 6 位十六进制（`0x5DCAA5`）—— alpha 位是 0，`fill` 画出来完全透明**。
+
+| API | alpha=0 时的行为 |
+|---|---|
+| `GuiGraphics#fill` / `blit` | **完全透明，什么都看不见**。没有兜底 |
+| `drawString`（`Font#drawInBatch`） | `Font.adjustColor`（Font.java:172）会兜底：`alpha 位 == 0 → 补 0xFF`，所以文字照样可见 |
+
+后果就是"文字都在、图形全没"—— 极具迷惑性，因为它**看起来像逻辑 bug 而不是颜色 bug**。
+本项目所有 fill 颜色自此统一写满 8 位（`0xFF5DCAA5`），并在调色板常量上写了注释防回归。
+
+> 顺带解释一个历史悬案：第一轮的火花线用的也是 6 位色（`0x9BE1CB`），
+> 所以**火花线从来没被看见过**——只是当时验收项没盯着它看，漏了五轮。
 
 ---
 
@@ -701,6 +754,11 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
    真出现"一个槽位里轮换了十几种物品"的场景时，需要给图例加翻页。
 7. **时间轴对齐参考**：目前所有系列的横轴都是绝对 tick。
    若以后支持"多探针对比"，可能需要"以某个事件为 0 点"的相对时间轴。
+8. **模组机器的下标映射**：CP9 之二的 capability 路径沿用菜单槽的 `getContainerSlot()`
+   当作 handler 下标。对 NeoForge 的 `SlotItemHandler` 严格成立；自写槽位类的模组
+   （如 Mekanism）未覆写时也成立，但"构造下标是否等于机器总表下标"要逐模组确认。
+   若实测某台机器某槽跟踪的不是那一格：在 `WorldProbe` 加该模组的下标适配
+   （按 `BlockEntity` 类型分流），不要动通用路径。
 
 ---
 
@@ -769,6 +827,11 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 | **`Slot.x` / `Slot.y` / `isActive()` / `isHighlightable()`** | 全是 public | ★ CP8 之二；命中判定与 vanilla 一致 |
 | **`EffectRenderingInventoryScreen`** | `InventoryScreen` 与 `CreativeModeInventoryScreen` 的共同基类 | ★ 排除"玩家自己的背包" |
 | `Player.displayClientMessage(Component, boolean)` | public | 动作栏状态提示 |
+| **`Capabilities.ItemHandler.BLOCK`** | `BlockCapability<IItemHandler, @Nullable Direction>`（`net.neoforged.neoforge.capabilities`） | ★ CP9 之二，模组机器的世界侧读取 |
+| **`Level.getCapability(BlockCapability, BlockPos, @Nullable Direction)`** | `ILevelExtension` 的 default 方法（Level 实现了它）；`side=null` = 内部视角 | ★ CP9 之二。命中 NeoForge 能力缓存，每 tick 多次查询成本可忽略 |
+| **`IItemHandler.getSlots()` / `getStackInSlot(int)`** | interface 方法（`net.neoforged.neoforge.items`） | ★ CP9 之二 |
+| **`Slot.getContainerSlot()`** | 返回 `this.slot`（构造时传入的下标）；**`SlotItemHandler` 把 handler 下标传给 super** → 对它而言 `getContainerSlot()` 就是 handler 的槽位下标 | ★ CP9 之二的下标依据 |
+| **`Font.adjustColor`** | `private static`；alpha 位 == 0 时补 `0xFF` —— **只有文字有这个兜底，`fill` 没有** | ★ CP11 的 fill alpha 坑 |
 | `Dist` | `net.neoforged.api.distmarker.Dist` | 客户端专用声明 |
 
 ### 4.3 第三方模组 API（反射调用，零编译依赖）
@@ -846,5 +909,7 @@ dev-check/
 | **支持别的搜索类模组**（REI / EMI） | `bind/TextInputGuard` 里加一个小探针 | 照 `JeiSearchProbe` 抄；先用 `javap -p -cp run/mods/<mod>.jar` 查它的 API |
 | 让容器的键盘操作也能用 | `ui/ScopeScreen` 补 `hoveredSlot` | 见第三节「待决问题 4」 |
 | 兼容自绘界面的模组 | `collect/` 下新建 accessor | 需要面向接口重构 `ContainerAccess` |
+| **某模组机器的下标对不上**（capability 路径） | `WorldProbe#readNow` 按 `BlockEntity` 类型加分流 | 见待决问题 8；通用路径保持"Container → capability"不动 |
+| **支持更多模组的搜索框** | 已有，见 `bind/TextInputGuard` | — |
 | **图例可滚动 / 可折叠** | `ui/ScopeScreen` 的 `capRows` / `renderLegend` | 见第三节「待决问题 6」 |
 | **给纯逻辑层加更多断言** | `dev-check/` 下新建 `Test*.java` | 前提是那一层不 import 游戏类。跑法见 `VERIFY.md` H 组 |

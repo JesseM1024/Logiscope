@@ -31,7 +31,7 @@
   "logiscope.tool.clear_sel": "Clear sel",
 
   "logiscope.chart.too_small": "Panel too small - drag bottom-right corner",
-  "logiscope.chart.no_data_in_window": "no data in this range",
+  "logiscope.chart.no_data_in_window": "no data in this range - try Fit all",
   "logiscope.chart.all_hidden": "all series hidden by the legend",
 
   "logiscope.flash.attached": "Probe attached",
