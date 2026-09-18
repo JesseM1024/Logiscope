@@ -1,5 +1,7 @@
 package com.jessetech.logiscope.store;
 
+import org.jetbrains.annotations.Nullable;
+
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -63,6 +65,37 @@ public final class SampleStore {
             return null;
         }
         return buf[(head - 1 + buf.length) % buf.length];
+    }
+
+    /**
+     * 时间轴最后一格里写下的**数据**样本（面板上那行 `now` 用它）。
+     *
+     * 为什么不是"最后一条样本"：一个世界 tick 可能写好几条（多格监控时每个物品一条，
+     * 见 {@code analysis/Aggregator}），而最后一条也可能是标记（`no_data` / `gap`）——
+     * 那种情况返回 null（这一刻没有数据），不要拿上一格的值冒充。
+     *
+     * 往回扫到 tick 变化为止：一个 tick 的条目数 = 被监控的物品种数，很小。
+     */
+    @Nullable
+    public synchronized List<Sample> latestTick() {
+        if (size == 0) {
+            return null;
+        }
+        Sample last = buf[Math.floorMod(head - 1, buf.length)];
+        if (last == null || last.isMarker()) {
+            return null;
+        }
+        long tick = last.tick();
+        List<Sample> out = new ArrayList<>(4);
+        for (int i = 0; i < size; i++) {
+            Sample s = buf[Math.floorMod(head - 1 - i, buf.length)];
+            if (s == null || s.isMarker() || s.tick() != tick) {
+                break;
+            }
+            out.add(s);
+        }
+        java.util.Collections.reverse(out);
+        return out;
     }
 
     /**

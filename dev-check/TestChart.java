@@ -32,6 +32,7 @@ import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.store.Sample;
+import com.jessetech.logiscope.store.SampleStore;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -58,6 +59,7 @@ public class TestChart {
         t15BreakOnGapMarker();
         t16MarkersAreTransparentToStats();
         t17SeriesDropoutInMultiSlot();
+        t18LatestTick();
         System.out.println();
         if (failed == 0) {
             System.out.println("全部通过");
@@ -470,6 +472,38 @@ public class TestChart {
         yes("铜首点断（契约）", copper.points().get(0).breakBefore());
         no("铜第 2 点连着", copper.points().get(1).breakBefore());
         yes("铜消失两 tick 后回来 → 必须断开", copper.points().get(2).breakBefore());
+    }
+
+    // 18) 面板读数用的"时间轴最后一格"（SampleStore#latestTick）
+    private static void t18LatestTick() {
+        SampleStore st = new SampleStore(8);
+        yes("空 store → null", st.latestTick() == null);
+
+        st.add(new Sample(1, "minecraft:iron_ingot", 10));
+        st.add(new Sample(2, "minecraft:iron_ingot", 11));
+        st.add(new Sample(2, "minecraft:copper_ingot", 5));
+        List<Sample> two = st.latestTick();
+        eq("最后一格两条（一个 tick 一个物品一条）", 2, two.size());
+        eq("第一条 = 写入顺序", "minecraft:iron_ingot", two.get(0).itemId());
+        eq("第二条 = 写入顺序", "minecraft:copper_ingot", two.get(1).itemId());
+
+        // 标记不是数据：这一刻没有值，不能拿上一格的值冒充
+        st.add(Sample.gap(3));
+        yes("最后一格是 gap → null", st.latestTick() == null);
+        st.add(Sample.noData(4));
+        yes("最后一格是 no_data → null", st.latestTick() == null);
+        st.add(new Sample(5, "minecraft:stone", 7));
+        eq("标记之后重新有数据", 1, st.latestTick().size());
+        eq("内容正确", "minecraft:stone", st.latestTick().get(0).itemId());
+
+        // 环形覆盖之后仍然只认"最新的那一格"
+        SampleStore small = new SampleStore(3);
+        small.add(new Sample(1, "minecraft:iron_ingot", 1));
+        small.add(new Sample(2, "minecraft:iron_ingot", 2));
+        small.add(new Sample(3, "minecraft:iron_ingot", 3));
+        small.add(new Sample(4, "minecraft:iron_ingot", 4));
+        eq("覆盖后只剩最新一条", 1, small.latestTick().size());
+        eq("覆盖后是新值", 4, small.latestTick().get(0).count());
     }
 
     // ---- 断言 ----

@@ -19,12 +19,12 @@
 │         bind/ProbeTarget       探针目标（一组槽位 + 持久身份）    │
 │         bind/ProbeContext      ★ 当前可探测的容器（界面 / 准星）  │
 ├───────────────────────────────────────────────────────────────┤
-│ 采集层  collect/ContainerAccess  读菜单槽位（★ 界面开着时的数据源）│
-│         collect/WorldProbe       读方块实体（★ 界面关了时的数据源）│
+│ 采集层  collect/ContainerAccess  读菜单槽位（回退路径的数据源）    │
+│         collect/WorldProbe       读方块实体 + 下标映射验证（★ 主数据源）│
 │         collect/ProbeSlots       无 GUI 容器的槽位清单（问服务端） │
-│         collect/ServerClock      ★ 两只全局时钟                 │
+│         collect/ServerClock      全局权威世界 tick（状态机用）     │
 │         collect/ProbeInstance    ★ 一个探针：状态机 + 每 tick 采样│
-│         collect/ProbeManager     ★ 实例表 / 创建 / 删除 / 驱动    │
+│         collect/ProbeManager     ★ 实例表 / 创建 / 删除 / **两个驱动点**│
 ├───────────────────────────────────────────────────────────────┤
 │ 存储层  store/SampleStore      环形缓冲 + version，唯一真相       │
 │         store/Sample           最小可序列化单元（含 no_data 哨兵）│
@@ -53,13 +53,16 @@
 | C6 | `WorldProbe#readNow` / `ProbeSlots#readNow` **只能在服务端线程跑** | 跨线程读 ServerLevel 是数据竞争 |
 | C7 | `no_data` 样本不进统计（`Analyzer` / `ChartData` 负责过滤，但要让它**占时间轴**） | 断档会被算成"数量掉到 0"，净流量全错；反过来丢掉时间轴会让图上的断档消失 |
 | C8 | **`analysis/` 与 `store/` 不 import 任何 `net.minecraft` / `net.neoforged`** | 一旦引入游戏类，`dev-check/` 的离线断言就跑不了，只能靠进游戏肉眼看 |
-| C9 | 一个探针每 tick 只写**一条**样本（多格先聚合） | 下游（分组 / 波形 / 框选统计）会看到交错的多条序列，时间轴语义崩掉 |
+| C9 | 一个探针每 tick 写**每个出现的物品一条**样本，但**共用同一个 tick 值**（多格先聚合，见 CP16） | 同一 tick 的样本必须是"同一格时间"；跨 tick 交错会让时间轴语义崩掉 |
+| C10 | 采样只允许发生在两个驱动点上：**客户端 tick**（状态机 + 菜单回退）与**服务端 tick**（单人主路径），两者用 `ProbeInstance#sampleLock` 互斥 | 客户端线程与服务端线程同时写缓冲/聚合缓冲会算错数（且症状是"偶尔跳一下"，极难查） |
 
 **一句话总结数据流**：
 
 ```
 按键盘 → KeyBindings →（容器界面开着? ContainerAccess : WorldProbe）
-                     → ProbeManager 驱动每个 ProbeInstance 采样
+                     → ProbeManager 驱动两件事：
+                         · 客户端 tick：跑状态机（界面开没开 / 源还在不在）+ 菜单回退采样
+                         · 服务端 tick：**单人下每世界 tick 读一次真值**（时间戳就是那个 tick）
                      → Aggregator 把多格按物品求和 → SampleStore(version)
                      → ChartData/Analyzer（version 变了才重算）
                      → ChartRenderer 画到 ScopeScreen 上
@@ -206,16 +209,38 @@ private static boolean consumed() { return preCount > postCount; }
 见 **CP8**。一句话：用 `ClientHooks.pushGuiLayer/popGuiLayer`，
 **不要**用 `Minecraft#setScreen` 替换式打开（那会把原界面从屏幕上抹掉）。
 
-### CP4 · 每 tick 采样　风险：低
+### CP4 · 采样：两个驱动点　风险：中 ⚠️
 
-`NeoForge.EVENT_BUS.addListener(ProbeManager::onClientTick)`，事件类型 `ClientTickEvent.Post`。
+★ 第十轮第四次修复把**采样的驱动**从"客户端 tick + 异步读"改成了"**服务端 tick + 同步读**"。
+两个驱动点分工如下（都在游戏总线上）：
 
-- `Post` 在 tick 逻辑之后触发，此时同步数据已更新完毕
-- 事件在**游戏总线**上
-- 同一次 tick 里兼职做三件事：`ContainerAnchor.tick()`（锚点计时）、
-  `ServerClock.tickClient()`（推进两只全局时钟）、
-  然后遍历**所有**探针实例各采样一次
-- `KeyBindings#onClientTick`（无界面时的快捷键）挂在同一个事件上，是另一个监听器
+| 驱动 | 事件 | 线程 | 干什么 |
+|---|---|---|---|
+| 状态机 | `ClientTickEvent.Post` | 渲染线程 | `ContainerAnchor.tick()`（锚点计时）、`ServerClock.tickClient()`（推进权威世界 tick）、遍历所有实例**跑状态机**（界面开没开 / 容器换没换 / 源还在不在 → RECORDING ↔ FOLLOWING ↔ PAUSED）、以及**回退采样**（多人读菜单 / 界面开着但下标没验证出来时读菜单） |
+| 采样（主路径） | `ServerTickEvent.Post` | **服务端线程** | 单人下遍历所有实例，按"维度 + 坐标"**同步读方块实体**，写"这个世界 tick 的真值"（`ProbeInstance#sampleOnServerTick`） |
+
+**为什么采样要挂在服务端 tick 上**（这是本轮的核心决定）：
+
+| | 旧做法：客户端 tick 驱动 + 异步读 | 现在：服务端 tick 驱动 + 同步读 |
+|---|---|---|
+| 采样节拍 | 客户端 20 次/秒，与服务端 tick **不锁相** → 必然偶尔漏观测一格 | **世界 tick 本身** → 一格不缺 |
+| 时间戳 | 异步读回来的 world tick（会跳 0 / 跳 2，见 CP15 之一） | 那一刻的 `ServerLevel#getGameTime()` |
+| 值 | 缓存可能被复用 → 旧值贴新 tick 标签（假平台） | 同步读，就是那一刻的值 |
+| 懒散采样 | 客户端只能观测 20 次/秒 | `/tick rate 200` → **200 条/秒**（世界走几格就记几格） |
+
+**`ServerTickEvent.Post` 的时机**（sources 核实）：它在 `MinecraftServer#tickServer`
+**最后一行**发（`EventHooks.fireServerTickPost`），也就是 `tickChildren`（所有 level 都 tick 完）
+之后 —— 所以读到的是"这一世界 tick 结束时的状态"，与 `gameTime` 严格同拍。
+
+**顺便消失的复杂度**：不再需要异步读取管线（`server.execute` + volatile 缓存 + 新鲜度窗口），
+`WorldProbe` 只剩"下标映射验证 + 一次同步读"。时间戳与取值同源，
+所以"旧值贴新标签"这类问题在结构上就不可能发生了。
+
+**快捷键**（无界面时）挂在同一个 `ClientTickEvent.Post` 上，是另一个监听器（CP2）。
+
+**离线验不了的地方**：`ServerTickEvent` 只在游戏里发得出来。所以这一层的正确性靠
+`dev-check/`（纯逻辑：断点规则 / 聚合 / 标记语义 / `SampleStore#latestTick`）+
+`VERIFY.md` 的实机项（采样密度、每秒样本数）两头夹。
 
 ### CP5 · 数据源失效的检测　风险：中 ⚠️
 
@@ -254,7 +279,7 @@ RECORDING ──界面关了，且用户开了"继续检测"且拿得到坐标�
 | **波形按列聚合** | 采样点远多于像素时不做逐点绘制；每帧复杂度 = O(窗口内采样点数)（CP11） |
 | **二分定位窗口起点** | `lowerBound` 找起点，"全览 30 分钟"时不必从第一个点开始扫（CP11） |
 | **列聚合数组复用** | 按图表宽度分配一次，不为每帧 new（CP11） |
-| 世界侧读值异步化 | `server.execute` 提交任务 + volatile 缓存，不在渲染/客户端线程读服务端对象 |
+| 世界侧读值只在服务端线程做 | 现在是**服务端 tick 里的同步读**：既避开数据竞争，又顺带拿到"一个世界 tick 一条"的采样密度（CP4） |
 | 不引入图表库 | 只用 `GuiGraphics#fill` + `drawString` |
 
 **已修的旧问题**：上一版 `ScopeScreen.render` **每帧**调 `store.toList()` 并
@@ -488,6 +513,12 @@ if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().is
 
 **代价与边界**：接缝处会少 1~2 格观测（异步管道的第一拍）。
 数据两端都是真的，中间的折线是连接而非插值，符合 CP10 的语义。
+
+**第十轮第四次修复：这条接缝本身也消失了。** 采样不再走异步管线，
+而是"世界每走一格就同步读一次"（CP4）—— 关界面 / 开界面完全不改变采样来源，
+所以既没有启动延迟，也没有需要补的洞。上面这一串修补史保留在这里，
+是因为它记录了一个反复出现的判断错误：
+**"我们还没看到" 不是 "我们看不到"，也不该被写成任何一个具体值。**
 
 **这不是把 no_data 藏起来**：`UNAVAILABLE`（区块卸载、方块被拆、多人读不到）
 该记 no_data 还是照记 —— 验证清单里的 N1c 就是在盯这一点。
@@ -861,7 +892,7 @@ selectWindowStart = win[0];
 | 钟 | 用途 | 实现 |
 |---|---|---|
 | **权威世界 tick** `worldGameTime(fallback)` | 样本时间戳、"世界没走 tick 就跳过采样"判定 | 单人：`Sampler#onClientTick` 每 tick 提交一个 `server.execute` 任务，在**服务端线程**读 `ServerLevel#getGameTime()` 缓存进 volatile（权威、随 `/tick rate` 正确伸缩、freeze/ESC 时冻结）；多人/主菜单退回客户端值 |
-| **客户端 tick** `tickClient()` | `WorldProbe` 异步读值的新鲜度（`latest(maxAge)`） | 读值延迟是真实时间量（提交到服务端线程、1~2 个客户端 tick 后回来），与世界流速无关；tick rate 200 时按世界 tick 判新鲜会把刚回来的真值判成超龄 |
+| **客户端 tick**（原 `ServerClock.clientTick()`） | 曾经用来判"异步读值的新鲜度" | 那条管线在第十轮第四次修复里被删掉了（采样改挂服务端 tick），所以这个计数器也一起删了 —— 现在 `ServerClock` 只提供权威世界 tick |
 
 **仍然存在、且记录在案的物理极限**：客户端每秒最多观测 20 次 —— tick rate 200 时
 世界每客户端 tick 走 ~10t，中间 9 个状态**不可观测**，样本间隔 ~10t 是采集端的
@@ -870,26 +901,36 @@ selectWindowStart = win[0];
 **多人限制（不变）**：没有集成服务端就没有权威时钟，退回客户端阶梯值 ——
 而多人下 FOLLOWING 本来就不可用，RECORDING（界面开着）受影响有限。
 
-#### CP15 之一：权威时钟带来的"观测抖动"（第十轮第三次修复）
+#### CP15 之一：观测抖动 → 最终解是"把采样点搬到世界 tick 上"
 
-换成服务端权威 gameTime 之后，**样本时间戳不再是"每 tick 恰好 +1"**：
+第八轮把样本时间戳换成**服务端权威 gameTime** 之后，客户端看到的 tick 序列
+不再是"每 tick 恰好 +1"：
 
 ```
-客户端 tick  N    N+1   N+2   N+3   N+4 ...
-观测到的世界 tick 100   101   101   103   104 ...     ← +0 与 +2 都会出现
-实际写入的样本    100   101    -    103   104 ...     ← +0 那格按设计跳过（没新信息）
+客户端 tick   N    N+1   N+2   N+3   N+4 ...
+看到的世界 tick 100  101   101   103   104 ...      ← +0 与 +2 都会出现
 ```
 
-- **+0** 是设计：世界这一 tick 没走（`/tick rate` 调慢、卡顿），跳过不记重复样本（N12 的修法）。
-- **+2** 是物理：客户端这一 tick 与上一次采样之间，服务端走了两个 tick ——
-  **中间那一格客户端根本没机会观测**。tick rate 20 时它由帧抖动触发，
-  tick rate > 20 时它是常态（200 时样本天然每 ~10t 一个）。
+- **+0**：世界这一 tick 没走（`/tick rate` 调慢、卡顿），客户端按设计跳过（N12 的修法）。
+- **+2**：客户端这一 tick 与上一 tick 之间服务端走了两格 —— **中间那格客户端根本没机会观测**。
+  本质是"客户端每秒最多观测 20 次，服务端每秒走 20 格（还能更快）"，**两者的节拍不锁相**。
 
-所以**时间轴上的空档是采集方式的固有产物，不是数据缺失**。
-它不该被画成断线 —— 这就是 CP10 改规则的全部理由。
-（`MAX_SILENT_GAP = 20` 是给"停摆但忘了写标记"留的兜底，抖动最多漏一两格，碰不到它。）
+第三轮修复的做法是让画图**容忍**这种空档（断线只认显式标记，见 CP10）。那是必要的
+（观测空档不等于数据断裂），但用户随后提出了更高的要求：**曲线不要跨过空档，
+我要每一格的真实值**。
 
----
+**第四轮修复：把采样点搬到世界 tick 上**（CP4）。客户端看不到中间那格，
+但**服务端自己知道** —— 于是直接在 `ServerTickEvent.Post` 里同步读：
+
+| | 客户端侧看 | 世界 tick 上采 |
+|---|---|---|
+| 每秒次数 | 20（客户端 tick 上限） | = 世界流速（20 / 40 / 200…） |
+| 漏格 | 帧抖动就漏 | 不可能漏（一个 tick 一次） |
+| 时间戳与值的一致性 | 一个是异步读回来的、一个是同步的 → 可能差一格 | 同一时刻同一个线程读出来 |
+
+`MAX_SILENT_GAP`（CP10 的兜底）因此降级成纯粹的防御措施：正常路径下时间轴是**密的**。
+（回退路径 —— 多人 / 界面开着但下标没验证 —— 仍然可能有观测空档，
+断线规则照旧兜着。）
 
 ### CP16 · 探针实例化 + 多格聚合（第十轮）　风险：中 ⚠️
 
@@ -976,7 +1017,8 @@ selectWindowStart = win[0];
 
 可视化选格依赖"菜单槽在屏幕上的位置"，而菜单只在界面开着时存在。
 无 GUI 的设备连"有几格、每格装着什么"客户端都不知道，只能由服务端线程读出来
-（`Container` 或 `ItemHandler` 能力），再异步交回客户端。
+（`Container` 或 `ItemHandler` 能力），再交回客户端
+（`server.execute` 提交、结果写进 volatile —— 这是一次性的配置动作，不是每 tick 的采样）。
 
 `ProbeSlots` 用静态单例是**故意**的：同一时刻只可能有一个"正在配置的探针"
 （面板是单例界面）。这与 `WorldProbe` 必须每实例一份正好相反。
@@ -1101,12 +1143,13 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 | 绘图 | 手写 `fill`/`drawString` | 引入图表库 | 避免依赖地狱，NeoForge 生态的渲染库版本极易打架 |
 | 采样时机 | `ClientTickEvent.Post` | `RenderTickEvent` | tick 是 20Hz 恒定，render 帧率会飘，时间轴对不齐 |
 | 断线的判据 | **只认显式标记**（`no_data` / `gap` / 相邻 tick 缺席） | 数 tick 间隔（间隔 > 1 就断） | 时间戳换成服务端权威值之后，"间隔 2"经常只是观测抖动，数间隔会把 20t 下的偶发漏观测剪成断线，也会让 `/tick rate 200` 的每个点都变成孤立点（CP10） |
-| 异步读值复用时 | 带 `seq` 去重，**同一个观测只写一次**；没拿到新观测就空着 | 每 tick 把缓存里的值写成新样本 | 后者给旧值贴新 tick 标签，曲线上会出现 1 tick 的假平台（第十轮实测反馈，见 CP9） |
+| 采样驱动 | **服务端 tick**（单人主路径）：世界走一格记一格 | 客户端 tick + 异步读 | 客户端每秒最多观测 20 次、服务端每秒走 20 格（还能更快），**节拍不锁相** → 必然偶尔漏观测一格 → 曲线要"跨过去"；异步读值还会把缓存里的旧值贴上新 tick 标签（假平台）。挂到世界 tick 上两者一起解决（CP4） |
+| 采样来源的选择 | 按"哪条路更准"：单人+有坐标走服务端；**界面开着但下标没验证出来时走菜单** | 一律走服务端 / 一律走菜单 | 一律走服务端会在模组机器上读错格子（MEK 下标硬编码 0）；一律走菜单又会漏格、且关界面后就没法读（CP9） |
 | 关界面/暂停的过渡 tick | **什么都不写**（没观测就是没观测） | 用上一次的已知值垫一格 | 垫值同样制造 1t 平台；而"缺一格"在新断线规则下看不出来，所以没必要造假（CP9 之一） |
 | 暂停在时间轴上的表示 | 写一条 `gap` 标记（统计透明、画图断开） | 什么都不写 / 也记 `no_data` | 什么都不写则恢复后曲线会被连起来；记 `no_data` 会污染"读失败"的计数（`Sample`） |
 | 纵轴刻度写法 | 只有纵轴用科学计数法，且**步长顶到相邻标签不重复** | 一律短格式 / 一律精确整数 | 8 位整数画到 GUI 外面；而 2 位小数的短格式会把 `1786000` 与 `1786500` 印成同一个 `1.79E6`（第十轮实测） |
 | 读数（框选 / 十字线 / 面板数字） | **精确整数** | 沿用短格式 | 用户要求：只有纵轴可以用科学计数法 —— 物流工具报"1.79E6"没有意义 |
-| 世界侧读值 | `server.execute` 异步 | 客户端线程直读 | 后者是数据竞争，不值得留隐患 |
+| 世界侧读值 | 在**服务端 tick 里同步读** | `server.execute` 异步 / 客户端线程直读 | 客户端直读是数据竞争；异步读又带来延迟与缓存复用（假平台、假空档）。既然要"每世界 tick 一条真值"，采样点干脆就放在服务端 tick 上（CP4） |
 | 面板位置 | 静态字段记住，默认右上角 | 每次居中 | 容器界面居中，默认放右上角天然"不遮挡"；且拖动结果跨开关保持 |
 | 面板外的鼠标 | **转发**给背景容器（CP8 之一） | 不响应 | 面板只占一块，其余区域本来就该能用；也是以后框选待测区间的基础 |
 | 格子 hover 高亮 | **自己补画**（CP8 之二） | 接受没有高亮 | 全是公开 API，十几行就能拿回视觉反馈 |
@@ -1121,7 +1164,8 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 | 建立选区 | **自动冻结**视图 | 继续实时滚动 | 不冻结的话刚框住那段几秒后跑出屏幕，选择就没意义了（CP12） |
 | 面板尺寸 | 右下角可缩放 + 静态字段记住 | 固定尺寸 | 波形要放坐标轴/图例/框选，固定 272×190 画不下；尺寸也是使用偏好（CP12） |
 | 关界面接缝 | **什么都不写**（那一 tick 确实没观测到） | 用 `lastKnown` / `seed` 垫一格 | 垫值能消掉假 no_data，但会造出 1 tick 假平台（读数上看得出）；而"缺一格"在新断线规则下看不见，所以赊账不如不赊（CP9 之一、CP10） |
-| 采样时钟 | 服务端线程读权威 `gameTime`，客户端 tick 只管新鲜度 | 客户端 `Level#getGameTime()` 直接用 | 客户端 gameTime 是错拍阶梯（本地 +1 / 服务端 20t 纠正一次），tick rate ≠ 20 时采样节奏与数值全错（CP15） |
+| 采样时钟 | **世界 tick 本身**（服务端 tick 事件里的 `ServerLevel#getGameTime()`） | 客户端 `Level#getGameTime()` / 异步读回来的权威值 | 客户端 gameTime 是错拍阶梯（本地 +1 / 服务端 20t 纠正一次），tick rate ≠ 20 时节奏与数值全错；异步读回来的值虽然权威，但它是"上一次观测"，要贴到哪个 tick 上永远差一格（CP15 / CP15 之一） |
+| 时间轴的"秒"标签 | 按**真实 tick 速率**换算（`Level#tickRateManager().tickrate()`） | 固定按 20 tick/s 换算 | `/tick rate 200` 下 1 秒会被标成 10 秒。客户端能从 `ClientboundTickingStatePacket` 同步到的 tick 速率拿到真值（21.1.209 核实） |
 | 多探针 | **所有实例同时采样**，界面只切换查看对象 | 只跑"当前在看的那一个" | 语义是"正在运行的探针"，切回来应该看到离开那段时间的数据（CP16） |
 | `WorldProbe` 的归属 | **每实例一份** | 静态单例共享 | 共享读值缓存会让两个探针互相覆盖读数，且症状是"数据偶尔跳一下"，极难查（CP16） |
 | 全局时钟 | 抽成 `ServerClock`，不放在实例里 | 跟着 `WorldProbe` 走 | 删掉一个实例不该清掉全世界的时间（CP16） |
@@ -1143,9 +1187,10 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 | 面板打开时按 `E`（背包键）没反应 | `Screen#keyPressed` 不处理背包键，只有 `AbstractContainerScreen` 处理 | 同上，收起面板即可 |
 | 被压住的容器界面**不 tick** | 只有 `minecraft.screen` 才会被 `Screen#tick` | 少数依赖 tick 的自绘界面可能显示不动 |
 | 面板内的点击不会穿透到容器 | 这是刻意的，否则一次点击会同时触发两边 | 无 |
-| **多探针**（第十轮已支持，上限 16 个） | 每实例一份半小时缓冲 + 每 tick 一次世界侧异步读取 | 数量很大时（十几个）会有可观的内存与查询开销；`MAX_PROBES` 就是为此设的 |
+| **多探针**（第十轮已支持，上限 16 个） | 每实例一份半小时缓冲 + 每世界 tick 一次方块实体读取 | 数量很大时（十几个）会有可观的内存与查询开销；`MAX_PROBES` 就是为此设的 |
 | 环形缓冲容量按**样本条数**算 | 多格多物品时一个世界 tick 要占好几条 | 监控 3 格、里面有 3 种物品时，36000 条只覆盖约 10 分钟而不是半小时（CP16） |
-| 20t 下偶尔会**漏观测一格** | 客户端每秒最多观测 20 次、服务端也每秒 20 tick，两者不锁相（CP15 之一） | 那一格在时间轴上留空，折线跨过去 —— 不再是断线，也不再出现假平台 |
+| **主路径不再漏格**；回退路径仍可能漏 | 主路径挂在世界 tick 上（CP4）；回退路径（多人 / 界面开着但下标没验证）只能按客户端 tick 观测 | 回退路径漏掉的那一格在时间轴上留空、折线跨过去（不是断线，见 CP10） |
+| 高流速下缓冲覆盖的时间变短 | 容量按**样本条数**算（36000），`/tick rate 200` 时 200 条/秒 | 20 t/s 覆盖 30 分钟；200 t/s 只覆盖 3 分钟。要更久就得加大容量（内存线性增长） |
 | `/tick rate > 20` 时样本天然稀疏（200 时约每 10t 一个点） | 观测端的物理极限 | 累计值与 n/t 速率仍正确；曲线是连的（CP10） |
 | 纵轴刻度可能变稀疏（相邻标签重复时自动加大步长） | 科学计数法只有 3 位小数，窗口很窄时解不出更多有效数字 | 宁可刻度稀疏也不要一排看不懂的数字；精确值看光标读数（CP11） |
 | 精确整数让面板文字变长 | 用户要求读数给准确值 | `now` / `min-max-avg` 行在窄面板里会被裁断（不会压到右边） |
@@ -1264,6 +1309,10 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 | **`Slot#container` / `Slot#index` / `Slot#isFake()`** | 全是 **public**（`container` 是 `public final Container`，`index` 是 `public int`） | ★ CP1 排除玩家背包（`slot.container == player.getInventory()`）、CP17 用 `Slot#index` 当菜单槽下标 |
 | **`Player#getInventory()`** | `public Inventory getInventory()` | ★ CP1 |
 | **`Level#getBlockEntity(BlockPos)` / `Level#isLoaded(BlockPos)`** | public | CP17 判"是不是方块实体"；CP9 判"区块还在不在" |
+| **`ServerTickEvent.Post`** | `net.neoforged.neoforge.event.tick.ServerTickEvent.Post`；`getServer()` 拿 `MinecraftServer` | ★ CP4 的采样点。sources 核实：它在 `MinecraftServer#tickServer` 的**最后一行**发（`EventHooks.fireServerTickPost`），即 `tickChildren` 之后 —— 读到的是"这一世界 tick 结束时的状态"。集成服务端与客户端同进程，纯客户端模组也能收到 |
+| **`ServerLevel#getGameTime()`** | public，转发给 `levelData.getGameTime()` | ★ CP4 的样本时间戳。`ServerLevel#tickTime()` 每个服务端 tick 给它 **+1**（`tickTime` 标志为真时）→ `/tick rate 200` 就是 200/秒 |
+| **ESC 暂停 / 单人暂停时** | `IntegratedServer#tickServer` 里 `if (paused) tickPaused()` 且**不调** `super.tickServer()` | 暂停期间**不发** `ServerTickEvent`、`gameTime` 也不走 → 采样自然停住，且时间轴不留假空档（CP4） |
+| **客户端能否知道 tick 速率** | `Level#tickRateManager()` → `TickRateManager#tickrate()`；服务端通过 `ClientboundTickingStatePacket(tickRate, isFrozen)` 同步 | CP11 时间轴"秒"标签按真实速率换算的依据（21.1.209 核实） |
 | **`BlockState#useWithoutItem(Level, Player, BlockHitResult)`** | **public**（`BlockStateBase` 把 `BlockBehaviour` 的 protected 五参重载包成了这个三参版本），返回 `InteractionResult` | ★ CP17 判"这个方块右键会不会开界面"的**主判据**。容器方块为了做客户端预测必须在客户端返回 `SUCCESS`，所以在客户端直接调它是纯查询（不发包） |
 | **`InteractionResult#consumesAction()`** | public；`SUCCESS` / `CONSUME` 为真 | ★ CP17：`hasGui = result.consumesAction()` |
 | **容器方块的客户端预测返回值** | 原版箱子/熔炉/木桶：`if (level.isClientSide()) return SUCCESS`；精妙存储 `ChestBlock`：javap 核实同样返回 `SUCCESS`；Mekanism `BlockTile`：按 `HasGui` 属性返回 `SUCCESS` / `PASS` | ★ CP17 的实测依据（都是 sources / javap 真读出来的） |
@@ -1306,9 +1355,9 @@ src/main/java/com/jessetech/logiscope/
 │  └─ ProbeContext.java       绑定层：当前可探测的容器（容器界面 / 准星）（CP17）
 ├─ collect/
 │  ├─ ContainerAccess.java    采集层：读菜单槽位（★ CP1，项目基石）
-│  ├─ WorldProbe.java         采集层：读方块实体，服务端线程执行；读结果带身份与状态（★ CP9）——**每实例一份**
+│  ├─ WorldProbe.java         采集层：同步读方块实体 + 下标映射验证（★ CP9）——**每实例一份**
 │  ├─ ProbeSlots.java         采集层：无 GUI 容器的槽位清单（CP16）
-│  ├─ ServerClock.java        采集层：两只**全局**时钟（CP15）
+│  ├─ ServerClock.java        采集层：全局权威世界 tick（状态机 / 回退路径用，CP15）
 │  ├─ ProbeInstance.java      采集层：一个探针的状态机 + 每 tick 采样 + 多格聚合（CP4/CP5/CP9/CP16）
 │  └─ ProbeManager.java       采集层：实例表 / 创建 / 删除 / 每 tick 驱动（CP16）
 ├─ store/

@@ -20,76 +20,34 @@ import java.util.Arrays;
 import java.util.List;
 
 /**
- * 采集层：界面关掉之后，从「方块实体」继续取值的通道。
+ * 采集层：从「方块实体」读真值的通道（界面关掉之后继续跟踪的唯一依靠）。
  *
- * ★ 第九轮：从"全局单例"改成"每个探针实例一份" ★
- *   多探针并存之后，读值缓存、待处理标志、下标验证结果都必须是**每实例独立**的
- *   （否则两个探针会互相覆盖对方的读数）。但"现在世界走到第几 tick"是全世界唯一的，
- *   已经抽到 {@link ServerClock}。所以本类现在只剩实例状态，时钟从 ServerClock 取。
+ * ★ 第十轮第四次修复：这里**不再有异步管道** ★
+ *   以前的做法是"客户端 tick 提交任务到服务端线程、结果丢进 volatile 缓存、
+ *   下一 tick 取用"。它能工作，但有两笔账：
+ *     · 缓存会被复用（`maxAge` 允许），复用时贴上新 tick 标签 → 曲线上假的 1t 平台；
+ *     · 客户端的观测节拍（20/s）与服务端的 tick 节拍（20/s 或更高）不锁相 →
+ *     时间戳偶尔跳 2（少观测一格）→ 旧断线规则把它剪成断线。
+ *   现在改成**由服务端 tick 事件驱动、在服务端线程同步读**（见
+ *   {@code ProbeInstance#sampleOnServerTick}）：一个世界 tick 读一次、读到的就是
+ *   那一刻的真值、时间戳就是那个世界 tick —— 既没有延迟也没有缓存复用，
+ *   顺便把"每 tick 一条"从"尽量"变成了"必然"（`/tick rate 200` 就是 200 条/秒）。
+ *
+ *   本类因此只剩下两件事：
+ *     1. **下标映射验证**（模组机器的菜单槽下标不可信，见下）
+ *     2. **一次同步读取**（{@link #readOnServer}，只能在服务端线程调）
  *
  * ★ 为什么只能单人用 ★
- * 多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
- * 根本不在客户端 —— 容器内容只会通过菜单包同步，界面一关就没了。
- * 所以多人下这里永远拿不到值，调用方会退化成记录 no_data（这是设计，不是 bug）。
- *
- * ★ 为什么要绕到集成服务端 ★
- * 单人存档里 ServeLevel 才是真正持有容器内容的地方。
- *
- * ★ 为什么用 server.execute 而不是直接读 ★
- * ServerLevel / 方块实体属于服务端 tick 线程，客户端线程直接读是数据竞争
- * （虽然实践中大多是原子的，但没必要留这种隐患）。
- * 把读取任务提交到服务端线程，结果丢进一个 volatile 缓存，
- * 客户端下一 tick 取用 —— 最多差 1 tick，对一个观测工具完全够。
- *
- * ★ 管道有延迟，所以"取回来的值"必须带身份（见 {@link Read}）★
- *   服务端的任务队列是在**服务端 tick** 上排空的，客户端的请求却是按**客户端 tick**
- *   发的，两者不锁相。于是偶尔会出现"这一 tick 还没有新结果"，
- *   此时缓存里躺着的是上一次的观测。**把它当成本 tick 的新值写下去就是造假**：
- *   曲线会出现一个 1 tick 的平台（同一个值贴了两个 tick 标签）。
- *   所以 {@link #read} 会把这次观测的身份一并交出去，由调用方去重。
+ *   多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
+ *   根本不在客户端 —— 容器内容只会通过菜单包同步，界面一关就没了。
+ *   所以多人下调用方会退化成记录 no_data（这是设计，不是 bug）。
  */
 public final class WorldProbe {
-
-    /** 缓存结果 + 它是哪一客户端 tick 提交的，用来判断新鲜度 */
-    private record Snapshot(List<ContainerAccess.SlotView> views, long atClientTick) {
-    }
-
-    /**
-     * 一次世界侧读取的**结论**（第十轮第三次修复新增）。
-     *
-     * | 状态 | 含义 | 调用方该做什么 |
-     * |---|---|---|
-     * | {@link Status#OK} | 读到了内容 | 写样本 —— **但同一个 {@code seq} 只写一次**（见下） |
-     * | {@link Status#UNAVAILABLE} | 读了，但这台机器现在读不到（区块卸载 / 方块没了 / 多人） | 记一条 `no_data` |
-     * | {@link Status#NOT_READY} | 还没有任何一次读取完成，或结果太旧 | **这一 tick 什么都不记** —— 我们确实没观测到，但这不是"读失败" |
-     *
-     * ★ 为什么要带 {@code seq}（同一个观测不能写两遍）★
-     *   值是从服务端线程异步取回来的，`maxAge` 允许它在缓存里多待几个客户端 tick。
-     *   如果每个 tick 都把这个缓存原样写成新样本，就会出现"**同一个观测值贴两个不同的
-     *   tick 标签**"—— 曲线上表现为一个 1 tick 的平台（实测反馈："断线后还有一个 t 的
-     *   曲线平台"），而那个平台对应的那个 tick 我们其实什么都没看到。
-     *   带上门牌号（= 提交读取时的客户端 tick，每一次请求都不同）之后，
-     *   调用方对同一个观测只会写一次；没拿到新观测的 tick 就空着。
-     *
-     * @param views  读到的槽位快照（与 target.slots() 同序）；仅 OK 时非 null
-     * @param seq    这次观测的身份（提交读取的客户端 tick）
-     * @param status 见上表
-     */
-    public record Read(@Nullable List<ContainerAccess.SlotView> views, long seq, Status status) {
-
-        public enum Status {
-            OK, UNAVAILABLE, NOT_READY
-        }
-
-        public static final Read NOT_READY = new Read(null, -1L, Status.NOT_READY);
-    }
 
     /** 下标验证结果：与 {@code target.slots()} **同序**的容器内下标；-1 = 这一格没验证出来 */
     private record Mapping(ProbeTarget target, int[] indexes, MappingStatus status) {
     }
 
-    private volatile Snapshot cached;
-    private volatile boolean pending;
     private volatile Mapping mapping;
 
     // ==================================================================
@@ -117,73 +75,9 @@ public final class WorldProbe {
         UNAVAILABLE
     }
 
-    /** 丢掉全部状态（读值缓存 + 下标验证）。重新配置 / 销毁探针时调用。 */
+    /** 丢掉全部状态（下标验证 + 目标）。重新配置 / 销毁探针时调用。 */
     public void reset() {
-        cached = null;
-        pending = false;
         mapping = null;
-    }
-
-    /**
-     * 只丢读值缓存，**保留下标验证**。
-     * 关界面转 FOLLOWING 时用：验证是挂探头时做的（GUI 开着才能做），
-     * 之后每次开关界面都不能丢 —— 否则模组机器关界面后立刻退化回不可信下标。
-     */
-    public void resetReadCache() {
-        cached = null;
-        pending = false;
-    }
-
-    /**
-     * 请求一次世界侧读取。**每客户端 tick 调一次即可**，不要在同一 tick 里反复调。
-     * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
-     */
-    public void request(@Nullable ProbeTarget target) {
-        if (target == null || !target.hasPersistentId() || target.slots().isEmpty() || pending) {
-            return;
-        }
-        Minecraft mc = Minecraft.getInstance();
-        if (!mc.isLocalServer()) {
-            return;
-        }
-        IntegratedServer server = mc.getSingleplayerServer();
-        if (server == null) {
-            return;
-        }
-
-        pending = true;
-        long atClient = ServerClock.clientTick();
-        try {
-            server.execute(() -> {
-                List<ContainerAccess.SlotView> views = readNow(server, target);
-                cached = new Snapshot(views, atClient);
-                pending = false;
-            });
-        } catch (Throwable t) {
-            // 服务器正在关闭时会拒绝任务。忽略即可，下一 tick 会重试。
-            pending = false;
-        }
-    }
-
-    /**
-     * 取最近一次读取的结论（与 {@code target.slots()} 同序的内容在 {@link Read#views()}）。
-     *
-     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄一律当
-     *                          {@link Read.Status#NOT_READY}（这一 tick 不记样本），
-     *                          避免服务端卡顿时把好几 tick 之前的旧值当成新值写进时间序列。
-     */
-    public Read read(int maxAgeClientTicks) {
-        Snapshot snap = cached;
-        if (snap == null) {
-            return Read.NOT_READY;
-        }
-        if ((ServerClock.clientTick() - snap.atClientTick()) > maxAgeClientTicks) {
-            return Read.NOT_READY;
-        }
-        if (snap.views() == null) {
-            return new Read(null, snap.atClientTick(), Read.Status.UNAVAILABLE);
-        }
-        return new Read(snap.views(), snap.atClientTick(), Read.Status.OK);
     }
 
     /**
@@ -312,7 +206,7 @@ public final class WorldProbe {
         return m != null && m.target() == target ? m.status() : MappingStatus.PENDING;
     }
 
-    /** readNow 用的"真下标"：验证过的优先，否则退回该格自己的 containerSlotIndex */
+    /** readOnServer 用的"真下标"：验证过的优先，否则退回该格自己的 containerSlotIndex */
     private int effectiveIndex(ProbeTarget target, int i) {
         Mapping m = mapping;
         if (m != null && m.target() == target && m.indexes() != null && i < m.indexes().length) {
@@ -329,7 +223,7 @@ public final class WorldProbe {
     // ==================================================================
 
     /**
-     * ★ 必须在服务端线程执行 ★
+     * ★ 只能在**服务端线程**执行（由服务端 tick 事件驱动）★
      *
      * 返回与 {@code target.slots()} **同序**的快照；只要有一格读不到就整体返回 null。
      *
@@ -337,12 +231,13 @@ public final class WorldProbe {
      *   聚合值是"所有格子的和"。少读一格 → 和偏小 → 图上的总存量/总吞吐静默偏小，
      *   而这种偏小在波形上完全看不出来（它看起来和正常的下降一模一样）。
      *   相比之下 no_data 是**看得出来**的断档。两害相权，宁可断档。
-     *   （真读不到时照样记 no_data —— "该断的地方要断"，见 ARCHITECTURE.md CP9。）
      */
     @Nullable
-    private List<ContainerAccess.SlotView> readNow(MinecraftServer server, ProbeTarget target) {
-        ServerLevel level = server.getLevel(target.dimension());
-        if (level == null || !level.isLoaded(target.pos())) {
+    public List<ContainerAccess.SlotView> readOnServer(ServerLevel level, ProbeTarget target) {
+        if (level == null || target == null || !target.hasPersistentId()) {
+            return null;
+        }
+        if (!level.isLoaded(target.pos())) {
             return null;
         }
         BlockEntity be = level.getBlockEntity(target.pos());
@@ -391,7 +286,9 @@ public final class WorldProbe {
      *
      * 先问无方向（null = 内部视角，通常是完整库存）；
      * 问不到再按六个方向逐个试 —— 有些模组只给"面向某一面"的分视图。
-     * 查询命中 NeoForge 的能力缓存，每 tick 七次的成本可以忽略。
+     *
+     * 刻意**每次读取都重新问**（不缓存 IItemHandler）：方块实体可能被换掉，
+     * 而这条查询走 NeoForge 的能力缓存，成本可以忽略。
      */
     @Nullable
     static IItemHandler itemHandler(ServerLevel level, BlockPos pos, @Nullable BlockEntity be) {

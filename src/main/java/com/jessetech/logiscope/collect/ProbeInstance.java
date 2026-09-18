@@ -7,26 +7,21 @@ import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
 import net.minecraft.client.Minecraft;
 import net.minecraft.network.chat.Component;
+import net.minecraft.server.MinecraftServer;
+import net.minecraft.server.level.ServerLevel;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 采集层：**一个探针实例**——整个模组唯一「主动跑」的东西。
  *
- * ★ 第九轮：从"全局唯一"变成"可以并存多个" ★
- *   需求："正在运行的探针是一个列表，用于选择" —— 也就是多个探针**同时**在监测，
- *   界面只负责挑一个来看。于是原来的单例 {@code Sampler} 被拆成：
- *     · 本类：一个实例自己的状态机 + 自己的环形缓冲 + 自己的世界侧读取器
- *     · {@link ProbeManager}：实例表、创建/销毁、每 tick 驱动所有人
- *   注意每个实例都持有**自己的** {@link WorldProbe}（读值缓存与下标验证必须隔离，
- *   否则两个探针会互相覆盖读数），但时钟是全局的（{@link ServerClock}）。
+ * 它会并存多个（"正在运行的探针是一个列表"），所以不变量是：
+ *   · 每个实例持有**自己的**环形缓冲与下标验证（共享会互相覆盖读数）
+ *   · 时钟与用户偏好是全局的（{@link ServerClock} / {@link ProbeManager}）
  *
- * 它刻意不认识任何 UI / 渲染类 —— 界面只是它的一个观察者。
- * 这样分层的好处：采样逻辑可以脱离界面单独验证（例如用日志输出），
- * 界面的崩溃也不会污染数据。
- *
- * 状态机：
+ * 状态机（**由客户端 tick 驱动**——它管的是"界面开没开、源还在不在"这类客户端事实）：
  *
  *   ARMED ──configure()──► RECORDING ◄──────────┐
  *     ▲                       │  ▲               │
@@ -34,10 +29,28 @@ import java.util.List;
  *     │                       │        │
  *     └──clearSlots()─────────┴────────┴──► PAUSED
  *
- * 【三条取值路径】
- *   RECORDING  界面开着 → 直接读菜单（ContainerAccess），这是最准的一条
- *   FOLLOWING  界面关了 → 单人从方块实体读（WorldProbe）；多人读不到，记 no_data
- *   PAUSED     不取值
+ * ★★ 采样时钟 = 世界 tick 本身（第十轮第四次修复）★★
+ *   这一版把采样的驱动**从客户端 tick 搬到了服务端 tick**，根因层面解决
+ *   "跨过去"和"1t 假平台"：
+ *
+ *   | | 旧做法（客户端 tick 驱动 + 异步读） | 现在（服务端 tick 驱动 + 同步读） |
+ *   |---|---|---|
+ *   | 采样节拍 | 客户端 20 次/秒，与服务端 tick **不锁相** | **服务端 tick 本身** |
+ *   | 时间戳 | 异步读回来的 world tick（会跳 0 / 跳 2） | 那一刻 `ServerLevel#getGameTime()`，**一个 tick 一条** |
+ *   | 值 | 缓存里的旧值可能被复用（贴上新 tick 标签 → 假平台） | 同步读，读到的就是这个世界 tick 的值 |
+ *   | `/tick rate 200` | 客户端只能观测 20 次/秒 → 每 ~10 tick 一个点 | **200 条/秒**（服务端 tick 200 次） |
+ *
+ *   落点是 NeoForge 的 `ServerTickEvent.Post`（在 `tickChildren` 之后发，
+ *   读到的就是这一 tick 结束时的状态），由 {@link ProbeManager} 转给
+ *   {@link #sampleOnServerTick}。
+ *
+ * 【两种采样来源，按"哪条路更准"选】
+ *
+ * | 场景 | 来源 | 为什么 |
+ * |---|---|---|
+ * | 单人 + 有坐标 + （下标已验证 或 界面关着） | **服务端 tick**（每 tick 一条真值） | 最准：直接读方块实体 |
+ * | 界面开着、但下标映射没验证出来（模组机器歧义） | 客户端菜单（`ContainerAccess`） | 菜单槽**就是用户点的那一格**；服务端那侧只能靠猜（MEK 的下标硬编码 0） |
+ * | 多人 | 客户端菜单 / 记 `no_data` | 方块实体不在客户端手里 |
  *
  * 【多格监控：一台设备上可以同时监控好几格，记录是聚合的】
  *   每 tick 把各格内容**按物品求和**（规则见 {@link Aggregator}），
@@ -49,29 +62,17 @@ import java.util.List;
  *   | 64 铁 + 32 铜 | 2 条：铁 × 64、铜 × 32（图上两条不同颜色的线） |
  *   | 都是空 | 1 条：air × 0（那条灰蓝的"被抽空了"线） |
  *
- *   于是下游（存储/分组/波形/图例/框选统计）一行都不用改 —— 它看到的仍是一条
- *   扁平时间序列，只是"一个 tick 一段"里可以有好几条不同物品的样本。
- *   唯一的连带修改是断点判定改成 per-series（见 {@code ChartData#build}）。
- *
  * 【PAUSED 的两种来源，行为不同】
  *   manualPause = true   用户按了「暂停」→ 不自动恢复，只能手动继续
  *   manualPause = false  数据源自己失效了 → 一旦数据源回来（重开同一台设备）自动恢复
  *
- * 【时间轴：只在"真的观测到"的时候才写样本】
- *   这是第十轮第三次修复的核心，两个方向都算：
- *   · **不补**：关界面那一 tick、异步读取还没回来的 tick，一律**什么都不写**。
- *     以前这里会写一条"上一 tick 的值"（lastViews 垫值）来续上时间轴，
- *     结果就是曲线上多出一个 1 tick 的平台 —— 那个 tick 我们其实什么都没看到。
- *     现在时间轴留个空档，画图层面按"观测抖动"连线（见 {@code ChartData#build}），
- *     看起来完全一样，但数据里不再有那句谎话。
- *   · **不重复**：世界侧的读值带身份（{@link WorldProbe.Read#seq()}），
- *     同一个观测只写一次；没拿到新观测就不写。
- *   真正读不到（区块卸载 / 多人 / 方块没了）时照样记 `no_data` —— 该断的地方照样断。
- *   记录被暂停时写一条 `gap` 标记，于是恢复之后那段不会被连起来（见 {@link Sample#gap}）。
+ * 【时间轴：只写真的发生过的事】
+ *   · **不补值**：某一 tick 没读到就什么都不写（画图层按观测连续性连线）
+ *   · **不重复**：同一个世界 tick 只写一遍（`advanceTick`）
+ *   · 读不到时写 `no_data`；暂停时写 `gap` 标记（恢复后曲线不会连起来）
  *
- * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12 → 第八轮 N13）】
- *   见 {@link ServerClock} 的类注释：客户端 {@code getGameTime()} 是错拍阶梯，
- *   所以单人存档改用服务端线程读出的权威值；这里只负责"世界没走 tick 就不记重复样本"。
+ * 【线程】：客户端 tick 在渲染线程，服务端 tick 在服务端线程 —— 两条路都会写
+ * `store` 与聚合缓冲，所以用 {@link #sampleLock} 互斥（同一个实例同一时刻只有一条路在写）。
  */
 public final class ProbeInstance {
 
@@ -83,36 +84,34 @@ public final class ProbeInstance {
         PAUSED
     }
 
-    /** 容量 = 20 tick/秒 × 60 秒 × 30 分 = 半小时（每个实例各一份） */
+    /**
+     * 容量 = 20 tick/秒 × 60 秒 × 30 分 = 半小时（每个实例各一份）。
+     *
+     * ⚠️ 它是按**样本条数**算的：`/tick rate 200` 时一个世界 tick 一条，
+     * 30 分钟的历史会缩短到 3 分钟（这是"每 tick 一条真值"的代价，已记录在案）。
+     */
     private static final int CAPACITY = 20 * 60 * 30;
-
-    /** 世界侧读值的最大可容忍延迟（**客户端** tick，≈250ms 真实时间，与世界流速无关）。 */
-    private static final int WORLD_READ_MAX_AGE = 5;
 
     private final int id;
     private final ProbeManager manager;
     private final SampleStore store = new SampleStore(CAPACITY);
     private final WorldProbe probe = new WorldProbe();
 
-    private ProbeTarget target = ProbeTarget.EMPTY;
-    private State state = State.ARMED;
+    /** 采样互斥：客户端线程（菜单路径）与服务端线程（tick 路径）都可能写样本 */
+    private final Object sampleLock = new Object();
+
+    // 这两个字段会被**服务端线程**读（采样时判断该不该采、采哪里），所以 volatile
+    private volatile ProbeTarget target = ProbeTarget.EMPTY;
+    private volatile State state = State.ARMED;
+
+    /** 客户端侧的状态：当前盯的是哪个菜单（界面重开后会换 ID） */
     private int watchedContainerId = -1;
 
     /** 暂停是不是用户主动按的（决定能否自动恢复） */
     private boolean manualPause;
 
-    /**
-     * 上一次**已经写成样本**的世界侧观测的身份（{@link WorldProbe.Read#seq()}）。
-     *
-     * 只为了一件事：**同一个观测不许写两遍**。
-     * 世界侧读取是异步的，管道偶尔会让同一个结果在缓存里多躺一个客户端 tick；
-     * 若照抄不误，曲线上就会出现一个 1 tick 的平台 —— 而那个 tick 我们什么都没看到。
-     * 身份没变 = 没有新观测 → 这一 tick 不写（时间轴留空档）。
-     */
-    private long lastUsedReadSeq = Long.MIN_VALUE;
-
-    /** 上一次采样的世界 tick。世界没走 tick（流速调慢 / 暂停）就不记重复样本 */
-    private long lastSampledGameTime = Long.MIN_VALUE;
+    /** 上一次写样本的世界 tick（两个采样路径共用，保证同一个 tick 不写两遍） */
+    private volatile long lastSampledGameTime = Long.MIN_VALUE;
 
     /** "下标不可信"是否已经警告过。每个探头只警告一次，别跑马灯。 */
     private boolean warnedUnverifiedIndex;
@@ -120,7 +119,7 @@ public final class ProbeInstance {
     /** 上一次给玩家发动作栏提示的 tick，用于去抖 */
     private long lastNotifyTick = Long.MIN_VALUE / 2;
 
-    // 聚合用的复用缓冲（每 tick 调一次，避免每 tick 造 List）：
+    // 聚合用的复用缓冲（在 sampleLock 内使用，避免每 tick 造 List）：
     //   buf* 是**输入**（各格原本的物品与数量）
     //   agg* 是**输出**（按物品分别求和之后的条目：每个出现的物品一条）
     private String[] bufIds = new String[8];
@@ -195,47 +194,53 @@ public final class ProbeInstance {
      *                    只用于在服务端做下标指纹验证（第六轮 M4）。
      */
     public void configure(ProbeTarget newTarget, @Nullable List<ContainerAccess.SlotView> verifyViews) {
-        this.target = newTarget;
-        this.watchedContainerId = ContainerAccess.currentContainerId();
-        this.store.clear();
-        this.manualPause = false;
-        this.lastUsedReadSeq = Long.MIN_VALUE;
-        this.warnedUnverifiedIndex = false;
-        this.lastSampledGameTime = Long.MIN_VALUE;
-        this.probe.reset();
+        // 锁内做：服务端 tick 那侧可能正在用旧目标写样本，不能让它落到新会话里
+        synchronized (sampleLock) {
+            this.target = newTarget;
+            this.watchedContainerId = ContainerAccess.currentContainerId();
+            this.store.clear();
+            this.manualPause = false;
+            this.warnedUnverifiedIndex = false;
+            this.lastSampledGameTime = Long.MIN_VALUE;
+            this.probe.reset();
 
-        if (newTarget.slots().isEmpty()) {
-            this.state = State.ARMED;
-            return;
-        }
-        if (newTarget.hasPersistentId()) {
-            this.probe.verifyIndex(newTarget, verifyViews);
-        }
-        if (menuSourceReady()) {
-            this.state = State.RECORDING;
-        } else if (newTarget.hasPersistentId()) {
-            enterFollowing(false);
-        } else {
-            // 既没有菜单路径、又拿不到坐标：只能明确停住，不假装在记录
-            this.state = State.PAUSED;
-            manualPause = false;
+            if (newTarget.slots().isEmpty()) {
+                this.state = State.ARMED;
+                return;
+            }
+            if (newTarget.hasPersistentId()) {
+                this.probe.verifyIndex(newTarget, verifyViews);
+            }
+            if (menuSourceReady()) {
+                this.state = State.RECORDING;
+            } else if (newTarget.hasPersistentId()) {
+                enterFollowing(false);
+            } else {
+                // 既没有菜单路径、又拿不到坐标：只能明确停住，不假装在记录
+                this.state = State.PAUSED;
+                manualPause = false;
+            }
         }
     }
 
     /** 清空已记录的数据，但不动探针和状态 */
     public void clearData() {
-        store.clear();
+        synchronized (sampleLock) {
+            store.clear();
+            lastSampledGameTime = Long.MIN_VALUE;
+        }
     }
 
     /** 把格子全清掉（面板上的「清空选择」并确认后走到这里）→ 回到待选格 */
     public void clearSlots() {
-        this.target = ProbeTarget.EMPTY;
-        this.watchedContainerId = -1;
-        this.manualPause = false;
-        this.lastUsedReadSeq = Long.MIN_VALUE;
-        this.warnedUnverifiedIndex = false;
-        this.probe.reset();
-        this.state = State.ARMED;
+        synchronized (sampleLock) {
+            this.target = ProbeTarget.EMPTY;
+            this.watchedContainerId = -1;
+            this.manualPause = false;
+            this.warnedUnverifiedIndex = false;
+            this.probe.reset();
+            this.state = State.ARMED;
+        }
     }
 
     /**
@@ -243,12 +248,13 @@ public final class ProbeInstance {
      * 由 {@link ProbeManager#remove} 调用。
      */
     void dispose() {
-        store.clear();
-        probe.reset();
-        target = ProbeTarget.EMPTY;
-        lastUsedReadSeq = Long.MIN_VALUE;
-        state = State.ARMED;
-        manualPause = false;
+        synchronized (sampleLock) {
+            store.clear();
+            probe.reset();
+            target = ProbeTarget.EMPTY;
+            state = State.ARMED;
+            manualPause = false;
+        }
     }
 
     /** 主动暂停（用户按的） */
@@ -256,7 +262,11 @@ public final class ProbeInstance {
         if (state == State.RECORDING || state == State.FOLLOWING) {
             manualPause = true;
             state = State.PAUSED;
-            writeGapMarker();
+            // 标记与"服务端那侧的最后一次采样"必须串行：先让在飞的采样写完，再落标记，
+            // 否则标记会落在样本之前，断口又会被连起来
+            synchronized (sampleLock) {
+                writeGapMarker();
+            }
         }
     }
 
@@ -291,21 +301,14 @@ public final class ProbeInstance {
     }
 
     // ------------------------------------------------------------------
-    // 采样
+    // 采样①：客户端 tick（状态机 + 菜单路径 / 多人的回退）
     // ------------------------------------------------------------------
 
-    /** 由 {@link ProbeManager} 每客户端 tick 调一次 */
+    /** 由 {@link ProbeManager} 每客户端 tick 调一次（渲染线程） */
     void tick(long gameTime) {
         if (state == State.ARMED || target.slots().isEmpty()) {
             return;
         }
-        // 世界这一 tick 还没走（`/tick rate` 调慢、ESC 暂停）→ 菜单同步也没动，
-        // 没有任何新信息。记重复样本只会让 tick rate ≠ 20 时数据全错（第七轮 N12）。
-        if (gameTime == lastSampledGameTime) {
-            return;
-        }
-        lastSampledGameTime = gameTime;
-
         switch (state) {
             case RECORDING -> tickRecording(gameTime);
             case FOLLOWING -> tickFollowing(gameTime);
@@ -315,14 +318,10 @@ public final class ProbeInstance {
         }
     }
 
-    /** 界面开着：读菜单 */
+    /** 界面开着 */
     private void tickRecording(long gameTime) {
         if (!ContainerAccess.hasForeignContainerOpen()) {
-            // 玩家关掉界面了 → 转坐标跟踪。
-            // ★ 这一 tick 刻意什么都不写 ★
-            // 菜单已经没了、世界侧读取也还没回来，我们**确实没有这一 tick 的观测**。
-            // 以前这里会写一条"上一 tick 的值"把时间轴续上，代价是曲线上多一个 1t 平台
-            // （那个 tick 并没有被观测到）。现在留个空档，画图层面按观测抖动连线。
+            // 玩家关掉界面了 → 转坐标跟踪（单人下从此由服务端 tick 采样，一个 tick 都不缺）
             if (manager.followAfterClose() && target.hasPersistentId()) {
                 enterFollowing(true);
             } else {
@@ -337,16 +336,25 @@ public final class ProbeInstance {
             return;
         }
 
+        if (serverSideSampling()) {
+            return;   // 服务端 tick 钩子在采（更准、每 tick 一条），这里不插手
+        }
+
         List<ContainerAccess.SlotView> views = readMenuSlots();
         if (views == null) {
             // 有格子读不到（槽位下标越界 = 换了不同类型的菜单）
             pauseAuto();
             return;
         }
-        writeTick(gameTime, views);
+        synchronized (sampleLock) {
+            if (!advanceTick(gameTime)) {
+                return;
+            }
+            writeTick(gameTime, views);
+        }
     }
 
-    /** 界面关着：按坐标读，读不到就记 no_data */
+    /** 界面关着 */
     private void tickFollowing(long gameTime) {
         // ★ 下标映射不可信的机器（MEK 这类自写槽位类的模组），必须明说 ★
         // 验证是挂探头那 1~2 tick 内在服务端做的（内容指纹匹配），
@@ -359,8 +367,7 @@ public final class ProbeInstance {
         }
 
         if (ContainerAccess.hasForeignContainerOpen()) {
-            // 玩家又把界面打开了 —— 优先回到最准的那条路径。
-            // 同样不写"过渡 tick"：菜单下一 tick 就能读到真值，中间那格空着即可。
+            // 玩家又把界面打开了 —— 优先回到最准的那条路径
             if (ContainerAccess.currentContainerId() == watchedContainerId || tryRebind()) {
                 state = State.RECORDING;
                 return;
@@ -368,23 +375,16 @@ public final class ProbeInstance {
             // 开的是别的容器：继续按坐标跟踪，不打断
         }
 
-        probe.request(target);
-        WorldProbe.Read read = probe.read(WORLD_READ_MAX_AGE);
-        switch (read.status()) {
-            case OK -> {
-                // ★ 同一个观测只写一次 ★
-                // seq 没变 = 管道还没把新结果送回来 → 这一 tick 没有新观测，
-                // 不写（写下去就是给旧值贴新 tick 标签 = 曲线上的假平台）。
-                if (read.seq() != lastUsedReadSeq) {
-                    lastUsedReadSeq = read.seq();
-                    writeTick(gameTime, read.views());
-                }
+        if (serverSideSampling()) {
+            return;   // 服务端 tick 钩子在采
+        }
+
+        // 回退路径（多人）：方块实体不在客户端手里，如实记"读不到"
+        synchronized (sampleLock) {
+            if (!advanceTick(gameTime)) {
+                return;
             }
-            case UNAVAILABLE -> store.add(Sample.noData(gameTime));
-            // 还没读到过 / 结果太旧：这一 tick 什么都不记。
-            // 「没观测到」和「读失败」是两件事，别把前者写成 no_data（第五轮 F6 的教训）。
-            case NOT_READY -> {
-            }
+            store.add(Sample.noData(gameTime));
         }
     }
 
@@ -403,12 +403,98 @@ public final class ProbeInstance {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 采样②：服务端 tick（单人下的主路径 —— 一个世界 tick 一条真实样本）
+    // ------------------------------------------------------------------
+
+    /**
+     * ★ 由服务端 tick 事件调用（**服务端线程**）★
+     *
+     * 每世界 tick 调一次。它同时是"时间戳"和"取值时机"的答案：
+     * 时间戳取那一刻的 `ServerLevel#getGameTime()`，值取那一刻方块实体里的真值 ——
+     * 两者同源，所以既不会漏观测也不会把旧值当新值。
+     *
+     * @return true = 这一 tick 已经写了样本（数据或 `no_data`）
+     */
+    boolean sampleOnServerTick(MinecraftServer server) {
+        State st = state;
+        if (st != State.RECORDING && st != State.FOLLOWING) {
+            return false;
+        }
+        ProbeTarget t = target;
+        if (t.slots().isEmpty() || !t.hasPersistentId()) {
+            return false;
+        }
+        // 界面开着且下标没验证出来 → 交给客户端菜单路径（菜单槽才是用户点的那一格）。
+        // 这个判断在锁外做一次只是"便宜的早退"，真正生效的是锁内那一次复查。
+        if (st == State.RECORDING && probe.mappingStatus(t) != WorldProbe.MappingStatus.VERIFIED) {
+            return false;
+        }
+        ServerLevel level = server.getLevel(t.dimension());
+        if (level == null) {
+            return false;
+        }
+        long gameTime = level.getGameTime();
+        synchronized (sampleLock) {
+            // ★ 锁内复查状态 ★
+            // 玩家可能刚刚按了暂停 / 删了这个实例：那时绝不能再用旧目标写样本，
+            // 否则会在"暂停标记"后面追加一条数据，把断口重新连起来。
+            State now = state;
+            if (now != State.RECORDING && now != State.FOLLOWING) {
+                return false;
+            }
+            if (!advanceTick(gameTime)) {
+                return false;
+            }
+            List<ContainerAccess.SlotView> views = probe.readOnServer(level, t);
+            if (views == null) {
+                store.add(Sample.noData(gameTime));
+            } else {
+                writeTick(gameTime, views);
+            }
+        }
+        return true;
+    }
+
+    /**
+     * 采样该不该走服务端 tick 这条主路径。
+     *
+     * | 条件 | 说明 |
+     * |---|---|
+     * | 有坐标 | 服务端才能按"维度+坐标"读到那台设备 |
+     * | 是单人 | 多人下方块实体不在客户端进程里（集成服务端才有） |
+     * | 界面关着 **或** 下标已验证 | 界面开着但映射没验证时，菜单槽才是用户点的那一格 —— 宁可留观测空档，也不要读错格子 |
+     */
+    private boolean serverSideSampling() {
+        ProbeTarget t = target;
+        if (!t.hasPersistentId()) {
+            return false;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (!mc.isLocalServer() || mc.getSingleplayerServer() == null) {
+            return false;
+        }
+        return state != State.RECORDING
+                || probe.mappingStatus(t) == WorldProbe.MappingStatus.VERIFIED;
+    }
+
+    /**
+     * 同一个世界 tick 只写一遍样本。
+     * （服务端暂停 tick / 客户端与服务端两条路交替时都可能重复调用）
+     *
+     * 只在 {@link #sampleLock} 内调用。
+     */
+    private boolean advanceTick(long gameTime) {
+        if (gameTime == lastSampledGameTime) {
+            return false;
+        }
+        lastSampledGameTime = gameTime;
+        return true;
+    }
+
     private void enterFollowing(boolean notify) {
-        // 丢掉旧的读值缓存：**不要再拿"关界面前那个值"去续时间轴**
-        // （那是第十轮第三次修复去掉的假平台来源）。第一次观测等真正的异步结果回来。
-        probe.resetReadCache();
-        lastUsedReadSeq = Long.MIN_VALUE;
-        probe.request(target);
+        // 采样由服务端 tick 接管（单人）；没有集成服务端时退化成"记 no_data"。
+        // 这里不做任何垫值：第一次观测就是第一个世界 tick 的真值。
         state = State.FOLLOWING;
         if (notify) {
             notifyPlayer("logiscope.msg.following");
@@ -418,7 +504,9 @@ public final class ProbeInstance {
     private void pauseAuto() {
         manualPause = false;
         state = State.PAUSED;
-        writeGapMarker();
+        synchronized (sampleLock) {
+            writeGapMarker();
+        }
         notifyPlayer("logiscope.msg.paused_auto");
     }
 
@@ -430,8 +518,9 @@ public final class ProbeInstance {
      * 但语义是对的，而且一定落在这段空白里，画图时能把线剪在该剪的地方。
      */
     private void writeGapMarker() {
-        if (lastSampledGameTime != Long.MIN_VALUE) {
-            store.add(Sample.gap(lastSampledGameTime + 1));
+        long last = lastSampledGameTime;
+        if (last != Long.MIN_VALUE) {
+            store.add(Sample.gap(last + 1));
         }
     }
 
@@ -497,12 +586,12 @@ public final class ProbeInstance {
 
     /**
      * 读全部被监控的菜单槽；任一格读不到就返回 null（理由见
-     * {@code WorldProbe#readNow} 的注释：聚合值偏小是看不出来的，宁可断档）。
+     * {@code WorldProbe#readOnServer} 的注释：聚合值偏小是看不出来的，宁可断档）。
      */
     @Nullable
     private List<ContainerAccess.SlotView> readMenuSlots() {
         List<ProbeTarget.SlotRef> refs = target.slots();
-        List<ContainerAccess.SlotView> out = new java.util.ArrayList<>(refs.size());
+        List<ContainerAccess.SlotView> out = new ArrayList<>(refs.size());
         for (ProbeTarget.SlotRef ref : refs) {
             if (ref.menuSlotIndex() < 0) {
                 // 这一格只有坐标路径（无 GUI 容器建的探针）—— 菜单里读不到它
@@ -544,7 +633,7 @@ public final class ProbeInstance {
      * ★ 一个 tick 可能写多条 ★（多格监控时每个出现的物品一条，见 Aggregator）
      * 它们共用同一个 tick 值 —— 时间轴仍然是"每世界 tick 一段"，
      * 只是这一段里可以有好几条不同物品的样本。
-     * 断点判定因此改成 per-series（见 {@code ChartData#build}）。
+     * 断点判定因此是 per-series（见 {@code ChartData#build}）。
      */
     private void writeTick(long gameTime, List<ContainerAccess.SlotView> views) {
         int m = aggregateInto(views);
@@ -556,38 +645,21 @@ public final class ProbeInstance {
     /**
      * 面板上那行 "now" 需要的实时值（按物品求和后的条目）。
      *
-     * @return null = 这一刻没有数据（no_data）；列表里是一条 {@code air × 0} 时 = 读到了但全空
+     * 直接取**时间轴最后一格**的样本：它最多 1 个世界 tick 旧
+     * （20 t/s 时 50 ms，200 t/s 时 5 ms），比"再读一次菜单/方块实体"更省事，
+     * 而且天然和图表上的数字一致（不会出现"读数变了但点还没写进去"）。
+     *
+     * @return null = 这一刻没有数据（最后一条是 `no_data` / `gap` 标记）
      */
     @Nullable
     public List<Aggregator.Totals> liveTotals() {
-        if (state == State.RECORDING) {
-            List<ContainerAccess.SlotView> views = readMenuSlots();
-            if (views == null) {
-                return null;
-            }
-            int m = aggregateInto(views);
-            return listOfAgg(m);
-        }
-        if (state == State.FOLLOWING) {
-            WorldProbe.Read read = probe.read(WORLD_READ_MAX_AGE);
-            if (read.status() != WorldProbe.Read.Status.OK) {
-                return null;
-            }
-            int m = aggregateInto(read.views());
-            return listOfAgg(m);
-        }
-        // 暂停 / 待选格：拿最后一条样本凑合显示（它至少是"我最后看到的样子"）
-        Sample last = store.latest();
-        if (last == null || last.isMarker()) {
+        List<Sample> latest = store.latestTick();
+        if (latest == null || latest.isEmpty()) {
             return null;
         }
-        return List.of(new Aggregator.Totals(last.itemId(), last.count()));
-    }
-
-    private List<Aggregator.Totals> listOfAgg(int m) {
-        List<Aggregator.Totals> out = new java.util.ArrayList<>(m);
-        for (int i = 0; i < m; i++) {
-            out.add(new Aggregator.Totals(aggIds[i], aggCounts[i]));
+        List<Aggregator.Totals> out = new ArrayList<>(latest.size());
+        for (Sample s : latest) {
+            out.add(new Aggregator.Totals(s.itemId(), s.count()));
         }
         return out;
     }
