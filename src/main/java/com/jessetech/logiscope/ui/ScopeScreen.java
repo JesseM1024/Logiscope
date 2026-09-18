@@ -10,12 +10,15 @@ import com.jessetech.logiscope.collect.WorldProbe;
 import com.jessetech.logiscope.store.Sample;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.world.inventory.Slot;
+import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.client.ClientHooks;
+import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -65,6 +68,10 @@ public final class ScopeScreen extends Screen {
     private int dragOffX;
     private int dragOffY;
     private int scrollRow;
+
+    /** 本帧鼠标悬停到的「背景容器槽位」。render 开头刷新，末尾用它画悬浮提示。 */
+    @Nullable
+    private Slot backgroundHoveredSlot;
 
     private List<ContainerAccess.SlotView> slots = List.of();
     private String flash = "";
@@ -196,13 +203,13 @@ public final class ScopeScreen extends Screen {
         int x = panelX;
         int y = panelY;
 
-        // 先补画背景容器界面的 hover 高亮。
+        // 先补画背景容器界面的 hover 高亮，并记下命中的槽位。
         // 为什么必须自己画：背景图层是由 ClientHooks#drawScreen 渲染的，
         // 它给背景层传的鼠标坐标是 Integer.MAX_VALUE（为了不让背景层的控件误高亮），
         // 而 AbstractContainerScreen 恰恰是在 render 里用这两个坐标算出 hoveredSlot 的
-        // → 背景层的 hoveredSlot 永远是 null，格子不会亮。
+        // → 背景层的 hoveredSlot 永远是 null，格子不会亮、悬浮提示也不会出。
         // 我们在最顶层，手里有真实鼠标坐标，所以自己补上。
-        renderBackgroundSlotHighlight(g, mouseX, mouseY);
+        renderBackgroundHover(g, mouseX, mouseY);
 
         // 只有面板本身，不再整屏压黑 —— 被压住的容器界面要能看见
         g.fill(x + 2, y + 3, x + PANEL_W + 3, y + PANEL_H + 4, 0x66000000);
@@ -234,17 +241,24 @@ public final class ScopeScreen extends Screen {
 
         renderButtons(g, buttons, mouseX, mouseY);
         renderFlash(g, y);
+
+        // 最后两样必须压在最上层，和 vanilla 的顺序一致：
+        // 手持物品永远跟着光标可见，悬浮提示在它下面。
+        renderCarriedItem(g, mouseX, mouseY);
+        renderBackgroundTooltip(g, mouseX, mouseY);
     }
 
     /**
-     * 自己给被压住的容器界面补 hover 高亮，见 render 里的说明。
+     * 自己给被压住的容器界面补 hover 高亮与悬浮提示，见 render 里的说明。
+     * 顺便把命中的槽位记在 backgroundHoveredSlot，供末尾画 tooltip 用。
      *
      * 能用公开 API 拿到全部需要的信息（都已核实）：
      *   AbstractContainerScreen#getGuiLeft() / getGuiTop() / getSlotColor(int)
-     *   Slot#x / Slot#y / isActive()
+     *   Slot#x / Slot#y / isActive() / isHighlightable()
      *   AbstractContainerScreen#renderSlotHighlight(GuiGraphics,int,int,int,int)（public static）
      */
-    private void renderBackgroundSlotHighlight(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderBackgroundHover(GuiGraphics g, int mouseX, int mouseY) {
+        backgroundHoveredSlot = null;
         AbstractContainerScreen<?> bg = backgroundContainer();
         if (bg == null || overPanel(mouseX, mouseY)) {
             return;
@@ -260,10 +274,66 @@ public final class ScopeScreen extends Screen {
             int sx = left + slot.x;
             int sy = top + slot.y;
             if (mouseX >= sx - 1 && mouseX < sx + 17 && mouseY >= sy - 1 && mouseY < sy + 17) {
+                backgroundHoveredSlot = slot;
                 AbstractContainerScreen.renderSlotHighlight(g, sx, sy, 0, bg.getSlotColor(slot.index));
                 return;
             }
         }
+    }
+
+    /**
+     * 自己把「鼠标手持的物品」画到真实鼠标位置上。
+     *
+     * ★ 为什么必须自己画 ★
+     * 背景容器界面是用 `Integer.MAX_VALUE` 当鼠标坐标渲染的，
+     * 于是 `AbstractContainerScreen.render` 末尾那段"把 carried item 画在光标旁边"
+     * 的代码把它画到了屏幕外 —— 表现就是第三轮 B7/B8 反馈的
+     * "东西确实拿起来了，但跟着鼠标的图标和数字不见了"。
+     *
+     * 这段复刻 vanilla 的 `renderFloatingItem`（**它是 private，只能照着写**）：
+     *   pose.translate(0,0,232) → renderItem(stack,x,y) → renderItemDecorations(font,stack,x,y)
+     * 位置取 `(mouseX-8, mouseY-8)`；vanilla 是在平移了 `(leftPos,topPos)` 的 pose 里
+     * 传 `(mouseX-leftPos-8, mouseY-topPos-8)`，两者等价。
+     *
+     * 已知差异：vanilla 在做「拖拽逐格分配」时会把数字画成剩余待分配量
+     * （`quickCraftingRemainder`，private，我们读不到），这里只能画完整数量。
+     * 只影响按住左键拖过一排格子的那一瞬间显示的数字。
+     */
+    private void renderCarriedItem(GuiGraphics g, int mouseX, int mouseY) {
+        AbstractContainerScreen<?> bg = backgroundContainer();
+        if (bg == null) {
+            return;
+        }
+        ItemStack carried = bg.getMenu().getCarried();
+        if (carried.isEmpty()) {
+            return;
+        }
+        int x = mouseX - 8;
+        int y = mouseY - 8;
+        g.pose().pushPose();
+        g.pose().translate(0.0F, 0.0F, 232.0F);
+        g.renderItem(carried, x, y);
+        Font countFont = IClientItemExtensions.of(carried)
+                .getFont(carried, IClientItemExtensions.FontContext.ITEM_COUNT);
+        g.renderItemDecorations(countFont == null ? this.font : countFont, carried, x, y);
+        g.pose().popPose();
+    }
+
+    /**
+     * 被压下容器的槽位悬浮提示。
+     * 同样是因为 `hoveredSlot` 在背景层恒为 null，vanilla 的 `renderTooltip` 也不干活。
+     * 手持物品时按 vanilla 的规矩不显示。
+     */
+    private void renderBackgroundTooltip(GuiGraphics g, int mouseX, int mouseY) {
+        Slot slot = backgroundHoveredSlot;
+        AbstractContainerScreen<?> bg = backgroundContainer();
+        if (slot == null || bg == null || !slot.hasItem()) {
+            return;
+        }
+        if (!bg.getMenu().getCarried().isEmpty()) {
+            return;
+        }
+        g.renderTooltip(this.font, slot.getItem(), mouseX, mouseY);
     }
 
     /** 未接探头：列出当前容器的所有槽位供选择 */

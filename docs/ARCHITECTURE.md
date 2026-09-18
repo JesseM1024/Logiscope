@@ -104,15 +104,25 @@ if (screen != null) {
 
 #### 规则 3 展开：三层文本输入守卫（`bind/TextInputGuard`）
 
-快捷键只要是个**能被打出来的字符**，就一定会和搜索框打架 ——
-换键位只是降低概率，不能根治（实测：换成 `]` 之后原版背包搜索框 OK 了，
-但 JEI 搜索框仍然会弹面板）。所以必须主动判断，而且要判三层：
+只要快捷键是个**能被打出来的字符**，就一定会和搜索框打架。
+本项目一路试过 `O` → `]`，两次都被咬到：
+
+| 键位 | 结果 |
+|---|---|
+| `O` | 在 JEI 搜索框里打 `hopper`，那个 `o` 直接弹面板 |
+| `]` | 三层守卫能挡住大部分，但"打完字 → 失焦 → 再按"这条路上仍会多拦一次 |
+| **`F9`（最终选择）** | **功能键不产生字符，冲突通道从根上不存在** |
+
+所以最终方案是**换键位 + 保留守卫**两条一起上：键位解决 99% 的情况，
+守卫保的是"用户把快捷键改回字母/符号键"和"某些模组的输入框吃掉所有按键"。
+
+三层守卫从准到糙，任何一层命中就不抢键：
 
 | 层 | 判据 | 覆盖范围 | 为什么需要这一层 |
 |---|---|---|---|
 | 1 | `screen.getFocused()` / `children()` 里的 `EditBox`（+ 类名兜底） | 原版背包搜索框、大多数模组输入框 | 标准契约，最省事 |
 | 2 | **JEI 公开 API** `IIngredientListOverlay#hasKeyboardFocus()` | JEI 搜索框 | JEI 的搜索框 `GuiTextFieldFilter` **本身继承 `EditBox`**，但它**不挂进 `screen.children()`**，自己用 `createInputHandler()` 管输入 → 第 1 层完全看不见它 |
-| 3 | **`CharacterTyped` 的 Pre/Post 计数差** | 任何模组的任何输入框 | 通用兜底，防的是 REI / EMI 这类我们没写探针的搜索框 |
+| 3 | **`CharacterTyped` 的 Pre/Post 配对情况** | 任何模组的任何输入框 | 通用兜底，防的是 REI / EMI 这类我们没写探针的搜索框 |
 
 第 2 层**用反射调用，零编译期依赖**（没装 JEI 就静静跳过）：
 入口只有 `mezz.jei.common.Internal#getJeiRuntime` 是内部类，
@@ -126,23 +136,50 @@ if (screen.charTyped((char)codepoint, mods)) return;                          //
 ClientHooks.onScreenCharTypedPost(screen, (char)codepoint, mods);             // 只有没人接手才发 Post
 ```
 
-⇒ **Pre 比 Post 多一次 ⇒ 上一个字符被某处消费了 ⇒ 有输入框在接手**。
+⇒ **Pre 发过、Post 没跟上来 ⇒ 上一个字符被消费了 ⇒ 有输入框在接手**。
 这条对任何模组都成立，不依赖任何模组的 API。
 
-它**会自愈**：`KeyPressed` 在 `charTyped` **之前**触发，所以
+##### ⚠️ 第 3 层的实现有一个必须避开的陷阱
+
+只记**上一个**字符事件的结果（一个布尔量），**绝对不要用累计计数**：
+
+```java
+// ✅ 对：一个字符事件结束时，它恰好等于"这个字符有没有被吃掉"
+public static void onCharTypedPre(...)  { lastCharConsumed = true;  }
+public static void onCharTypedPost(...) { lastCharConsumed = false; }
+
+// ❌ 错（本项目真踩过，第三轮 A7/A10/A12 失败就是它）
+private static int preCount, postCount;
+private static boolean consumed() { return preCount > postCount; }
+```
+
+为什么"计数差"是错的：**被吃掉的字符会在差值上留下一个永久的 +1**。
+之后每个未被吃掉的字符同时给两个计数各 +1，差值只是**原地保持、永远不会归零**。
+于是"在任意输入框里打过一次字"就等于"永久打开文本模式"，快捷键彻底失效。
+
+> 通用教训：**差值型状态只在"每个事件都成对抵消"时才成立**。
+> 只要存在"只加不减"的分支，差值就会单调增长 —— 这种 bug 在测试里很容易被
+> 误判成"偶尔失灵"，必须从原理上排掉。
+
+它**会自愈**（正确实现下）：`KeyPressed` 在 `charTyped` **之前**触发，所以
 
 | 场景 | 过程 |
 |---|---|
-| 在输入框里 | `]` 的字符被吃掉 → 计数差保持 → 每次都拦得住 |
-| 不在输入框里 | `]` 的字符没人吃 → 计数差归零 → **下一次按键就正常了** |
+| 在输入框里 | `]` 的字符被吃掉 → Post 不来 → 布尔量保持 true → 每次都拦得住 |
+| 不在输入框里 | `]` 的字符没人吃 → Post 把它置回 false → **下一次按键就正常了** |
 
-代价是"刚打完字立刻想开面板"时要多按一次。再叠一个 60 tick 的时效窗口，
-避免"很久以前打过一次字"永久抑制快捷键。
+代价是"刚打完字立刻想开面板"时要多按一次；再叠一个 60 tick 的时效窗口，
+避免"很久以前打过一次字"抑制快捷键。
 
 **还有一个反直觉事实**：`KeyMapping#matches` **不看修饰键**。
 源码只有一句比较 `key.getType() == KEYSYM && key.getValue() == keyCode`，
 所以把快捷键设成 `Ctrl+O` 毫无意义 —— 单独按 `o` 一样命中。
 这就是"改了 Ctrl+O 还在搜索框里触发"的原因。
+
+**换默认键位的坑**：按键绑定会被写进 `run/options.txt`
+（形如 `key_logiscope.key.open_scope:key.keyboard.right.bracket`），**那份存档优先于代码默认值**。
+改了默认值之后，要么删掉那一行，要么在「选项 → 控制」里手动重绑 ——
+否则你会以为"改了但没生效"。
 
 ### CP3 · 打开面板但不丢菜单　风险：中 ⚠️
 
@@ -311,6 +348,42 @@ GUI scale 调大时逻辑分辨率可能只有 320 宽，而面板固定 272 宽
 「拖动中宽松、打开时收紧」是关键：宽松是**功能**（大 GUI scale 下有用），
 收紧是**救援**（万一进了死角，一次开合就能脱困）。
 
+#### CP8 之四：手持物品与悬浮提示
+
+**同一个根因的另外两个受害者。** `MAX_VALUE` 那个鼠标坐标不只让格子不高亮，
+还让这两样东西一起失效（第三轮 B7/B8 反馈"物品拿起来了但图标和数字不见了"）：
+
+| 失效的东西 | vanilla 在哪画的 | 为什么失效 |
+|---|---|---|
+| 光标上的手持物品（carried item） | `AbstractContainerScreen.render` 末尾，位置 `(mouseX-8, mouseY-8)` | 坐标被算成 `MAX_VALUE - 8` → 画到屏幕外 |
+| 槽位悬浮提示（tooltip） | `AbstractContainerScreen.renderTooltip`，条件是 `hoveredSlot != null` | `hoveredSlot` 恒为 null |
+
+两样都在最顶层自己补画：
+
+```java
+// 手持物品：复刻 vanilla 的 renderFloatingItem（它是 private，只能照着写）
+ItemStack carried = bg.getMenu().getCarried();          // public
+if (!carried.isEmpty()) {
+    pose.pushPose(); pose.translate(0, 0, 232);         // vanilla 的 z
+    g.renderItem(carried, mouseX - 8, mouseY - 8);
+    Font f = IClientItemExtensions.of(carried).getFont(carried, FontContext.ITEM_COUNT);
+    g.renderItemDecorations(f == null ? font : f, carried, mouseX - 8, mouseY - 8);
+    pose.popPose();
+}
+
+// 悬浮提示：按 vanilla 的规矩，手持物品时不显示
+if (hoveredSlot != null && hoveredSlot.hasItem() && bg.getMenu().getCarried().isEmpty()) {
+    g.renderTooltip(font, hoveredSlot.getItem(), mouseX, mouseY);
+}
+```
+
+**必须画在最上层**（我们的 render 末尾），因为光标上的物品应该压过面板 ——
+这也是 vanilla 的顺序（它最后画这两样）。
+
+**已知差异**：vanilla 在"拖拽逐格分配"时会把数字画成**剩余待分配量**
+（`quickCraftingRemainder`，private 字段，读不到），我们只能画完整数量。
+只影响按住左键拖过一排格子的那一瞬间显示的数字。
+
 ### CP9 · 关掉界面之后继续跟踪　风险：中 ⚠️
 
 ```
@@ -376,7 +449,8 @@ GUI scale 调大时逻辑分辨率可能只有 320 宽，而面板固定 272 宽
 
 | 限制 | 原因 | 影响 |
 |---|---|---|
-| 面板打开时，容器的**键盘**操作无效（数字键换物、`Q` 丢弃、中键取方块） | 这些走 `hoveredSlot`，而背景层拿不到鼠标坐标（见 CP8） | 鼠标操作已经完全可用（CP8 之一）；键盘这几个键要收起面板 |
+| 面板打开时，容器的**键盘**操作无效（数字键换物、`Q` 丢弃、中键取方块） | 这些走 `hoveredSlot`，而背景层拿不到鼠标坐标（见 CP8） | 鼠标操作已经完全可用（CP8 之一 ~ 之四）；键盘这几个键要收起面板 |
+| 拖拽分配时手持物品的数字是**完整数量**而非剩余量 | `quickCraftingRemainder` 是 `private` 字段，读不到 | 只在按住左键拖过一排格子的瞬间可见（CP8 之四） |
 | 面板打开时按 `E`（背包键）没反应 | `Screen#keyPressed` 不处理背包键，只有 `AbstractContainerScreen` 处理 | 同上，收起面板即可 |
 | 被压住的容器界面**不 tick** | 只有 `minecraft.screen` 才会被 `Screen#tick` | 少数依赖 tick 的自绘界面可能显示不动 |
 | 面板内的点击不会穿透到容器 | 这是刻意的，否则一次点击会同时触发两边 | 无 |
@@ -445,13 +519,19 @@ GUI scale 调大时逻辑分辨率可能只有 320 宽，而面板固定 272 宽
 | `Screen.tick()` | `Minecraft#tick` 在 `screen != null` 时调用 | 刷新槽位快照 |
 | `GuiGraphics.drawString(Font,@Nullable String,int,int,int)` | 存在 | 画文字 |
 | `GuiGraphics.fill(int,int,int,int,int)` | 存在 | 画矩形 |
-| `InputConstants.KEY_RBRACKET` | `public static final int = 93` | 默认键位 `]` |
+| `InputConstants.KEY_RBRACKET` | `public static final int = 93` | 备用键位 `]` |
+| **`InputConstants.KEY_F9`** | `public static final int = 298` | **默认键位 `F9`**（功能键不产生字符，见 CP2） |
 | `KeyMapping.matches(int,int)` | **只比 keyCode，忽略修饰键** | ★ CP2 的坑 |
 | `KeyMapping.releaseAll()` | `public static` | 开面板时清按键状态 |
 | `EditBox` / `AbstractWidget.isFocused()` | public | ★ CP2 规则 3 第 1 层 |
 | **`AbstractContainerScreen.getGuiLeft()` / `getGuiTop()`** | **public**（Neo 加的访问器） | ★ CP8 之二 画高亮 |
 | **`AbstractContainerScreen.getSlotColor(int)`** | **public** | ★ CP8 之二 用原版的每槽高亮色 |
 | **`AbstractContainerScreen.renderSlotHighlight(GuiGraphics,int,int,int,int)`** | **public static**，内部 `fillGradient(guiOverlay, x, y, x+16, y+16, ...)`，**坐标系是 pose 相对的** | ★ CP8 之二 |
+| **`AbstractContainerMenu.getCarried()`** | public | ★ CP8 之四 手持物品 |
+| **`GuiGraphics.renderItem(ItemStack,int,int)`** | public | ★ CP8 之四 |
+| **`GuiGraphics.renderItemDecorations(Font,ItemStack,int,int)`** | public | ★ CP8 之四（画数量） |
+| **`GuiGraphics.renderTooltip(Font,ItemStack,int,int)`** | public | ★ CP8 之四（悬浮提示） |
+| **`IClientItemExtensions.of(ItemStack).getFont(stack, FontContext.ITEM_COUNT)`** | public Neo API | ★ CP8 之四，忠实于 vanilla 的数量字体 |
 | **`Slot.x` / `Slot.y` / `isActive()` / `isHighlightable()`** | 全是 public | ★ CP8 之二；命中判定与 vanilla 一致 |
 | **`EffectRenderingInventoryScreen`** | `InventoryScreen` 与 `CreativeModeInventoryScreen` 的共同基类 | ★ 排除"玩家自己的背包" |
 | `Player.displayClientMessage(Component, boolean)` | public | 动作栏状态提示 |

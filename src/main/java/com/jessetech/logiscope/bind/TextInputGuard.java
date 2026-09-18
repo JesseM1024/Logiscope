@@ -34,24 +34,43 @@ import java.lang.reflect.Method;
  *        if (ClientHooks.onScreenCharTypedPre(...)) return;   // 被 cancel → 不发 Post
  *        if (screen.charTyped(...)) return;                   // 被控件吃掉 → 不发 Post
  *        ClientHooks.onScreenCharTypedPost(...);              // 只有没人接手才发 Post
- *      所以 **Pre 比 Post 多一次 ⇒ 上一个字符被某处消费了 ⇒ 有输入框在接手**。
+ *      所以 **Pre 发过、Post 没跟上来 ⇒ 上一个字符被某处消费了 ⇒ 有输入框在接手**。
  *      这条对任何模组都成立，代价是"刚打完字想开面板"时要多按一次（会自愈，见下）。
  *
- * ★ 第 3 层为什么能自愈 ★
- *   KeyPressed 在 charTyped **之前**触发。所以：
- *     · 在输入框里：`]` 的字符会被吃掉 → 计数差保持 → 永远拦得住
- *     · 不在输入框里：`]` 的字符没人吃 → 计数差归零 → 下一次按键就正常了
- *   再叠一个 60 tick 的时效窗口，避免"很久以前打过一次字"永久抑制快捷键。
+ * ★ 第 3 层的正确写法（踩过坑，别再改回去）★
+ *   **不要用累计计数**。曾经写过 `preCount++ / postCount++`，靠 `preCount > postCount`
+ *   判断"上一个字符被吃了" —— 那是错的：一个被吃掉的字符会在差值上留下**永久的 +1**，
+ *   之后每个未被吃掉的字符同时给两个计数各 +1，差值只会原地保持、**永远不会归零**。
+ *   实测后果：在任何输入框里打过一次字之后，快捷键就**永久失效**
+ *   （第三轮 A7/A10/A12 失败就是这个原因）。
+ *
+ *   正确写法是一个布尔量：Pre 时置 true，Post 真的来了就置回 false。
+ *   因为 Pre/Post 在同一次调用里同步跑完，所以一个字符事件结束时它恰好等于
+ *   "这个字符有没有被吃掉"。而 KeyPressed 在 charTyped **之前**触发，
+ *   于是按键那一刻读到的是"上一个字符的结果"。
+ *
+ * ★ 为什么能自愈 ★
+ *     · 在输入框里：`]` 的字符会被吃掉 → Post 不来 → 布尔量保持 true → 一直拦得住
+ *     · 不在输入框里：`]` 的字符没人吃 → Post 把它置回 false → 下一次按键就正常
+ *   再叠一个 TTL 时效窗口，避免"很久以前打过一次字"抑制快捷键。
+ *
+ * ★ 默认键位已经换成 F9（见 KeyBindings）★
+ *   F 键不产生字符，所以这一层对默认键位其实用不上 —— 它保的是"用户把快捷键
+ *   改成字母/符号键"以及"某些模组把所有按键都吃掉"这两种情况。
  */
 public final class TextInputGuard {
 
     /** 第 3 层的时效窗口（tick）。60 tick = 3 秒 */
     private static final int CONSUMED_CHAR_TTL = 60;
 
-    /** CharacterTyped 的 Pre/Post 计数。差值 > 0 ⇔ 上一个字符被消费 */
-    private static int charPreCount;
-    private static int charPostCount;
-    private static long charPreTick;
+    /**
+     * 上一个字符事件有没有被界面消费掉。
+     * Pre 时先置 true（假设被吃掉），Post 真的发出来了就说明没人接手，置回 false。
+     */
+    private static boolean lastCharConsumed;
+
+    /** 上一次字符事件发生在哪一 tick，用来做时效窗口 */
+    private static long lastCharTick;
 
     private TextInputGuard() {
     }
@@ -61,12 +80,13 @@ public final class TextInputGuard {
     // ------------------------------------------------------------------
 
     public static void onCharTypedPre(ScreenEvent.CharacterTyped.Pre event) {
-        charPreCount++;
-        charPreTick = LogiScopeMod.sampler().currentTick();
+        lastCharConsumed = true;
+        lastCharTick = LogiScopeMod.sampler().currentTick();
     }
 
     public static void onCharTypedPost(ScreenEvent.CharacterTyped.Post event) {
-        charPostCount++;
+        // Post 发出来了 = 这个字符没有人接手
+        lastCharConsumed = false;
     }
 
     // ------------------------------------------------------------------
@@ -117,13 +137,13 @@ public final class TextInputGuard {
 
     /**
      * 第 3 层：上一个字符被界面吃掉了，且发生在时效窗口内。
-     * 见类注释里对 KeyboardHandler#charTyped 的核实结论。
+     * 见类注释里对 KeyboardHandler#charTyped 的核实结论，以及"为什么不能用累计计数"。
      */
     private static boolean lastCharWasConsumed() {
-        if (charPreCount <= charPostCount) {
+        if (!lastCharConsumed) {
             return false;
         }
-        return LogiScopeMod.sampler().currentTick() - charPreTick <= CONSUMED_CHAR_TTL;
+        return LogiScopeMod.sampler().currentTick() - lastCharTick <= CONSUMED_CHAR_TTL;
     }
 
     // ------------------------------------------------------------------

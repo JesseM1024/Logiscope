@@ -37,7 +37,7 @@ import org.jetbrains.annotations.Nullable;
  *   源码只有一句比较：key.getType() == KEYSYM && key.getValue() == keyCode。
  *   所以把快捷键设成 Ctrl+O 毫无意义 —— 单独按 o 一样命中，
  *   于是"改了 Ctrl+O 还是在搜索框里触发"。
- *   真正的出路是换一个不会被当作正文输入的键（本项目用 ]）+ 上面的聚焦守卫。
+ *   真正的出路是换一个**根本不产生字符**的键（本项目最终用 F9）+ 上面的三层守卫。
  */
 public final class KeyBindings {
 
@@ -50,14 +50,29 @@ public final class KeyBindings {
     private static long lastHotkeyTick = Long.MIN_VALUE / 2;
 
     /**
-     * 默认键位 `]`。
-     * 不用 O/I/E 这类字母键：它们在搜索框里是正文，必然打架。
-     * 用 InputConstants.KEY_RBRACKET（= 93）而不是写裸数字，可读性好得多。
+     * 默认键位：`F9`。
+     *
+     * ★ 为什么最后选了功能键，而不是符号键 ★
+     * 一路试过 `O` → `]`，两次都被"打字"问题咬到：
+     *   · `O`：在 JEI 搜索框里打 `hopper`，那个 `o` 直接弹面板
+     *   · `]`：三层守卫能挡住大部分情况，但"在搜索框里打完字 → 点外面失焦 → 再按 `]`"
+     *          这条路上仍然会多拦一次（守卫第 3 层的固有代价）
+     * **功能键根本不产生字符**，键盘输入这条冲突通道从根上就不存在了。
+     * 代价是 `F9` 离左手主键区远、笔记本上可能要按 Fn —— 换来的是"永不会误触发"。
+     *
+     * 三层守卫（TextInputGuard）保留着，保的是另外两种情况：
+     *   1. 用户自己把快捷键改回字母/符号键
+     *   2. 某些模组的输入框会把所有按键都吃掉（连 F 键也不放过）
+     *
+     * ⚠️ 改这个默认值**不会**影响已经存过的老绑定 —— 按键绑定会被写进
+     *   `run/options.txt`（形如 `key_logiscope.key.open_scope:key.keyboard.right.bracket`），
+     *   那份存档优先。所以换了默认值之后，要么删掉 options.txt 里那一行，
+     *   要么在「选项 → 控制」里手动重绑。
      */
     public static final KeyMapping OPEN_SCOPE = new KeyMapping(
             "logiscope.key.open_scope",
             InputConstants.Type.KEYSYM,
-            InputConstants.KEY_RBRACKET,
+            InputConstants.KEY_F9,
             CATEGORY);
 
     private KeyBindings() {
@@ -80,7 +95,7 @@ public final class KeyBindings {
      * ★ 为什么要做去抖 ★
      * 这个事件对「按下」和「长按连发」都会触发（KeyboardHandler 里 action==1 || action==2
      * 都走 screen 这条分支），而且事件本身不带 action 信息。
-     * 不去抖的话，按住 `]` 会以每秒 ~30 次的频率把面板开了又关。
+     * 不去抖的话，按住快捷键会以每秒 ~30 次的频率把面板开了又关。
      */
     public static void onScreenKeyPressed(ScreenEvent.KeyPressed.Pre event) {
         if (!OPEN_SCOPE.matches(event.getKeyCode(), event.getScanCode())) {
@@ -135,7 +150,7 @@ public final class KeyBindings {
     /**
      * 没有界面打开时，上面的 Screen 事件**根本不会触发**，
      * 按键这时才走标准的 KeyMapping 路径（Minecraft#handleKeybinds 只在 screen == null 时跑）。
-     * 所以想"关掉容器界面之后还能按 ] 把面板叫出来看波形"，必须在这里补一条。
+     * 所以想"关掉容器界面之后还能按快捷键把面板叫出来看波形"，必须在这里补一条。
      *
      * ★ 无论有没有界面打开都要把点击队列排空 ★
      * 否则界面开着时攒下的点击会在面板关掉的那一刻集中兑现，把面板又立刻弹回来。
@@ -184,7 +199,7 @@ public final class KeyBindings {
      * 单人的生存背包走 player.inventoryMenu，ContainerAccess 已经排除了；
      * 但**创造模式的背包不走它** —— 它有自己的 ItemPickerMenu，
      * 于是「containerMenu != inventoryMenu」为真，会被误判成"外部设备"。
-     * 实测表现：创造模式里在背包界面按 `]` 会弹出面板（面板上还会列出一堆
+     * 实测表现：创造模式里在背包界面按快捷键会弹出面板（面板上还会列出一堆
      * 创造物品标签页的内容）。这不是崩溃，但语义是错的。
      *
      * 两种背包界面共同的基类是 EffectRenderingInventoryScreen，
