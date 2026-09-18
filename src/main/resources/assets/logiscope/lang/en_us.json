@@ -2,14 +2,10 @@
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
-
   "logiscope.page.picker": "slots",
   "logiscope.page.chart": "chart",
-
   "logiscope.slot.empty": "(empty)",
-  "logiscope.slot.mixed": "mixed items",
   "logiscope.nodata": "(no data)",
-
   "logiscope.status.idle": "No probe",
   "logiscope.status.armed": "Pick slots",
   "logiscope.status.recording": "Recording",
@@ -18,19 +14,15 @@
   "logiscope.status.paused_auto": "Paused (source lost)",
   "logiscope.status.probes": "probes",
   "logiscope.status.picking": "picked",
-
   "logiscope.short.armed": "pick slots",
   "logiscope.short.recording": "recording",
   "logiscope.short.following": "tracking",
   "logiscope.short.paused": "paused",
-
   "logiscope.info.probes": "Running probes",
   "logiscope.info.selected": "slots picked",
-
   "logiscope.src.menu": "source: container GUI - click cells directly",
   "logiscope.src.world": "source: block entity - list only",
   "logiscope.src.none": "source: none",
-
   "logiscope.hint.drag": "drag here to move",
   "logiscope.hint.resize": "drag here to resize",
   "logiscope.hint.scroll": "scroll to page",
@@ -40,9 +32,7 @@
   "logiscope.hint.create_ready": "click \"+ New probe\", then click cells in the container",
   "logiscope.hint.not_a_container": "this block has no item storage",
   "logiscope.hint.world_reading": "reading slot list from the server...",
-  "logiscope.hint.cell_mode": "LMB pick - RMB unpick",
   "logiscope.hint.cell_mode_short": "LMB pick - RMB unpick - drag to sweep",
-
   "logiscope.btn.create_probe": "+ New probe",
   "logiscope.btn.cell_mode": "Pick cells",
   "logiscope.btn.cell_mode_on": "Stop picking",
@@ -56,16 +46,13 @@
   "logiscope.btn.close": "Hide",
   "logiscope.btn.follow_on": "Keep tracking after close: ON",
   "logiscope.btn.follow_off": "Keep tracking after close: OFF",
-
   "logiscope.tool.live": "Live",
   "logiscope.tool.frozen": "Frozen",
   "logiscope.tool.fit": "Fit all",
   "logiscope.tool.clear_sel": "Clear sel",
-
   "logiscope.chart.too_small": "Panel too small - drag bottom-right corner",
   "logiscope.chart.no_data_in_window": "no data in this range - try Fit all",
   "logiscope.chart.all_hidden": "all series hidden by the legend",
-
   "logiscope.flash.probe_created": "created %s - now pick slots",
   "logiscope.flash.probe_deleted": "deleted %s (cache cleared)",
   "logiscope.flash.probe_configured": "probe attached, recording",
@@ -82,8 +69,8 @@
   "logiscope.flash.live": "Back to live scrolling",
   "logiscope.flash.fit": "Showing the whole recording",
   "logiscope.flash.sel_cleared": "Selection cleared",
-
   "logiscope.msg.following": "LogiScope: GUI closed, tracking by position",
   "logiscope.msg.paused_auto": "LogiScope: data source lost, paused",
-  "logiscope.msg.index_unverified": "LogiScope: WARNING - slot index could not be verified; background tracking may read a different slot"
+  "logiscope.msg.index_unverified": "LogiScope: WARNING - slot index could not be verified; background tracking may read a different slot",
+  "logiscope.label.probe": "Probe"
 }

@@ -10,6 +10,8 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.gui.screens.inventory.EffectRenderingInventoryScreen;
 import net.minecraft.core.BlockPos;
+import net.minecraft.resources.ResourceKey;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
@@ -47,13 +49,21 @@ import org.jetbrains.annotations.Nullable;
  *   ├─ 面板已经开着            → 收起
  *   ├─ 容器界面开着            → 浮层压在它上面（根页）
  *   └─ 屏幕是空的（在世界上）  → 看准星：
- *        ├─ 准星是"有 GUI 的容器方块" → 模拟右键把界面打开；界面一开就自动压上面板（根页）
- *        ├─ 准星是"无 GUI 的容器方块" → 直接新建探针并进入选格页（列表选格）
- *        └─ 其它 / 没指到方块        → 打开根页（选一个已创建的探针来看）
+ *        ├─ 不是容器方块实体          → 打开根页（选一个已创建的探针来看）
+ *        └─ 是容器方块实体
+ *             ├─ 会消费右键（有界面）  → 模拟一次真实右键把界面打开；界面一出现就压面板（根页）
+ *             │                          （40 tick 内没等到界面 → 兜底当无界面，见下）
+ *             └─ 不消费右键（无界面）  → **不发任何交互**，直接进创建流程（列表选格）
  * ```
  *
  * 目的很直白：**指着哪台设备按快捷键，就是在说"我要探测这一台"**，
  * 不用先右键开界面、再按快捷键、再在列表里找。
+ *
+ * ★ 第十轮实测修正：不能用 `getMenuProvider` 判有没有界面 ★
+ *   那条判据连**原版熔炉**都判不出来（它不覆写 `getMenuProvider`），
+ *   于是空手对着精妙存储 / MEK 熔炼工厂按 F9 会错进"无 GUI"分支。
+ *   现在改成问"这个方块会不会消费一次右键"（`ProbeContext#wouldConsumeClick`），
+ *   而且**判定为无界面时不发交互** —— 于是手里拿着扳手也绝不会误触工具。
  */
 public final class KeyBindings {
 
@@ -62,21 +72,25 @@ public final class KeyBindings {
     /** 长按连发的去抖窗口（tick）。20 tick = 1 秒 */
     private static final int REPEAT_GUARD_TICKS = 5;
 
-    /** "模拟右键打开界面"之后，等界面出现的最大 tick 数（超时就放弃，别让它挂着） */
-    private static final int PENDING_OVERLAY_TICKS = 60;
+    /** "模拟右键打开界面"之后，等界面出现的最大 tick 数（超时就当它没有界面） */
+    private static final int PENDING_OPEN_TICKS = 40;
 
     /** 上一次真正响应快捷键的 tick */
     private static long lastHotkeyTick = Long.MIN_VALUE / 2;
 
     /**
-     * 已经模拟过右键、正在等服务端把容器界面打开 —— 界面一开就把探针面板压上去。
+     * 已经发出"打开界面"的交互、正等服务端把界面交出来 —— 界面一出现就把探针面板压上去。
      *
      * 为什么必须跨 tick：只有服务端能开菜单（`ServerPlayer#openMenu` + OpenScreen 包），
      * 所以客户端发出交互之后，界面要到 1~3 tick 后才出现。那才是能压图层的时机
      * （见 {@link #onScreenInit}）。
+     *
+     * 超时兜底：到期还没界面 → 说明这个方块其实没有界面 → 走"无 GUI"的创建流程。
      */
-    private static boolean pendingOverlay;
-    private static long pendingOverlayUntil;
+    private static PendingOpen pendingOpen;
+
+    private record PendingOpen(ResourceKey<Level> dim, BlockPos pos, String name, long deadline) {
+    }
 
     /**
      * 默认键位：`F9`。
@@ -189,7 +203,7 @@ public final class KeyBindings {
         if (mc.player == null) {
             return;
         }
-        expirePendingOverlay();
+        expirePendingOpen(mc);
 
         boolean clicked = false;
         while (OPEN_SCOPE.consumeClick()) {
@@ -221,45 +235,65 @@ public final class KeyBindings {
         }
         BlockHitResult hit = ProbeContext.crosshairBlock(mc);
         if (hit == null) {
-            // 准星上没有方块实体 → 打开根目录，选一个已创建的探针来监测
+            // 准星上没有方块 → 打开根目录，选一个已创建的探针来监测
             ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
 
         BlockPos pos = hit.getBlockPos();
 
-        // 情况 A：这个方块右键会开界面 → 先把界面打开（顺带拿到"维度+坐标"锚点），
-        //         界面一出现就把探针面板压上去（见 PENDING_OVERLAY / onScreenInit）
-        if (ProbeContext.hasMenuProvider(mc.level, pos)) {
-            if (ProbeContext.tryOpenContainerGui(mc, hit)) {
-                pendingOverlay = true;
-                pendingOverlayUntil = LogiScopeMod.probes().currentTick() + PENDING_OVERLAY_TICKS;
-            } else {
-                // 手上物品会抢走这次右键（扳手/工具类），此时硬发交互可能改动机器。
-                // 不冒险，退回根页，并让面板自己提示用户空手再试。
-                ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
-                ScopeScreen.flashOnOpen("logiscope.flash.hand_blocks_use");
-            }
+        // ★ 先判"是不是容器"，不是就**绝对不发交互** ——
+        //   这条顺序是无副作用的保证：我们对非容器方块（拉杆、门、按钮……）一个包都不发。
+        if (!ProbeContext.isContainerLike(mc.level, pos)) {
+            ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
 
-        // 情况 B：有容器方块实体但没有界面（机械手这类）→ 直接进入这台设备的创建流程。
-        //         没有菜单 → 可视化选格用不了，选格页会自动切成"列表选格"。
-        if (ProbeContext.isContainerLike(mc.level, pos)) {
-            ScopeScreen.openWorldCreate(mc, mc.level.dimension(), pos.immutable(),
-                    ProbeContext.blockName(mc.level, pos));
+        String name = ProbeContext.blockName(mc.level, pos);
+
+        // ★ "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）★
+        //   getMenuProvider 只对原版箱子这类有效（原版熔炉都不覆写它），所以只用它做肯定判断。
+        boolean hasGui = ProbeContext.hasMenuProvider(mc.level, pos)
+                || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player);
+
+        if (!hasGui) {
+            // 无 GUI 的容器（机械手这类）→ 直接进入这台设备的创建流程。
+            // 没有菜单 → 可视化选格用不了，选格页会自动切成"列表选格"。
+            ScopeScreen.openWorldCreate(mc, mc.level.dimension(), pos.immutable(), name);
             return;
         }
 
-        // 情况 C：有方块但既不是容器也没界面 → 等同"没有目标"
-        ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
+        // 有界面：只有服务端能开菜单，所以必须模拟一次真实右键。
+        if (!ProbeContext.tryOpenContainerGui(mc, hit)) {
+            // 手上物品会抢走这次右键（覆写了 onItemUseFirst 的工具）→ 不冒险，
+            // 退回根页并提示用户空手再试。
+            ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
+            ScopeScreen.flashOnOpen("logiscope.flash.hand_blocks_use");
+            return;
+        }
+        pendingOpen = new PendingOpen(mc.level.dimension(), pos.immutable(), name,
+                LogiScopeMod.probes().currentTick() + PENDING_OPEN_TICKS);
     }
 
-    private static void expirePendingOverlay() {
-        if (pendingOverlay && LogiScopeMod.probes().currentTick() > pendingOverlayUntil) {
-            // 服务端一直没开界面（太远 / 被拒）。别让这个标志挂着 ——
-            // 否则用户下一次正常开任何容器时，面板会莫名其妙自己弹出来。
-            pendingOverlay = false;
+    /**
+     * 等服务端开界面的超时兜底。
+     *
+     * 到期还没界面 → 说明这个方块其实没有界面（但"会不会消费右键"误判成有了，
+     * 例如某台机器右键会做别的事）。这时按"无 GUI"处理：直接进创建流程。
+     * 不这么做的话这个标志会一直挂着，导致用户**下一次正常开任何容器时面板自己弹出来**。
+     */
+    private static void expirePendingOpen(Minecraft mc) {
+        PendingOpen p = pendingOpen;
+        if (p == null || LogiScopeMod.probes().currentTick() <= p.deadline()) {
+            return;
+        }
+        pendingOpen = null;
+        // 这 2 秒里玩家可能自己开了别的界面（背包、聊天…）。那种情况下不要硬抢屏幕。
+        if (mc.screen != null || mc.level == null) {
+            return;
+        }
+        if (ProbeContext.isContainerLike(mc.level, p.pos())) {
+            ScopeScreen.openWorldCreate(mc, p.dim(), p.pos(), p.name());
         }
     }
 
@@ -271,18 +305,20 @@ public final class KeyBindings {
      * 这是"关掉界面之后还能找回来"的唯一可靠时机，见 ContainerAnchor 的类注释。
      */
     public static void onScreenInit(ScreenEvent.Init.Post event) {
-        if (!(event.getScreen() instanceof AbstractContainerScreen<?> containerScreen)) {
-            return;
-        }
+        Screen screen = event.getScreen();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             return;
         }
-        ContainerAnchor.onContainerScreenOpened(containerScreen.getMenu().containerId);
+        if (screen instanceof AbstractContainerScreen<?> containerScreen) {
+            ContainerAnchor.onContainerScreenOpened(containerScreen.getMenu().containerId);
+        }
 
-        if (pendingOverlay) {
-            pendingOverlay = false;
-            // 此刻 Minecraft#setScreen 已经把 mc.screen 赋成这个容器界面了
+        // 我们自己弹出/收起的界面不算"服务端给出的答复"；
+        // 玩家自己的背包界面也不算（那是他在这几 tick 里顺手按 E 打开的，与本次交互无关）。
+        if (pendingOpen != null && !(screen instanceof ScopeScreen) && !isOwnInventoryScreen(screen)) {
+            pendingOpen = null;
+            // 此刻 Minecraft#setScreen 已经把 mc.screen 赋成这个界面了
             // （它先赋值、再调 init，而 Init.Post 在 init 末尾发），所以压图层的父界面正确。
             ScopeScreen.openOverlay(mc, ScopeScreen.Page.ROOT, -1);
         }

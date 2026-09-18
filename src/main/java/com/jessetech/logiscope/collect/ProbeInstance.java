@@ -40,17 +40,26 @@ import java.util.List;
  *   PAUSED     不取值
  *
  * 【多格监控：一台设备上可以同时监控好几格，记录是聚合的】
- *   每 tick 只写**一条**样本：把所有被监控格子的数量**加在一起**，
- *   物品 id 的规则见 {@link Aggregator}（同种物品 → 那种物品；混着多种 → logiscope:mixed）。
- *   于是下游（存储/分组/波形/框选统计）一行都不用改 —— 它看到的仍是一条扁平时间序列。
+ *   每 tick 把各格内容**按物品求和**（规则见 {@link Aggregator}），
+ *   **每个出现的物品各写一条样本**（同一个 tick 值）：
+ *
+ *   | 两个被监控的格子 | 这个 tick 写几条、内容是什么 |
+ *   |---|---|
+ *   | 都是 64 铁 | 1 条：铁 × 128 |
+ *   | 64 铁 + 32 铜 | 2 条：铁 × 64、铜 × 32（图上两条不同颜色的线） |
+ *   | 都是空 | 1 条：air × 0（那条灰蓝的"被抽空了"线） |
+ *
+ *   于是下游（存储/分组/波形/图例/框选统计）一行都不用改 —— 它看到的仍是一条
+ *   扁平时间序列，只是"一个 tick 一段"里可以有好几条不同物品的样本。
+ *   唯一的连带修改是断点判定改成 per-series（见 {@code ChartData#build}）。
  *
  * 【PAUSED 的两种来源，行为不同】
  *   manualPause = true   用户按了「暂停」→ 不自动恢复，只能手动继续
  *   manualPause = false  数据源自己失效了 → 一旦数据源回来（重开同一台设备）自动恢复
  *
  * 【时间轴连续性：RECORDING → FOLLOWING 的接缝】
- *   关界面的那一 tick 记的是 lastKnown（上一 tick 的观测值），并把它垫进 WorldProbe 缓存，
- *   于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
+ *   关界面的那一 tick 记的是 lastViews（上一 tick 读到的槽位快照），并把它垫进
+ *   WorldProbe 缓存，于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
  *   真读不到的时候才会记 no_data —— 该断的地方照样断。
  *
  * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12 → 第八轮 N13）】
@@ -108,10 +117,13 @@ public final class ProbeInstance {
     /** 上一次给玩家发动作栏提示的 tick，用于去抖 */
     private long lastNotifyTick = Long.MIN_VALUE / 2;
 
-    // 聚合用的复用缓冲（每 tick 调一次，避免每 tick 造两个 List）
+    // 聚合用的复用缓冲（每 tick 调一次，避免每 tick 造 List）：
+    //   buf* 是**输入**（各格原本的物品与数量）
+    //   agg* 是**输出**（按物品分别求和之后的条目：每个出现的物品一条）
     private String[] bufIds = new String[8];
     private int[] bufCounts = new int[8];
-    private int bufN;
+    private String[] aggIds = new String[8];
+    private int[] aggCounts = new int[8];
 
     ProbeInstance(int id, ProbeManager manager) {
         this.id = id;
@@ -146,12 +158,22 @@ public final class ProbeInstance {
         return !target.slots().isEmpty();
     }
 
-    /** 列表页显示用的名字 */
+    /**
+     * 列表页显示用的名字：**这台设备（方块）的名字**。
+     *
+     * 用户实测反馈：原来只有"槽 0,1 · overworld 10,64,10"，机器一多就分不清谁是谁。
+     * 设备名是在建实例 / 选格完成时从方块状态里取的（{@code ProbeContext#blockName}）。
+     * 拿不到（例如异常路径）就退回一个通用名 —— 坐标永远在描述里，不会真的认不出来。
+     */
     public String name() {
-        return "P" + id;
+        String d = target.deviceName();
+        if (d != null && !d.isBlank()) {
+            return d;
+        }
+        return Component.translatable("logiscope.label.probe").getString();
     }
 
-    /** 列表页显示用的一行描述 */
+    /** 列表页显示用的一行描述（槽位 + 维度坐标） */
     public String describe() {
         if (!hasSlots()) {
             return target.anchorText();
@@ -227,7 +249,8 @@ public final class ProbeInstance {
     }
 
     /** 主动暂停（用户按的） */
-    public void pause() {        if (state == State.RECORDING || state == State.FOLLOWING) {
+    public void pause() {
+        if (state == State.RECORDING || state == State.FOLLOWING) {
             manualPause = true;
             state = State.PAUSED;
         }
@@ -298,8 +321,7 @@ public final class ProbeInstance {
                 // 不补的话时间轴在这里断一格，而下一 tick 又会因为异步读取还没回来
                 // 记一条 no_data —— 合起来就是实机反馈的"关界面时冒出 1t 的 no-data"。
                 if (lastViews != null) {
-                    Aggregator.Result r = aggregate(lastViews);
-                    store.add(new Sample(gameTime, r.itemId(), r.count()));
+                    writeTick(gameTime, lastViews);
                 }
                 enterFollowing(true);
             } else {
@@ -320,9 +342,8 @@ public final class ProbeInstance {
             pauseAuto();
             return;
         }
-        Aggregator.Result r = aggregate(views);
         lastViews = views;
-        store.add(new Sample(gameTime, r.itemId(), r.count()));
+        writeTick(gameTime, views);
     }
 
     /** 界面关着：按坐标读，读不到就记 no_data */
@@ -345,8 +366,7 @@ public final class ProbeInstance {
                 // 时间轴断一格，波形在这里凭空断开（与关界面方向对称）。
                 List<ContainerAccess.SlotView> bridge = probe.latest(WORLD_READ_MAX_AGE);
                 if (bridge != null) {
-                    Aggregator.Result r = aggregate(bridge);
-                    store.add(new Sample(gameTime, r.itemId(), r.count()));
+                    writeTick(gameTime, bridge);
                 }
                 state = State.RECORDING;
                 return;
@@ -359,9 +379,8 @@ public final class ProbeInstance {
         if (views == null) {
             store.add(Sample.noData(gameTime));
         } else {
-            Aggregator.Result r = aggregate(views);
             lastViews = views;
-            store.add(new Sample(gameTime, r.itemId(), r.count()));
+            writeTick(gameTime, views);
         }
     }
 
@@ -482,41 +501,78 @@ public final class ProbeInstance {
         return out;
     }
 
-    /** 把一组槽位快照聚合成一条样本内容（缓冲复用，不再分配 List） */
-    private Aggregator.Result aggregate(List<ContainerAccess.SlotView> views) {
+    /**
+     * 把一组槽位快照按物品求和，**写进复用的输出缓冲**（不分配 List）。
+     *
+     * @return 条目数（全空时为 1 —— 一条 {@code air × 0}）
+     */
+    private int aggregateInto(List<ContainerAccess.SlotView> views) {
         int n = views.size();
         if (bufIds.length < n) {
             bufIds = new String[n];
             bufCounts = new int[n];
+            aggIds = new String[n];
+            aggCounts = new int[n];
         }
         for (int i = 0; i < n; i++) {
             ContainerAccess.SlotView v = views.get(i);
             bufIds[i] = v.itemId();
             bufCounts[i] = v.count();
         }
-        bufN = n;
-        return Aggregator.combine(bufIds, bufCounts, bufN);
+        return Aggregator.combine(bufIds, bufCounts, n, aggIds, aggCounts);
     }
 
     /**
-     * 面板上那行 "now" 需要的实时值（聚合后）。
+     * 把一组槽位快照变成**这个 tick 的样本**写进环形缓冲。
      *
-     * @return null = 这一刻没有数据（no_data）；empty() 为真 = 读到了，只是全空
+     * ★ 一个 tick 可能写多条 ★（多格监控时每个出现的物品一条，见 Aggregator）
+     * 它们共用同一个 tick 值 —— 时间轴仍然是"每世界 tick 一段"，
+     * 只是这一段里可以有好几条不同物品的样本。
+     * 断点判定因此改成 per-series（见 {@code ChartData#build}）。
+     */
+    private void writeTick(long gameTime, List<ContainerAccess.SlotView> views) {
+        int m = aggregateInto(views);
+        for (int i = 0; i < m; i++) {
+            store.add(new Sample(gameTime, aggIds[i], aggCounts[i]));
+        }
+    }
+
+    /**
+     * 面板上那行 "now" 需要的实时值（按物品求和后的条目）。
+     *
+     * @return null = 这一刻没有数据（no_data）；列表里是一条 {@code air × 0} 时 = 读到了但全空
      */
     @Nullable
-    public Aggregator.Result liveValue() {
+    public List<Aggregator.Totals> liveTotals() {
         if (state == State.RECORDING) {
             List<ContainerAccess.SlotView> views = readMenuSlots();
-            return views == null ? null : aggregate(views);
+            if (views == null) {
+                return null;
+            }
+            int m = aggregateInto(views);
+            return listOfAgg(m);
         }
         if (state == State.FOLLOWING) {
             List<ContainerAccess.SlotView> views = probe.latest(WORLD_READ_MAX_AGE);
-            return views == null ? null : aggregate(views);
+            if (views == null) {
+                return null;
+            }
+            int m = aggregateInto(views);
+            return listOfAgg(m);
         }
+        // 暂停 / 待选格：拿最后一条样本凑合显示（它至少是"我最后看到的样子"）
         Sample last = store.latest();
         if (last == null || last.isNoData()) {
             return null;
         }
-        return new Aggregator.Result(last.itemId(), last.count());
+        return List.of(new Aggregator.Totals(last.itemId(), last.count()));
+    }
+
+    private List<Aggregator.Totals> listOfAgg(int m) {
+        List<Aggregator.Totals> out = new java.util.ArrayList<>(m);
+        for (int i = 0; i < m; i++) {
+            out.add(new Aggregator.Totals(aggIds[i], aggCounts[i]));
+        }
+        return out;
     }
 }

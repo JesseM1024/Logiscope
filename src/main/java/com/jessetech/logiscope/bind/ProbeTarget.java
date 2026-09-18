@@ -33,12 +33,17 @@ import java.util.List;
  * 持久身份是从右键方块事件（PlayerInteractEvent.RightClickBlock）或准星射线推出来的，
  * 见 ContainerAnchor / ProbeContext。推不出来时它就是 null，此时关掉界面只能暂停。
  *
- * @param slots     被监控的格子（至少一个；还没选格时为空表）
- * @param dimension 维度 key；拿不到为 null
- * @param pos       方块坐标；拿不到为 null
+ * @param slots      被监控的格子（至少一个；还没选格时为空表）
+ * @param deviceName 这台设备（方块）的名字，例如"熔炉""MEK 熔炼工厂"。
+ *                   只用于界面显示 —— 用户实测反馈："探针实例名称里前缀加一个这个方块的名字"，
+ *                   否则列表里只有"槽 0,1 · overworld 10,64,10"，认不出是哪台机器。
+ *                   ⚠️ 它**不参与任何身份判定**（身份仍然是维度+坐标），所以刷新不及时也无所谓。
+ * @param dimension  维度 key；拿不到为 null
+ * @param pos        方块坐标；拿不到为 null
  */
 public record ProbeTarget(
         List<SlotRef> slots,
+        @Nullable String deviceName,
         @Nullable ResourceKey<Level> dimension,
         @Nullable BlockPos pos) {
 
@@ -67,7 +72,7 @@ public record ProbeTarget(
     }
 
     /** 还没选格的空目标 */
-    public static final ProbeTarget EMPTY = new ProbeTarget(List.of(), null, null);
+    public static final ProbeTarget EMPTY = new ProbeTarget(List.of(), null, null, null);
 
     /** 是否具备"关掉界面之后还能找回来"的持久身份 */
     public boolean hasPersistentId() {

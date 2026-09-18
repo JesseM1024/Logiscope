@@ -271,7 +271,7 @@ public final class ScopeScreen extends Screen {
      */
     public static void openWorldCreate(Minecraft mc, ResourceKey<Level> dim, BlockPos pos, String label) {
         ProbeManager mgr = LogiScopeMod.probes();
-        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), dim, pos));
+        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), label, dim, pos));
         if (created == null) {
             flashOnOpen("logiscope.flash.too_many_probes");
             openStandalone(mc, Page.ROOT, -1);
@@ -321,10 +321,7 @@ public final class ScopeScreen extends Screen {
             if (p == null) {
                 page = Page.ROOT;
             } else {
-                seedSelectionOnce(p);
-                if (p.target().hasPersistentId()) {
-                    ProbeSlots.request(p.target().dimension(), p.target().pos());
-                }
+                enterPicker(p);
             }
         }
         refreshSnapshots();
@@ -397,6 +394,25 @@ public final class ScopeScreen extends Screen {
      * 进入选格页时，把实例已有的槽位回填成"已勾选"状态 ——
      * 用户点「选格」回来是想改一两格，不该面对一张空表。
      */
+    /**
+     * 进入选格页 —— **三个入口共用**（打开面板时落在选格页 / 根页点了一个还没选格的探针 /
+     * 图表页点「选格」）。
+     *
+     * ★ 第十轮修的 bug：只有前两条路会回填"已选格子" ★
+     * 用户实测反馈：选完格开始测量 → 退出界面 → 再打开面板 → 进选格页，
+     * 显示的是"已选 0 格"。根因就是「图表页点选格」没走回填那条路。
+     * 现在统一从这里进，回填的去重（{@link #seededForProbeId}）保证
+     * 不会把用户正在改的选择冲掉。
+     */
+    private void enterPicker(ProbeInstance p) {
+        pickerProbeId = p.id();
+        seedSelectionOnce(p);
+        if (p.target().hasPersistentId()) {
+            ProbeSlots.request(p.target().dimension(), p.target().pos());
+        }
+        page = Page.PICKER;
+    }
+
     private void seedSelectionOnce(ProbeInstance p) {
         if (seededForProbeId == p.id()) {
             return;
@@ -911,10 +927,6 @@ public final class ScopeScreen extends Screen {
                 };
                 g.drawString(this.font, badge + " · " + tr("logiscope.info.selected") + " " + selectionCount(),
                         left, y, 0x9BE1CB, false);
-                if (cellMode) {
-                    String m = tr("logiscope.hint.cell_mode");
-                    g.drawString(this.font, m, right - this.font.width(m), y, 0x3FE0A0, false);
-                }
             }
             case CHART -> {
                 ProbeInstance p = currentProbe();
@@ -927,11 +939,13 @@ public final class ScopeScreen extends Screen {
 
                 String now = "now " + currentValueText(p);
                 g.drawString(this.font, now, left, y, 0x9BE1CB, false);
-                String counts = "samples " + summary.dataCount() + "  no-data " + summary.noDataCount();
+                String counts = "ticks " + summary.dataTicks() + "  no-data " + summary.noDataTicks();
                 g.drawString(this.font, counts, right - this.font.width(counts), y, 0x808088, false);
                 y += ROW_H;
 
-                String mm = "min " + summary.min() + "  max " + summary.max() + "  avg " + summary.average();
+                String mm = "min " + ChartRenderer.fmtCount(summary.min()) + "  max "
+                        + ChartRenderer.fmtCount(summary.max()) + "  avg "
+                        + ChartRenderer.fmtCount(summary.average());
                 g.drawString(this.font, mm, left, y, 0xC8C8D4, false);
                 String sw = "switch " + chartData.switches() + "  series " + chartData.series().size();
                 g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
@@ -939,16 +953,35 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** 面板上那行 "now"。RECORDING 直接读菜单，其余从最近一条样本取。 */
+    /**
+     * 面板上那行 "now"。RECORDING 直接读菜单，其余从最近一条样本取。
+     *
+     * ★ 多格监控时这里会有**多条**（每个物品一条）★
+     * 最多显示 3 条，多的收成 "+N" —— 和十字线读数的处理一致，不把一行塞爆。
+     */
     private String currentValueText(ProbeInstance p) {
-        Aggregator.Result r = p.liveValue();
-        if (r == null) {
+        List<Aggregator.Totals> totals = p.liveTotals();
+        if (totals == null || totals.isEmpty()) {
             return tr("logiscope.nodata");
         }
-        if (r.empty()) {
+        if (totals.size() == 1 && totals.get(0).empty()) {
             return tr("logiscope.slot.empty");
         }
-        return ChartRenderer.label(-1, r.itemId()) + " x" + r.count();
+        StringBuilder sb = new StringBuilder();
+        int shown = 0;
+        for (Aggregator.Totals t : totals) {
+            if (shown == 3) {
+                sb.append(" +").append(totals.size() - shown);
+                break;
+            }
+            if (shown > 0) {
+                sb.append("  ·  ");
+            }
+            sb.append(ChartRenderer.label(-1, t.itemId())).append(" x")
+                    .append(ChartRenderer.fmtCount(t.count()));
+            shown++;
+        }
+        return sb.toString();
     }
 
     // ------------------------------------------------------------------
@@ -987,11 +1020,14 @@ public final class ScopeScreen extends Screen {
                 g.fill(x + 4, ry - 1, x + 4 + 2, ry + ROW_H - 1, 0xFF3FE0A0);
             }
 
-            g.drawString(this.font, p.name(), x + 8, ry, active ? 0xFFF0F0FF : 0xFFC8C8D8, false);
+            // 行首是**设备名**（用户要求：探针名称里前缀加方块名），然后是状态、槽位+坐标
+            String name = cut(p.name(), 92);
+            g.drawString(this.font, name, x + 8, ry, active ? 0xFFF0F0FF : 0xFFC8C8D8, false);
+            int stX = x + 8 + this.font.width(name) + 6;
             String st = shortState(p);
-            g.drawString(this.font, st, x + 30, ry, stateColor(p), false);
+            g.drawString(this.font, st, stX, ry, stateColor(p), false);
             String desc = p.describe();
-            int descX = x + 30 + this.font.width(st) + 8;
+            int descX = stX + this.font.width(st) + 6;
             int descW = x + L.w() - 4 - DEL_W - 4 - descX;
             if (descW > 20) {
                 g.drawString(this.font, cut(desc, descW), descX, ry,
@@ -1477,9 +1513,7 @@ public final class ScopeScreen extends Screen {
             selectionStats = List.of();
             userZoomed = false;
         } else {
-            pickerProbeId = p.id();
-            page = Page.PICKER;
-            seedSelectionOnce(p);
+            enterPicker(p);
         }
         builtVersion = Long.MIN_VALUE;
     }
@@ -1678,7 +1712,7 @@ public final class ScopeScreen extends Screen {
         }
 
         ProbeTarget old = p.target();
-        ProbeTarget target = new ProbeTarget(refs, old.dimension(), old.pos());
+        ProbeTarget target = new ProbeTarget(refs, old.deviceName(), old.dimension(), old.pos());
         // verifyViews：下标指纹验证只在"界面开着"这一刻做得准，所以顺手带上
         p.configure(target, forVerify);
         mgr.setActive(p.id());
@@ -1726,23 +1760,21 @@ public final class ScopeScreen extends Screen {
                 say(tr("logiscope.flash.cells_cleared"));
             }
             case "done" -> commitPicker();
-            case "to_root" -> {
-                if (page == Page.PICKER) {
-                    leavePicker();
-                } else {
-                    page = Page.ROOT;
-                }
+            case "to_root" -> leavePicker();
+            case "list" -> {
+                // 图表页的「列表」：回根页挑别的探针
+                // （第十轮修的 bug：按钮 id 是 "list"，而 onChip 里只写了 "to_root"，
+                //   于是这个按钮此前是**完全没反应**的 —— 用户 A 组实测反馈）
+                cellMode = false;
+                cellDragButton = -1;
+                page = Page.ROOT;
             }
             case "pick" -> {
                 ProbeInstance p = currentProbe();
                 if (p != null) {
-                    pickerProbeId = p.id();
                     cellMode = false;
                     cellDragButton = -1;
-                    if (p.target().hasPersistentId()) {
-                        ProbeSlots.request(p.target().dimension(), p.target().pos());
-                    }
-                    page = Page.PICKER;
+                    enterPicker(p);
                 }
             }
             case "pause" -> {
@@ -1823,20 +1855,18 @@ public final class ScopeScreen extends Screen {
             say(tr("logiscope.flash.no_target"));
             return;
         }
-        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), cand.dimension(), cand.pos()));
+        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), cand.label(), cand.dimension(), cand.pos()));
         if (created == null) {
             say(tr("logiscope.flash.too_many_probes"));
             return;
         }
-        if (cand.hasAnchor()) {
-            ProbeSlots.request(cand.dimension(), cand.pos());
-        }
-        pickerProbeId = created.id();
+        // 全新实例：先把"已回填"标记打上，免得 enterPicker 里的回填把它清成空
+        // （其实也没得回填，但这样语义明确：回填只针对"已经有槽位的实例"）
         seededForProbeId = created.id();
         selMenuSlots.clear();
         selContainerSlots.clear();
         cellMode = false;
-        page = Page.PICKER;
+        enterPicker(created);
         say(tr("logiscope.flash.probe_created").replace("%s", created.name()));
     }
 

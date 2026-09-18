@@ -2,14 +2,10 @@
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
-
   "logiscope.page.picker": "选格",
   "logiscope.page.chart": "图表",
-
   "logiscope.slot.empty": "（空）",
-  "logiscope.slot.mixed": "混合物品",
   "logiscope.nodata": "（无数据）",
-
   "logiscope.status.idle": "未连接探头",
   "logiscope.status.armed": "待选格",
   "logiscope.status.recording": "记录中",
@@ -18,19 +14,15 @@
   "logiscope.status.paused_auto": "已暂停（源丢失）",
   "logiscope.status.probes": "探针",
   "logiscope.status.picking": "已选",
-
   "logiscope.short.armed": "待选格",
   "logiscope.short.recording": "记录中",
   "logiscope.short.following": "跟踪中",
   "logiscope.short.paused": "已暂停",
-
   "logiscope.info.probes": "正在运行的探针",
   "logiscope.info.selected": "已选格子",
-
   "logiscope.src.menu": "来源：容器界面·可可视化选格",
   "logiscope.src.world": "来源：方块实体·只能列表选格",
   "logiscope.src.none": "来源：无",
-
   "logiscope.hint.drag": "按住这里拖动",
   "logiscope.hint.resize": "拖这里缩放面板",
   "logiscope.hint.scroll": "滚轮翻页",
@@ -40,9 +32,7 @@
   "logiscope.hint.create_ready": "点「＋ 创建探针」，再用光标在容器界面里点格子",
   "logiscope.hint.not_a_container": "这个方块不含物品栏",
   "logiscope.hint.world_reading": "正在读取服务端槽位清单…",
-  "logiscope.hint.cell_mode": "左键选·右键取消",
   "logiscope.hint.cell_mode_short": "左键选·右键取消·拖过即选中",
-
   "logiscope.btn.create_probe": "＋ 创建探针",
   "logiscope.btn.cell_mode": "选择容器格",
   "logiscope.btn.cell_mode_on": "结束选格",
@@ -56,16 +46,13 @@
   "logiscope.btn.close": "收起",
   "logiscope.btn.follow_on": "关界面后继续检测：开",
   "logiscope.btn.follow_off": "关界面后继续检测：关",
-
   "logiscope.tool.live": "实时滚动",
   "logiscope.tool.frozen": "已冻结",
   "logiscope.tool.fit": "全览",
   "logiscope.tool.clear_sel": "清选",
-
   "logiscope.chart.too_small": "面板太小·拖右下角放大",
   "logiscope.chart.no_data_in_window": "这一区间没有数据·点「全览」看整段",
   "logiscope.chart.all_hidden": "数据线都被图例关掉了",
-
   "logiscope.flash.probe_created": "已创建 %s·现在选格子",
   "logiscope.flash.probe_deleted": "已删除 %s（缓存已清）",
   "logiscope.flash.probe_configured": "探针已接上，开始监测",
@@ -82,8 +69,8 @@
   "logiscope.flash.live": "已回到实时滚动",
   "logiscope.flash.fit": "已全览整段记录",
   "logiscope.flash.sel_cleared": "已清除选区",
-
   "logiscope.msg.following": "LogiScope：界面已关，转为坐标跟踪",
   "logiscope.msg.paused_auto": "LogiScope：数据源丢失，已暂停",
-  "logiscope.msg.index_unverified": "LogiScope：警告——该机器的槽位下标无法验证，关界面后跟踪的可能不是你选的格子"
+  "logiscope.msg.index_unverified": "LogiScope：警告——该机器的槽位下标无法验证，关界面后跟踪的可能不是你选的格子",
+  "logiscope.label.probe": "探针"
 }
