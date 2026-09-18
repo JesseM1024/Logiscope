@@ -16,7 +16,8 @@ import java.util.List;
  *   · 求和 / 极值 / 平均：跳过 no_data
  *   · 首值 / 末值 / 净变化：取最近的两个**有数据**样本
  *   · 类型切换：no_data 不算一次切换，它只是断档
- * 图上的处理是"断开"，见 ScopeScreen#renderSparkline。
+ * 图上的处理是"断开"，见 {@code ui/ChartRenderer}（按物品分线 + 断点不连线）
+ * 和 {@link ChartData#build}（断点标记的产生处）。
  *
  * 后续要加的东西（见 docs/GOALS.md）：
  *   - 滑窗速率（物品/tick 的平滑曲线）

@@ -3,10 +3,12 @@
 **纯客户端物流探测示波器** —— 给模组机器装一台示波器。
 
 在任意模组设备的容器界面里按 `]`，把某个容器格接到探头上，
-逐游戏刻记录里面物品的种类与数量变化，并画成波形。
+逐游戏刻记录里面物品的种类与数量变化，并画成带坐标轴的波形。
 
-面板是一个**可以拖动的浮层**：它不会盖住原容器界面，你可以边看机器边看波形。
-关掉容器界面之后记录也能继续（单人从方块实体读真值，多人记断档，跨空档的差值依然有效）。
+面板是一个**可以拖动、可以缩放的浮层**：它不会盖住原容器界面，你可以边看机器边看波形。
+波形按物品分线、各有各的颜色（物品切换处自然断开），图例可以点掉不想看的线，
+还能用鼠标框选一段区间看那一段的净变化。关掉容器界面之后记录也能继续
+（单人从方块实体读真值，多人记断档，跨空档的差值依然有效）。
 
 > 全程只读客户端已同步的数据。**不发网络包、不需要服务端安装、不注册任何物品。**
 
@@ -47,7 +49,7 @@ gradlew.bat createLaunchScripts
 |---|---|---|
 | [`docs/VISION.md`](docs/VISION.md) | 项目方向、核心依据、**明确不做什么** | 开始任何新功能前 |
 | [`docs/GOALS.md`](docs/GOALS.md) | G0–G6 分目标与**可验证的验收标准** | 想知道"下一步做什么" |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**9 条关键逻辑路径**、数据契约、**已核实的 API 清单** | **改代码前必读** |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**12 条关键逻辑路径（CP1–CP12）**、数据契约、**已核实的 API 清单** | **改代码前必读** |
 | [`docs/VERIFY.md`](docs/VERIFY.md) | **实机验证清单**（逐条可打勾） | 每次改完要进游戏试 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 目前进度、已知问题、验证记录 | 每次开工前 |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复、**本地 git 用法（含要不要上传 GitHub）** | 做有风险的改动前 |
@@ -59,23 +61,33 @@ gradlew.bat createLaunchScripts
 
 ---
 
-## 按键
+## 按键与操作
 
-| 键 | 作用 |
+| 操作 | 作用 |
 |---|---|
-| `F9` | 打开/收起示波器面板（可在「选项 → 控制 → 物流示波器」里改） |
+| `]` | 打开/收起示波器面板（代码默认值是 `F9`，可在「选项 → 控制 → 物流示波器」里改） |
 | ESC | 收起面板（原容器界面会回来） |
-| 鼠标拖动标题栏 | 移动面板 |
+| 拖动**标题栏** | 移动面板（可以拖出屏幕，留 1/8 屏宽能抓住） |
+| 拖动**右下角** | 缩放面板（尺寸和位置都会记住） |
+| 在**波形**里拖动 | 框选一段区间 → 自动冻结视图 + 显示该区间的净变化 |
+| 在波形里**点一下** | 取消选择 |
+| 滚轮（实时模式） | 缩放时间窗口 |
+| 滚轮（冻结模式） | 左右平移，回头细看某一段 |
+| 点**图例色块** | 开关那条数据线的渲染 |
 
-> **为什么用 F9**：一路试过 `O` → `]`，两次都被"在搜索框里打字"咬到。
-> 功能键**不产生字符**，冲突通道从根上就不存在 —— 这是最省心的选择。
-> 代价是离主键区远、笔记本上可能要按 Fn，想换回 `]` 也行
-> （那样会用到三层文本守卫，见 `ARCHITECTURE.md` CP2）。
+面板上的按钮：返回选格 / 暂停 / 继续 / 清空 / 关界面后继续检测（开关）/ 收起，
+以及图表工具栏的 实时滚动（冻结）/ `-` / `+` / 全览 / 清选。
+
+> **关于键位**：一路试过 `O` → `]` → `F9`，`O` 和 `]` 都被"在搜索框里打字"咬到过。
+> 代码默认给的是 `F9`（功能键**不产生字符**，冲突通道从根上不存在）；
+> 你要是更喜欢 `]`，也能用 —— 那就是三层文本守卫在兜（见 `ARCHITECTURE.md` CP2），
+> 实测在 JEI 搜索框里打 `hopper` 再按 `]` 也不会误触发。
 >
 > 另外 `KeyMapping` 的匹配**不看修饰键**，所以设成 `Ctrl+O` 没用
 > （单独按 `o` 照样命中）—— 这是踩过的坑之一。
 >
 > ⚠️ 改了默认键位之后要注意：按键绑定会存在 `run/options.txt` 里并**覆盖代码默认值**。
+> 这就是为什么"改了代码里的默认值但游戏里没变"。
 
 ---
 
@@ -84,23 +96,39 @@ gradlew.bat createLaunchScripts
 ```
 logiscope/
 ├─ docs/                       设计文档（见上表）
+├─ dev-check/TestChart.java    ★ 离线断言：不启动游戏就能验断点规则/分组/统计
 ├─ src/main/
 │  ├─ java/com/jessetech/logiscope/
 │  │  ├─ LogiScopeMod.java     主类：注册 7 个事件监听、持有唯一 Sampler
 │  │  ├─ bind/                 输入层（快捷键 + TextInputGuard 三层打字守卫）+ 绑定层（坐标锚点 / 探针目标）
 │  │  ├─ collect/              采集层（★ 三条取值路径都在这）
 │  │  │     ContainerAccess    读菜单槽位（界面开着）
-│  │  │     WorldProbe         读方块实体（界面关了，单人）
+│  │  │     WorldProbe         读方块实体（界面关了，单人；带 seed 垫值）
 │  │  │     Sampler            状态机 + 每 tick 采样
-│  │  ├─ store/                存储层（环形缓冲 + no_data 哨兵）
-│  │  ├─ analysis/             分析层（纯函数，跳过 no_data）
-│  │  └─ ui/                   呈现层（可拖动浮层面板，只读；向外转发鼠标给容器）
-│  ├─ templates/               元数据模板（${} 占位符）
-│  └─ resources/assets/        语言文件
+│  │  ├─ store/                存储层（环形缓冲 + version + no_data 哨兵）
+│  │  ├─ analysis/             分析层（纯函数，不 import 任何游戏类）
+│  │  │     Analyzer           摘要 / 逐 tick 差值
+│  │  │     ChartData          扁平序列 → 按物品分组的数据线（★ 断点规则在这）
+│  │  ├─ ui/                   呈现层（只读）
+│  │  │     ScopeScreen        可拖动可缩放的浮层面板：布局 / 交互 / 视图状态
+│  │  │     ChartRenderer      坐标轴 / 波形 / 框选 / 准线
+│  │  ├─ templates/            元数据模板（${} 占位符）
+│  │  └─ resources/assets/     语言文件
 ├─ build.gradle                注意 filteringCharset = 'UTF-8' 那一行
 ├─ gradle.properties           版本号都在这里
 └─ verify-jar.py               构建产物验收工具
 ```
+
+**`analysis/` 与 `store/` 刻意不 import 任何 `net.minecraft`** ——
+这不是洁癖，而是让 `dev-check/TestChart.java` 能脱离游戏跑断言的前提：
+
+```bat
+gradlew.bat compileJava
+javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/TestChart.java
+java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" TestChart
+```
+
+波形断点这类逻辑的 bug 在游戏里几乎看不出来，靠断言钉住才是可靠的办法。
 
 ---
 

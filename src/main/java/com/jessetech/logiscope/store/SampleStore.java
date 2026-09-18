@@ -15,12 +15,22 @@ import java.util.List;
  * 为什么要 synchronized：
  *   采样在客户端 tick 线程，绘制在渲染线程。虽然 1.20+ 两者基本同一个线程，
  *   但加上锁的成本可忽略，能避免以后引入异步分析时踩坑。
+ *
+ * ★ 为什么要有 version ★
+ *   界面每帧都要"把时间序列整理成按物品分组的折线"（见 analysis/ChartData）。
+ *   这个整理是 O(n) 的：不缓存的话，60 fps 下每秒白烧 60 次全量遍历。
+ *   有了 version，界面就能"只在数据真的变了之后重算一次"——
+ *   采样是 20 tick/秒，所以从 60 次/秒 降到 20 次/秒，且改动只集中在这一处
+ *   （不会出现"某条路径忘了通知界面刷新"的漏网情况）。
  */
 public final class SampleStore {
 
     private final Sample[] buf;
     private int size;
     private int head;
+
+    /** 数据版本号：只要内容变了就 +1。界面靠它判断"要不要重算派生数据"。 */
+    private long version;
 
     public SampleStore(int capacity) {
         this.buf = new Sample[Math.max(1, capacity)];
@@ -32,10 +42,16 @@ public final class SampleStore {
         if (size < buf.length) {
             size++;
         }
+        version++;
     }
 
     public synchronized int size() {
         return size;
+    }
+
+    /** 数据版本号，见类注释。任何 add / clear 都会让它变化。 */
+    public synchronized long version() {
+        return version;
     }
 
     public int capacity() {
@@ -49,7 +65,14 @@ public final class SampleStore {
         return buf[(head - 1 + buf.length) % buf.length];
     }
 
-    /** 按时间先后顺序导出副本（最旧 -> 最新） */
+    /**
+     * 按时间先后顺序导出副本（最旧 -> 最新）。
+     *
+     * 注意：这会真的复制一份（最多 36000 个引用，约 290 KB）。
+     * 界面只在 version 变化后才调用它，即最多 20 次/秒 —— 对年轻代 GC 完全无压力。
+     * 想再省一步的话，可以改成提供一个"按序遍历"的回调，但那样会把
+     * ChartData 的纯函数形态破坏掉，不划算。
+     */
     public synchronized List<Sample> toList() {
         List<Sample> out = new ArrayList<>(size);
         int start = (head - size + buf.length) % buf.length;
@@ -63,5 +86,6 @@ public final class SampleStore {
         Arrays.fill(buf, null);
         size = 0;
         head = 0;
+        version++;
     }
 }
