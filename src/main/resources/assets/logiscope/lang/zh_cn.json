@@ -31,7 +31,7 @@
   "logiscope.tool.clear_sel": "清选",
 
   "logiscope.chart.too_small": "面板太小·拖右下角放大",
-  "logiscope.chart.no_data_in_window": "这一区间没有数据",
+  "logiscope.chart.no_data_in_window": "这一区间没有数据·点「全览」看整段",
   "logiscope.chart.all_hidden": "数据线都被图例关掉了",
 
   "logiscope.flash.attached": "探头已接上",

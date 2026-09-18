@@ -44,22 +44,28 @@ public final class ChartRenderer {
      * 下标 = 物品首次出现的顺序（见 ChartData#build 里的 LinkedHashMap），
      * 所以颜色是稳定的：某条线不会因为"又冒出一个新物品"而突然换色。
      * 挑色的标准是"在深色底上互相分得开"，而不是好看 —— 观测工具优先看辨得清。
+     *
+     * ★ 每个颜色都必须带 0xFF 的 alpha 位 ★
+     * GuiGraphics#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
+     * 它不像 drawString 那样有 adjustColor 兜底（Font.java:172：alpha 位为 0 就补 0xFF）。
+     * 第五轮实机"图里没有任何线"就是这里：调色板写成 0x5DCAA5，alpha=0，线全被画没了。
+     * 这个坑从第一轮的火花线（0x9BE1CB）就存在，只是当时没人盯着火花线看。
      */
     private static final int[] PALETTE = {
-            0x5DCAA5, // 青绿
-            0x6FB6E8, // 蓝
-            0xEF9F27, // 琥珀
-            0xE86A6A, // 红
-            0xB98AE8, // 紫
-            0x8FD14F, // 黄绿
-            0xE8A0C8, // 粉
-            0x4FD1E0, // 青
-            0xD9C36B, // 土黄
-            0xA0A8B8, // 灰
+            0xFF5DCAA5, // 青绿
+            0xFF6FB6E8, // 蓝
+            0xFFEF9F27, // 琥珀
+            0xFFE86A6A, // 红
+            0xFFB98AE8, // 紫
+            0xFF8FD14F, // 黄绿
+            0xFFE8A0C8, // 粉
+            0xFF4FD1E0, // 青
+            0xFFD9C36B, // 土黄
+            0xFFA0A8B8, // 灰
     };
 
     /** "格子空着"单独给一个低饱和的灰蓝：它不是物品，不该和物品线抢注意力 */
-    private static final int EMPTY_SLOT_COLOR = 0x707888;
+    private static final int EMPTY_SLOT_COLOR = 0xFF707888;
 
     // ------------------------------------------------------------------
     // 布局与配色常量
@@ -77,7 +83,7 @@ public final class ChartRenderer {
     private static final int COLOR_GRID = 0x18FFFFFF;
     private static final int COLOR_LABEL = 0xFF7A7A92;
     private static final int COLOR_TEXT = 0xFFD0D0DC;
-    private static final int COLOR_SEL = 0xEF9F27;
+    private static final int COLOR_SEL = 0xFFEF9F27;
     private static final int COLOR_CROSS = 0x60FFFFFF;
 
     /** 时间刻度的候选步长（tick）。20 tick = 1 秒。 */
@@ -258,12 +264,17 @@ public final class ChartRenderer {
         }
 
         if (vLo == Integer.MAX_VALUE) {
-            // 窗口里没有采样点（暂停中、或刚接上探头）。时间轴还是要画，
-            // 否则玩家看到一块纯黑，分不清"没数据"和"面板坏了"。
+            // 窗口里没有采样点（暂停中、刚接上探头、或最近一段全是 no_data）。
+            // 时间轴还是要画，否则玩家看到一块纯黑，分不清"没数据"和"面板坏了"。
             drawTimeAxis(g, font);
             centered(g, font,
                     anyVisible ? tr("logiscope.chart.no_data_in_window") : tr("logiscope.chart.all_hidden"),
                     plotX + plotW / 2, plotY + plotH / 2 - 4, COLOR_LABEL);
+            // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
+            // 第五轮 N8 就是这么全部失败的（用户以为框选坏了，其实是没数据 + 没反馈）
+            if (view.selection() != null) {
+                drawSelection(g, font, view.selection(), List.of(), data);
+            }
             return;
         }
 
