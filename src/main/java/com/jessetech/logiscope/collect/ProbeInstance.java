@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.collect;
 
+import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeTarget;
@@ -84,17 +85,10 @@ public final class ProbeInstance {
         PAUSED
     }
 
-    /**
-     * 容量 = 20 tick/秒 × 60 秒 × 30 分 = 半小时（每个实例各一份）。
-     *
-     * ⚠️ 它是按**样本条数**算的：`/tick rate 200` 时一个世界 tick 一条，
-     * 30 分钟的历史会缩短到 3 分钟（这是"每 tick 一条真值"的代价，已记录在案）。
-     */
-    private static final int CAPACITY = 20 * 60 * 30;
-
     private final int id;
     private final ProbeManager manager;
-    private final SampleStore store = new SampleStore(CAPACITY);
+    /** 容量来自配置（`bufferSamples`，默认 72000 条样本）；**改了会热切换**，见 ensureCapacity */
+    private final SampleStore store = new SampleStore(LogiScopeConfig.bufferSamples());
     private final WorldProbe probe = new WorldProbe();
 
     /** 采样互斥：客户端线程（菜单路径）与服务端线程（tick 路径）都可能写样本 */
@@ -219,6 +213,19 @@ public final class ProbeInstance {
                 // 既没有菜单路径、又拿不到坐标：只能明确停住，不假装在记录
                 this.state = State.PAUSED;
                 manualPause = false;
+            }
+        }
+    }
+
+    /**
+     * 配置里的缓冲容量改了就跟上（**保留最新样本**）。
+     * 由 {@link ProbeManager} 每客户端 tick 调一次 —— 便宜到可以忽略（一次整数比较）。
+     */
+    void ensureCapacity() {
+        int want = LogiScopeConfig.bufferSamples();
+        if (store.capacity() != want) {
+            synchronized (sampleLock) {
+                store.resize(want);
             }
         }
     }

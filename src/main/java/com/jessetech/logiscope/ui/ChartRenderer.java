@@ -94,6 +94,9 @@ public final class ChartRenderer {
     private static final int COLOR_SEL = 0xFFEF9F27;
     private static final int COLOR_CROSS = 0x60FFFFFF;
 
+    /** 有 IO 线时画的 0 基线：读流量必须有参照，否则看不出"是进还是出" */
+    private static final int COLOR_FLOW_ZERO = 0x40FFFFFF;
+
     /** 时间刻度的候选步长（tick）。20 tick = 1 秒。 */
     private static final long[] TICK_LADDER = {
             20, 40, 100, 200, 400, 1000, 2000, 4000, 10000, 20000, 40000, 100000, 200000, 600000
@@ -128,6 +131,10 @@ public final class ChartRenderer {
     private int yLo;
     private int ySpan;
     private int usable;
+
+    /** 本帧可见数据的最小 / 最大值（存量与 IO 一起扫，见 render） */
+    private int vScanLo;
+    private int vScanHi;
 
     // ------------------------------------------------------------------
     // 对外的小数据结构
@@ -168,6 +175,8 @@ public final class ChartRenderer {
             long startTick,
             long endTick,
             Set<String> hidden,
+            /** 开了 IO 线（单 tick 净流量）的物品 —— 图例里"物品 → IO"子行的开关 */
+            Set<String> ioShown,
             @Nullable Selection selection,
             boolean draft,
             List<ChartData.SeriesRange> selectionStats,
@@ -180,6 +189,19 @@ public final class ChartRenderer {
             return EMPTY_SLOT_COLOR;
         }
         return PALETTE[Math.floorMod(seriesIndex, PALETTE.length)];
+    }
+
+    /**
+     * IO 线的颜色：把物品色**整体提亮**一档（同色系）。
+     *
+     * 为什么不用虚线 / 换色相：虚线要自己拼像素（`GuiGraphics` 没有画线 API），
+     * 而换色相会让"哪条 IO 属于哪个物品"要靠猜。同色系浅一档最直观。
+     */
+    public static int flowColor(int color) {
+        int r = Math.min(255, ((color >> 16) & 0xFF) + 72);
+        int g = Math.min(255, ((color >> 8) & 0xFF) + 72);
+        int b = Math.min(255, (color & 0xFF) + 72);
+        return (color & 0xFF000000) | (r << 16) | (g << 8) | b;
     }
 
     // ------------------------------------------------------------------
@@ -247,29 +269,30 @@ public final class ChartRenderer {
 
         List<Series> all = data.series();
         boolean anyVisible = false;
-        int vLo = Integer.MAX_VALUE;
-        int vHi = Integer.MIN_VALUE;
+        boolean anyFlow = false;
+        vScanLo = Integer.MAX_VALUE;
+        vScanHi = Integer.MIN_VALUE;
 
+        // 纵轴自动缩放会把**所有可见的线**一起算进去：存量线与 IO 线都算。
+        // 两者量级差得远时（存量 1.79E6、IO ±64），把存量线在图例里关掉，
+        // 轴就会自动缩放到 IO 自己的范围 —— 比在一张图里塞两套刻度清楚得多。
         for (Series s : all) {
-            if (view.hidden().contains(s.itemId())) {
+            boolean level = !view.hidden().contains(s.itemId());
+            boolean io = view.ioShown().contains(s.itemId());
+            if (!level && !io) {
                 continue;
             }
             anyVisible = true;
-            List<SeriesPoint> pts = s.points();
-            // 二分找窗口起点：全览 30 分钟数据时，这一步能省掉几万次无用的比较
-            for (int i = lowerBound(pts, start); i < pts.size(); i++) {
-                SeriesPoint p = pts.get(i);
-                if (p.tick() > end) {
-                    break;
-                }
-                if (p.count() < vLo) {
-                    vLo = p.count();
-                }
-                if (p.count() > vHi) {
-                    vHi = p.count();
-                }
+            if (level) {
+                scanWindow(s.points());
+            }
+            if (io && s.hasFlow()) {
+                anyFlow = true;
+                scanWindow(s.flow());
             }
         }
+        int vLo = vScanLo;
+        int vHi = vScanHi;
 
         if (vLo == Integer.MAX_VALUE) {
             // 窗口里没有采样点（暂停中、刚接上探头、或最近一段全是 no_data）。
@@ -281,7 +304,7 @@ public final class ChartRenderer {
             // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
             // 第五轮 N8 就是这么全部失败的（用户以为框选坏了，其实是没数据 + 没反馈）
             if (view.selection() != null) {
-                drawSelection(g, font, view.selection(), List.of(), data);
+                drawSelection(g, font, view.selection(), List.of(), data, view.ioShown());
             }
             return;
         }
@@ -291,13 +314,16 @@ public final class ChartRenderer {
         //   · 刻度落在整数上，读得出来
         //   · 窗口滚动时范围只会偶尔跳一次，不会每一帧都在抖
         int step = niceStep((int) Math.ceil((vHi - vLo) / 4.0));
+        // 存量永远 ≥ 0，所以底边贴 0 更好看；但 **IO 线可以是负的**，
+        // 那时就不能把下界钳到 0（负值会被切到图外）。
+        boolean clampZero = vLo >= 0;
         // ★ 刻度必须"读得出来"：相邻两个标签不能是同一个字符串 ★
         // 大数量 + 小窗口时科学计数法只有 3 位小数，步长太小就会印出
         // 一排一模一样的 `1.79E6`（实测反馈的截图里就是这样）。
         // 解不出更多有效数字时（轴的宽度就 46px），就把步长顶上去 ——
         // 宁可刻度稀疏，也不要一排看不懂的数字。
         for (int guard = 0; guard < 12; guard++) {
-            int lo = Math.max(0, Math.floorDiv(vLo, step) * step);
+            int lo = baseLow(vLo, step, clampZero);
             if (lo + (long) step > vHi) {
                 break;   // 窗口里只有一条刻度线，无所谓重复
             }
@@ -310,7 +336,7 @@ public final class ChartRenderer {
             }
             step = next;
         }
-        yLo = Math.max(0, Math.floorDiv(vLo, step) * step);
+        yLo = baseLow(vLo, step, clampZero);
         int yHi = ceilDiv(vHi, step) * step;
         if (yHi <= yLo) {
             yHi = yLo + step;
@@ -323,18 +349,27 @@ public final class ChartRenderer {
 
         // ---- 数据线 ----
         ensureCols(plotW);
+        if (anyFlow) {
+            // 0 基线：流量线没有它就是一道看不出进出的波浪
+            int y0 = yOf(0);
+            g.fill(plotX + 1, y0, plotR - 1, y0 + 1, COLOR_FLOW_ZERO);
+        }
         for (int i = 0; i < all.size(); i++) {
             Series s = all.get(i);
-            if (view.hidden().contains(s.itemId())) {
-                continue;
+            int color = colorOf(i, s.itemId());
+            if (!view.hidden().contains(s.itemId())) {
+                drawSeries(g, s.points(), color);
             }
-            drawSeries(g, s, colorOf(i, s.itemId()));
+            if (view.ioShown().contains(s.itemId()) && s.hasFlow()) {
+                drawSeries(g, s.flow(), flowColor(color));
+            }
         }
 
         // ---- 框选 ----
         Selection sel = view.selection();
         if (sel != null) {
-            drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data);
+            drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data,
+                    view.ioShown());
         }
 
         // ---- 十字线读数 ----
@@ -391,8 +426,7 @@ public final class ChartRenderer {
     // 数据线
     // ------------------------------------------------------------------
 
-    private void drawSeries(GuiGraphics g, Series s, int color) {
-        List<SeriesPoint> pts = s.points();
+    private void drawSeries(GuiGraphics g, List<SeriesPoint> pts, int color) {
         Arrays.fill(colHas, false);
         Arrays.fill(colStart, false);
 
@@ -464,7 +498,8 @@ public final class ChartRenderer {
     // ------------------------------------------------------------------
 
     private void drawSelection(GuiGraphics g, Font font, Selection sel,
-                               List<ChartData.SeriesRange> stats, ChartData data) {
+                               List<ChartData.SeriesRange> stats, ChartData data,
+                               Set<String> ioShown) {
         int xa = xOf(sel.lo());
         int xb = xOf(sel.hi());
         int left = Math.max(plotX, Math.min(xa, xb));
@@ -502,7 +537,10 @@ public final class ChartRenderer {
             // 框选统计 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
             rows[n] = name + " " + fmtExact(r.first()) + "→" + fmtExact(r.last())
                     + "  Δ" + signedExact(r.delta())
-                    + "  " + fmtRate(r.delta(), span);
+                    + "  " + fmtRate(r.delta(), span)
+                    + (ioShown.contains(r.itemId())
+                            ? "  in " + signedExact(r.inflow()) + " out " + signedExact(r.outflow())
+                            : "");
             rowColors[n] = colorOf(data.indexOf(r.itemId()), r.itemId());
             n++;
         }
@@ -568,6 +606,9 @@ public final class ChartRenderer {
             }
             String v = valueAt(s, t, tolerance);
             sb.append("   ").append(label(i, s.itemId())).append(' ').append(v);
+            if (view.ioShown().contains(s.itemId())) {
+                sb.append(" Δ").append(flowAt(s, t, tolerance));
+            }
             shown++;
         }
 
@@ -593,9 +634,43 @@ public final class ChartRenderer {
         return fmtExact(p.count());
     }
 
+    /** 十字线上的 IO 读数（带正负号）；离得太远（其实是断档）就报 "-" */
+    private String flowAt(Series s, long tick, long tolerance) {
+        List<SeriesPoint> pts = s.flow();
+        int idx = lowerBound(pts, tick + 1) - 1;
+        if (idx < 0) {
+            return "-";
+        }
+        SeriesPoint p = pts.get(idx);
+        if (tick - p.tick() > tolerance) {
+            return "-";
+        }
+        return p.count() > 0 ? "+" + p.count() : String.valueOf(p.count());
+    }
+
     // ------------------------------------------------------------------
     // 小工具
     // ------------------------------------------------------------------
+
+    /**
+     * 把一条点表在**当前窗口内**的极值并进 {@link #vScanLo} / {@link #vScanHi}。
+     *
+     * 二分找窗口起点：全览几万点数据时，这一步能省掉大量无用比较。
+     */
+    private void scanWindow(List<SeriesPoint> pts) {
+        for (int i = lowerBound(pts, start); i < pts.size(); i++) {
+            SeriesPoint p = pts.get(i);
+            if (p.tick() > end) {
+                break;
+            }
+            if (p.count() < vScanLo) {
+                vScanLo = p.count();
+            }
+            if (p.count() > vScanHi) {
+                vScanHi = p.count();
+            }
+        }
+    }
 
     private int colOf(long tick) {
         long span = Math.max(1L, end - start);
@@ -699,6 +774,12 @@ public final class ChartRenderer {
             }
         }
         return TICK_LADDER[TICK_LADDER.length - 1];
+    }
+
+    /** 纵轴下界：吸附到刻度；数据全非负时顺手把底边贴到 0 */
+    private static int baseLow(int vLo, int step, boolean clampZero) {
+        int base = Math.floorDiv(vLo, step) * step;
+        return clampZero ? Math.max(0, base) : base;
     }
 
     private static int ceilDiv(int a, int b) {

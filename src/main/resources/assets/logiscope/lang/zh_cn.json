@@ -72,5 +72,7 @@
   "logiscope.msg.following": "LogiScope：界面已关，转为坐标跟踪",
   "logiscope.msg.paused_auto": "LogiScope：数据源丢失，已暂停",
   "logiscope.msg.index_unverified": "LogiScope：警告——该机器的槽位下标无法验证，关界面后跟踪的可能不是你选的格子",
-  "logiscope.label.probe": "探针"
+  "logiscope.label.probe": "探针",
+  "logiscope.legend.io": "IO",
+  "logiscope.info.kinds_dropped": "+%s 未显示"
 }

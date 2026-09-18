@@ -8,8 +8,11 @@ import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
+import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.neoforged.neoforge.client.gui.ConfigurationScreen;
+import net.neoforged.neoforge.client.gui.IConfigScreenFactory;
 import net.neoforged.neoforge.common.NeoForge;
 import net.neoforged.neoforge.event.entity.player.PlayerInteractEvent;
 import net.neoforged.neoforge.event.tick.ServerTickEvent;
@@ -44,6 +47,12 @@ public final class LogiScopeMod {
     public LogiScopeMod(IEventBus modBus, ModContainer container) {
         // 注册快捷键（必须在模组总线上）
         KeyBindings.register(modBus);
+
+        // 资源上限配置（客户端类型）。文件在 config/logiscope-client.toml；
+        // 再挂一个配置界面工厂，这样「模组列表 → LogiScope → 配置」里有图形界面可改。
+        container.registerConfig(ModConfig.Type.CLIENT, LogiScopeConfig.SPEC);
+        container.registerExtensionPoint(IConfigScreenFactory.class,
+                (mod, parent) -> new ConfigurationScreen(mod, parent));
 
         // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyMapping 不走全局输入，
         // 必须拦 Screen 的按键事件，见 KeyBindings#onScreenKeyPressed

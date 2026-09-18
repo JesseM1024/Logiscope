@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.collect;
 
+import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeTarget;
@@ -43,8 +44,6 @@ import java.util.concurrent.CopyOnWriteArrayList;
  */
 public final class ProbeManager {
 
-    /** 实例数上限。每实例一份半小时缓冲，且每 tick 一次世界侧读取，不做无上限。 */
-    public static final int MAX_PROBES = 16;
 
     private final List<ProbeInstance> probes = new CopyOnWriteArrayList<>();
     private int nextId = 1;
@@ -77,6 +76,7 @@ public final class ProbeManager {
                 : tick;
         // 索引循环：删除只会发生在界面事件里（不在 tick 中途），所以不需要快照
         for (ProbeInstance p : probes) {
+            p.ensureCapacity();   // 配置里的缓冲容量改了就跟上
             p.tick(gameTime);
         }
     }
@@ -123,7 +123,7 @@ public final class ProbeManager {
     }
 
     public boolean isFull() {
-        return probes.size() >= MAX_PROBES;
+        return probes.size() >= LogiScopeConfig.maxProbes();
     }
 
     @Nullable
