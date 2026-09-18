@@ -13,11 +13,11 @@ import java.util.Map;
  * 刻意不引用任何游戏类，也不持有状态 ——
  * 这样它可以被单元测试直接喂造好的数据，也能在导出后离线复用。
  *
- * ★ no_data 样本的处理原则 ★
- * "没读到值"和"格子里是 0 个"是两件完全不同的事，绝不能混进统计：
- *   · 求和 / 极值 / 平均：跳过 no_data
+ * ★ 标记样本（no_data / gap）的处理原则 ★
+ * "没读到值"、"没在记录"和"格子里是 0 个"是三件完全不同的事，绝不能混进统计：
+ *   · 求和 / 极值 / 平均：跳过标记（{@link Sample#isMarker()}）
  *   · 首值 / 末值 / 净变化：取最近的两个**有数据**的 tick
- *   · 类型切换：no_data 不算一次切换，它只是断档
+ *   · 类型切换：标记不算一次切换，它只是断档
  * 图上的处理是"断开"，见 {@code ui/ChartRenderer}（按物品分线 + 断点不连线）
  * 和 {@link ChartData#build}（断点标记的产生处）。
  *
@@ -39,6 +39,15 @@ import java.util.Map;
  *   - 周期检测（判断产线是否达到稳态）
  */
 public final class Analyzer {
+
+    /**
+     * {@link #deltas} 里"上一个点还算是相邻"的最大 tick 间隔。
+     *
+     * 与画图的断点规则无关（那边看标记，见 {@link ChartData#build}）：
+     * 这里判的是"这个物品的变化量能不能直接相减"。间隔 1 = 紧挨着的上一个 tick；
+     * 中间哪怕只漏观测一个 tick，差值也可能少算一次 IO，所以标记为"不可直接相减"。
+     */
+    private static final long MAX_DELTA_GAP = 1;
 
     private Analyzer() {
     }
@@ -63,12 +72,12 @@ public final class Analyzer {
         // itemId → {该物品上一次出现的 tick, 数量}。多格监控时每个物品各记各的
         Map<String, long[]> last = new HashMap<>();
         for (Sample cur : samples) {
-            if (cur.isNoData()) {
+            if (cur.isMarker()) {
                 last.clear();
                 continue;
             }
             long[] p = last.get(cur.itemId());
-            if (p != null && (cur.tick() - p[0]) <= ChartData.CONTINUITY_GAP) {
+            if (p != null && (cur.tick() - p[0]) <= MAX_DELTA_GAP) {
                 out.add(new Delta(cur.tick(), cur.count() - (int) p[1], false));
             } else {
                 // 这个物品上一次出现不在上一个 tick（首见 / 中间断了）→ 差值无意义
@@ -102,9 +111,12 @@ public final class Analyzer {
         int n = samples.size();
         while (i < n) {
             Sample s = samples.get(i);
-            if (s.isNoData()) {
-                noDataTicks++;
-                // 断档之后不连（净变化仍按"首尾有数据的 tick"算）
+            if (s.isMarker()) {
+                // 中断标记不计入 no-data（那是"读了读不到"的专属计数），
+                // 但两者的统计行为一样：都不是数据，都让"净变化"的链条断开
+                if (s.isNoData()) {
+                    noDataTicks++;
+                }
                 hasPrevTotal = false;
                 i++;
                 continue;
@@ -115,7 +127,7 @@ public final class Analyzer {
             int total = 0;
             while (i < n) {
                 Sample c = samples.get(i);
-                if (c.isNoData() || c.tick() != t) {
+                if (c.isMarker() || c.tick() != t) {
                     break;
                 }
                 total += c.count();

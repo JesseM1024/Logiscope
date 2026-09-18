@@ -20,24 +20,37 @@ import java.util.Map;
  * 按物品分组的 Series 是它的**派生视图**，每次数据变化重算一次（20 次/秒，O(n)）。
  * 结果是同一件事只写一遍，而且顺序、断档、清空全都自动正确。
  *
- * ★ 断点规则（什么时候必须把线剪断）★
- *   规则现在是**每条线各判各的**（per-series），因为一个 tick 会有多条样本
- *   —— 多格监控时，每个出现的物品各一条（见 {@code analysis/Aggregator}）：
+ * ★★ 断点规则（什么时候必须把线剪断）★★
  *
- *   | 情况 | 为什么必须断 |
- *   |---|---|
- *   | 这条线自己出现空档（间隔 > {@link #CONTINUITY_GAP}） | 中间那几 tick 没观测到它（`no_data`，或者它已经不在被监控的格子里了）。**把两点连起来等于编造数据** |
- *   | 这条线的第一个点 | 它前面没东西可连（契约：首点一定是"段起点"，无害） |
+ * 规则一：**只有"这条线自己不连续"才剪**（per-series）。
+ * 一个 tick 可以有多条样本（多格监控时每个出现的物品各一条，见 {@code analysis/Aggregator}），
+ * 所以不能用"全局上一个样本"判连续性 —— 那样第二条样本必然被判成"换了物品"，
+ * 波形会碎成一堆孤立点。
  *
- *   ★ 第十轮的关键修改：不再用"全局上一个样本"判连续性 ★
- *   第一版用的是"上一个样本的物品变了就断开"。单格时代没问题（一个 tick 只有一个物品），
- *   但多格之后**同一 tick 有多条不同物品的样本** —— 用全局 prev 判的话第二条样本
- *   必然被判成"物品切换" → **每条线在每一个 tick 都断开** → 波形碎成一堆孤立点。
- *   改成 per-series 之后，"物品换了"这件事天然由"它属于哪条线"解决，
- *   断点只剩"时间上不连续"一个原因 —— 比原来更简单，也更准。
+ * 规则二：**"不连续"由两件事定义，都与"采样间隔是多少"无关**：
  *
- *   顺带一个好性质：`no_data` 不需要任何特殊处理了 —— 它只要让那条线少一个点，
- *   下一点自然就因为超大间隔被判成断点。
+ * | 情况 | 为什么必须断 |
+ * |---|---|
+ * | 中间夹了标记（`no_data` = 读了读不到，`gap` = 没在记录） | 那段区间我们**没观测**，把两点连起来等于编造数据 |
+ * | 这条线的上一个点**不在上一个数据 tick 上** | 那个 tick 里被监控的格子没有这个物品（被抽空了 / 换成了别的），再连上就是假的连续 |
+ *
+ * 规则三：还有一个**静默大空档**兜底（{@link #MAX_SILENT_GAP}）：
+ * 万一有一条没写标记的停摆路径，超过它就直接剪断，不让线横穿一大段空白。
+ *
+ * ★ 为什么不再用"tick 间隔 > 1 就断"（第十轮第三次修复推翻的旧规则）★
+ *   旧规则是"正常的采样是一 tick 一条，所以间隔只可能是 1"。它在**客户端 tick 与服务端
+ *   tick 锁相**的年代成立（时间戳取自客户端自己的计数器，恒定 +1），但第八轮把时间戳
+ *   换成**服务端权威 gameTime** 之后就不成立了：
+ *
+ *   客户端每秒最多观测 20 次，服务端也每秒走 20 tick，两者**不锁相**。一次帧抖动
+ *   （GC、区块生成、卡顿）就会让某个客户端 tick 看到 ±0 或 +2 的世界 tick。客户端
+ *   看见 0 时按"世界没走 tick 就不记"跳过，于是**下一个样本的 tick 自然跳 2** ——
+ *   这只是"少观测了一个 tick"，数据本身两端都真的、也没断，但旧规则会在这里剪一刀。
+ *   实测现象就是 20t 正常流速下**偶发的断线**（第九轮之前从没出现过，因为那时时钟
+ *   恰好恒 +1），而真正的停顿/读取失败**本来就有显式标记**，用不着靠数间隔去猜。
+ *
+ *   换到高流速（`/tick rate 200`）就更明显：样本天然每 ~10 tick 一个，旧规则会把
+ *   **每一个点**都判成断点。新规则下它只是一条采样稀疏的连续折线。
  *
  * ★ 为什么要有 version ★
  *   界面每帧都要这份数据。带上 version 后界面可以"数据没变就不重算"，
@@ -45,12 +58,12 @@ import java.util.Map;
  *   纯函数 + 显式版本号，比在界面里做增量更新更容易证明是对的。
  *
  * @param series      按物品"首次出现顺序"排列 —— 顺序稳定，界面才能给每个物品固定的颜色
- * @param firstTick   时间轴起点（含 no_data 样本）
- * @param lastTick    时间轴终点（含 no_data 样本）
+ * @param firstTick   时间轴起点（含标记样本）
+ * @param lastTick    时间轴终点（含标记样本）
  * @param minValue    全体有数据样本的最小值
  * @param maxValue    全体有数据样本的最大值
  * @param dataCount   有数据的**样本条数**（多格多物品时一个 tick 可能好几条）
- * @param noDataCount 无数据的样本数（一个 tick 最多一条）
+ * @param noDataCount 无数据的样本数（一个 tick 最多一条；中断标记不计入）
  * @param switches    物品**集合**发生变化的次数（按 tick 比集合，不是比单个样本）
  * @param version     对应的 SampleStore 版本号
  */
@@ -69,11 +82,13 @@ public record ChartData(
             new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, Long.MIN_VALUE);
 
     /**
-     * 相邻两条样本的 tick 间隔超过它就算断档。
-     * 正常采样是每世界 tick 一条，所以同一条线上相邻两点只可能差 1。
-     * （将来若做"每 N tick 采样一次"的降频，这里要跟着改成 N。）
+     * 静默大空档兜底（tick）：中间隔了这么多还没断，就直接剪断。
+     *
+     * 正常情况**用不到它** —— 停顿都有显式标记（见 {@link Sample#gap}）。
+     * 它存在只为兜住"没写标记就停摆了"这种 unforeseen 路径，
+     * 所以阈值刻意给得很大（1 秒 = 20 tick）：观测抖动最多漏一两 tick，碰不到它。
      */
-    public static final long CONTINUITY_GAP = 1;
+    public static final long MAX_SILENT_GAP = 20;
 
     public static final String EMPTY_ITEM = Sample.EMPTY_ITEM;
 
@@ -166,37 +181,69 @@ public record ChartData(
         int minValue = Integer.MAX_VALUE;
         int maxValue = Integer.MIN_VALUE;
 
-        for (Sample s : samples) {
+        // 上一个**数据 tick**（有内容的那个 tick）与"是否见过"
+        long prevDataTick = 0L;
+        boolean hasPrevDataTick = false;
+        // 自上一个数据 tick 以来见过标记（no_data / gap）没有
+        boolean interrupted = false;
+
+        int i = 0;
+        int n = samples.size();
+        while (i < n) {
+            Sample s = samples.get(i);
             firstTick = Math.min(firstTick, s.tick());
             lastTick = Math.max(lastTick, s.tick());
 
-            if (s.isNoData()) {
-                // no_data 不需要任何特殊处理：它只要让每条线都少一个点，
-                // 下一点自然因为"间隔超过 CONTINUITY_GAP"被判成断点。
-                noDataCount++;
+            if (s.isMarker()) {
+                // 标记：不产出点，只把"这里断了"记下来，交给下一个数据 tick 消化。
+                // 注意 interrupted 会一直挂到下一个数据 tick —— 中间不管隔多少个标记都一样断。
+                if (s.isNoData()) {
+                    noDataCount++;
+                }
+                interrupted = true;
+                i++;
                 continue;
             }
 
-            Builder b = builders.get(s.itemId());
-            if (b == null) {
-                b = new Builder(s.itemId());
-                builders.put(s.itemId(), b);
+            // ---- 把同一个 tick 的所有条目一起处理 ----
+            long t = s.tick();
+            int j = i;
+            while (j < n && !samples.get(j).isMarker() && samples.get(j).tick() == t) {
+                j++;
             }
 
-            // ★ 断点只看**这条线自己**的上一个点 ★
-            // 首点（lastTick 还是初值）也算"段起点"—— 这是老契约：
-            // 它前面没东西可连，渲染层靠 colStart 决定"要不要连到左邻列"，
-            // 而首列本来就没有左邻列，所以标记为 true 无害。
-            boolean gap = b.lastTick == Long.MIN_VALUE
-                    || (s.tick() - b.lastTick) > CONTINUITY_GAP;
-            b.points.add(new SeriesPoint(s.tick(), s.count(), gap));
-            b.lastTick = s.tick();
-            b.min = Math.min(b.min, s.count());
-            b.max = Math.max(b.max, s.count());
+            for (int k = i; k < j; k++) {
+                Sample c = samples.get(k);
+                Builder b = builders.get(c.itemId());
+                if (b == null) {
+                    b = new Builder(c.itemId());
+                    builders.put(c.itemId(), b);
+                }
 
-            dataCount++;
-            minValue = Math.min(minValue, s.count());
-            maxValue = Math.max(maxValue, s.count());
+                // ★ 断点只看**这条线自己**的上一个点 ★
+                // 1. 中间有标记（读了读不到 / 没在记录）→ 断
+                // 2. 这是这条线的第一个点（契约：首点永远是"段起点"，渲染层靠它
+                //    决定"要不要连到左邻列"，而首列本来没有左邻列，所以标记为 true 无害）
+                // 3. 上一个**数据 tick** 里没有它 → 中间它被抽空了 / 换成了别的 → 断
+                // 4. 静默大空档兜底（正常路径用不到，见 MAX_SILENT_GAP）
+                boolean gap = interrupted
+                        || !hasPrevDataTick
+                        || b.lastTick != prevDataTick
+                        || (t - b.lastTick) > MAX_SILENT_GAP;
+                b.points.add(new SeriesPoint(t, c.count(), gap));
+                b.lastTick = t;
+                b.min = Math.min(b.min, c.count());
+                b.max = Math.max(b.max, c.count());
+
+                dataCount++;
+                minValue = Math.min(minValue, c.count());
+                maxValue = Math.max(maxValue, c.count());
+            }
+
+            prevDataTick = t;
+            hasPrevDataTick = true;
+            interrupted = false;
+            i = j;
         }
 
         List<Series> out = new ArrayList<>(builders.size());
@@ -227,6 +274,7 @@ public record ChartData(
      * 为什么不是"相邻两个样本的物品不同就算一次"：多格监控下一个 tick 本来就有
      * 多条不同物品的样本，那样算出来的是"每 tick 都切换"，数字虚高且没有意义。
      * 用户想知道的是"这几格里装的东西变了几次"，所以按 tick 归组成集合再比。
+     * 标记（no_data / gap）不算切换，它只是"没观测到"，切换链条到这里断掉重算。
      *
      * 代价：一次额外的 O(n) 扫描（只在 rebuild 时跑，最多 20 次/秒）。
      * 刻意用两个复用的 List 而不是 HashSet —— k（一个 tick 里的物品种数）很小，
@@ -241,8 +289,8 @@ public record ChartData(
         int n = samples.size();
         while (i < n) {
             Sample s = samples.get(i);
-            if (s.isNoData()) {
-                // 断档不算"切换"（与旧行为一致）：它只是没观测到
+            if (s.isMarker()) {
+                // 断档不算"切换"：它只是没观测到
                 hasPrev = false;
                 prev.clear();
                 i++;
@@ -250,7 +298,7 @@ public record ChartData(
             }
             long t = s.tick();
             cur.clear();
-            while (i < n && !samples.get(i).isNoData() && samples.get(i).tick() == t) {
+            while (i < n && !samples.get(i).isMarker() && samples.get(i).tick() == t) {
                 cur.add(samples.get(i).itemId());
                 i++;
             }
@@ -282,7 +330,7 @@ public record ChartData(
         final List<SeriesPoint> points = new ArrayList<>();
         int min = Integer.MAX_VALUE;
         int max = Integer.MIN_VALUE;
-        /** 这条线自己的上一个采样 tick；用来判"这条线是否连续"（见 build 的注释） */
+        /** 这条线自己上一次出现的 tick；用来判"它在上一个数据 tick 里在不在" */
         long lastTick = Long.MIN_VALUE;
 
         Builder(String itemId) {

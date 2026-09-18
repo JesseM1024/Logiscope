@@ -40,11 +40,48 @@ import java.util.List;
  * （虽然实践中大多是原子的，但没必要留这种隐患）。
  * 把读取任务提交到服务端线程，结果丢进一个 volatile 缓存，
  * 客户端下一 tick 取用 —— 最多差 1 tick，对一个观测工具完全够。
+ *
+ * ★ 管道有延迟，所以"取回来的值"必须带身份（见 {@link Read}）★
+ *   服务端的任务队列是在**服务端 tick** 上排空的，客户端的请求却是按**客户端 tick**
+ *   发的，两者不锁相。于是偶尔会出现"这一 tick 还没有新结果"，
+ *   此时缓存里躺着的是上一次的观测。**把它当成本 tick 的新值写下去就是造假**：
+ *   曲线会出现一个 1 tick 的平台（同一个值贴了两个 tick 标签）。
+ *   所以 {@link #read} 会把这次观测的身份一并交出去，由调用方去重。
  */
 public final class WorldProbe {
 
     /** 缓存结果 + 它是哪一客户端 tick 提交的，用来判断新鲜度 */
     private record Snapshot(List<ContainerAccess.SlotView> views, long atClientTick) {
+    }
+
+    /**
+     * 一次世界侧读取的**结论**（第十轮第三次修复新增）。
+     *
+     * | 状态 | 含义 | 调用方该做什么 |
+     * |---|---|---|
+     * | {@link Status#OK} | 读到了内容 | 写样本 —— **但同一个 {@code seq} 只写一次**（见下） |
+     * | {@link Status#UNAVAILABLE} | 读了，但这台机器现在读不到（区块卸载 / 方块没了 / 多人） | 记一条 `no_data` |
+     * | {@link Status#NOT_READY} | 还没有任何一次读取完成，或结果太旧 | **这一 tick 什么都不记** —— 我们确实没观测到，但这不是"读失败" |
+     *
+     * ★ 为什么要带 {@code seq}（同一个观测不能写两遍）★
+     *   值是从服务端线程异步取回来的，`maxAge` 允许它在缓存里多待几个客户端 tick。
+     *   如果每个 tick 都把这个缓存原样写成新样本，就会出现"**同一个观测值贴两个不同的
+     *   tick 标签**"—— 曲线上表现为一个 1 tick 的平台（实测反馈："断线后还有一个 t 的
+     *   曲线平台"），而那个平台对应的那个 tick 我们其实什么都没看到。
+     *   带上门牌号（= 提交读取时的客户端 tick，每一次请求都不同）之后，
+     *   调用方对同一个观测只会写一次；没拿到新观测的 tick 就空着。
+     *
+     * @param views  读到的槽位快照（与 target.slots() 同序）；仅 OK 时非 null
+     * @param seq    这次观测的身份（提交读取的客户端 tick）
+     * @param status 见上表
+     */
+    public record Read(@Nullable List<ContainerAccess.SlotView> views, long seq, Status status) {
+
+        public enum Status {
+            OK, UNAVAILABLE, NOT_READY
+        }
+
+        public static final Read NOT_READY = new Read(null, -1L, Status.NOT_READY);
     }
 
     /** 下标验证结果：与 {@code target.slots()} **同序**的容器内下标；-1 = 这一格没验证出来 */
@@ -98,29 +135,6 @@ public final class WorldProbe {
     }
 
     /**
-     * ★ 用"最后一次已知值"垫一下，专治"刚关掉界面那 1 tick 的假 no_data" ★
-     *
-     * 问题出在时序上，不是读取失败：
-     *   第 N   tick  客户端发现界面关了 → 提交不了请求（这一 tick 还没进 FOLLOWING）
-     *   第 N+1 tick  request() 把任务丢给服务端线程，
-     *               而**同一 tick 内** latest() 立刻就要取值 —— 服务端线程还没轮到
-     *               → 必然返回 null → 记下一条 no_data
-     * 所以那条 no_data 是"异步管道的启动延迟"，不是"这台机器读不到"，纯属误导。
-     *
-     * 修法：进入 FOLLOWING 时把上一 tick 刚读到的值（最多 50 ms 旧）当作一次快照塞进缓存，
-     * 让时间轴续上；真正的异步结果在 1–2 个客户端 tick 内到达并覆盖它。
-     * 若确实读不到（多人 / 区块卸载 / 方块被拆），这个垫值会在 maxAge 之后自然过期，
-     * 之后照样记 no_data —— 该断的地方还是会断。
-     */
-    public void seed(@Nullable List<ContainerAccess.SlotView> views) {
-        if (views == null || views.isEmpty()) {
-            return;
-        }
-        cached = new Snapshot(List.copyOf(views), ServerClock.clientTick());
-        // 刻意不动 pending：垫值只是"缓一下"，不该阻止真正的异步请求发出去
-    }
-
-    /**
      * 请求一次世界侧读取。**每客户端 tick 调一次即可**，不要在同一 tick 里反复调。
      * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
      */
@@ -152,19 +166,24 @@ public final class WorldProbe {
     }
 
     /**
-     * 取最近一次读到的值（与 {@code target.slots()} 同序）。
+     * 取最近一次读取的结论（与 {@code target.slots()} 同序的内容在 {@link Read#views()}）。
      *
-     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄返回 null
-     *                          （记 no_data），避免服务端卡顿时把一堆陈旧值当成新值
-     *                          写进时间序列。
+     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄一律当
+     *                          {@link Read.Status#NOT_READY}（这一 tick 不记样本），
+     *                          避免服务端卡顿时把好几 tick 之前的旧值当成新值写进时间序列。
      */
-    @Nullable
-    public List<ContainerAccess.SlotView> latest(int maxAgeClientTicks) {
+    public Read read(int maxAgeClientTicks) {
         Snapshot snap = cached;
-        if (snap == null || snap.views() == null) {
-            return null;
+        if (snap == null) {
+            return Read.NOT_READY;
         }
-        return (ServerClock.clientTick() - snap.atClientTick()) <= maxAgeClientTicks ? snap.views() : null;
+        if ((ServerClock.clientTick() - snap.atClientTick()) > maxAgeClientTicks) {
+            return Read.NOT_READY;
+        }
+        if (snap.views() == null) {
+            return new Read(null, snap.atClientTick(), Read.Status.UNAVAILABLE);
+        }
+        return new Read(snap.views(), snap.atClientTick(), Read.Status.OK);
     }
 
     /**

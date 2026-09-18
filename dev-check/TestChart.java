@@ -2,7 +2,7 @@
  * 分析层的离线验收：不启动游戏，直接喂造好的时间序列。
  *
  * 覆盖三块：
- *   1. ChartData 的断点规则（per-series 连续性 / no_data / 多物品同 tick）
+ *   1. ChartData 的断点规则（per-series 连续性 / no_data / gap 中断标记 / 多物品同 tick）
  *   2. Aggregator 的多格聚合规则（按物品分别求和 —— 第十轮按用户反馈修正过）
  *   3. Analyzer 的按 tick 合计统计
  *
@@ -44,7 +44,7 @@ public class TestChart {
         t1ItemGroupingAndColorOrder();
         t2BreakOnItemSwitch();
         t3BreakOnNoData();
-        t4BreakOnTickGap();
+        t4ObservationGapDoesNotBreak();
         t5EmptySlotSeries();
         t6Ranges();
         t7AxisBoundsSanity();
@@ -55,6 +55,9 @@ public class TestChart {
         t12ItemVanishesThenReturns();
         t13BreakAfterNoData();
         t14SummaryAggregatesPerTick();
+        t15BreakOnGapMarker();
+        t16MarkersAreTransparentToStats();
+        t17SeriesDropoutInMultiSlot();
         System.out.println();
         if (failed == 0) {
             System.out.println("全部通过");
@@ -126,18 +129,44 @@ public class TestChart {
         eq("时间轴仍然推进到 no_data 那一段", 5L, d.lastTick());
     }
 
-    // 4) tick 不连续（暂停 / 状态切换）也要断开
-    private static void t4BreakOnTickGap() {
+    // 4) ★ 第十轮第三次修复：**观测空档不再断开** ★
+    //    客户端每秒最多观测 20 次，服务端也每秒走 20 tick，两者不锁相 ——
+    //    一次帧抖动就会让某个客户端 tick 看到 +2 的世界 tick（少观测了一格）。
+    //    这不是"数据断了"，只是采样稀疏。旧规则（间隔 > 1 就断）会在这里凭空剪一刀，
+    //    实测现象就是 20t 正常流速下的偶发断线。
+    private static void t4ObservationGapDoesNotBreak() {
+        // 中间少了一格（游戏里就是"这一 tick 没观测到"）
         List<Sample> s = List.of(
                 new Sample(1, "minecraft:iron_ingot", 10),
                 new Sample(2, "minecraft:iron_ingot", 11),
-                new Sample(60, "minecraft:iron_ingot", 12));
+                new Sample(4, "minecraft:iron_ingot", 13),
+                new Sample(5, "minecraft:iron_ingot", 14));
 
         ChartData d = ChartData.build(1L, s);
         List<SeriesPoint> p = d.series().get(0).points();
         no("相邻 tick 不断", p.get(1).breakBefore());
-        yes("跳了 58 tick 必须断开", p.get(2).breakBefore());
-        eq("切换次数不把断档算进去", 0, d.switches());
+        no("少观测一格（1→2→4）也不断", p.get(2).breakBefore());
+        no("后面继续连着", p.get(3).breakBefore());
+        eq("只有首点一个断点", 1, d.series().get(0).breaks());
+        eq("切换次数不把观测空档算进去", 0, d.switches());
+
+        // 高流速（/tick rate 200）下样本天然每 ~10 tick 一个：旧规则会把每个点都判成断点
+        List<Sample> fast = List.of(
+                new Sample(100, "minecraft:iron_ingot", 10),
+                new Sample(110, "minecraft:iron_ingot", 74),
+                new Sample(120, "minecraft:iron_ingot", 138));
+        ChartData fd = ChartData.build(2L, fast);
+        no("稀疏采样仍是连续折线（第二个点）", fd.series().get(0).points().get(1).breakBefore());
+        eq("整条线只有 1 个断点", 1, fd.series().get(0).breaks());
+
+        // 兜底：静默大空档（超过 MAX_SILENT_GAP）还是要断 ——
+        // 万一有哪条停摆路径忘了写标记，也不让线横穿一大段空白
+        List<Sample> silent = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                new Sample(2 + ChartData.MAX_SILENT_GAP + 1, "minecraft:iron_ingot", 12));
+        ChartData sd = ChartData.build(3L, silent);
+        yes("静默大空档兜底断开", sd.series().get(0).points().get(2).breakBefore());
     }
 
     // 5) 空格子（air × 0）也是一条正经的线，不该被丢掉
@@ -326,7 +355,7 @@ public class TestChart {
         Series iron = d.byItem("minecraft:iron_ingot");
         eq("铁 3 个点", 3, iron.points().size());
         no("铁第 2 点连着", iron.points().get(1).breakBefore());
-        yes("铁第 3 点（隔了 2 tick）必须断开", iron.points().get(2).breakBefore());
+        yes("铁第 3 点必须断开（上一个数据 tick 里它在不在 = 不在）", iron.points().get(2).breakBefore());
         eq("铁 2 个断点", 2, iron.breaks());
         eq("物品集合变了两次 → switch 2", 2, d.switches());
     }
@@ -369,6 +398,78 @@ public class TestChart {
         eq("末 tick 总存量", 7, sum.last());
         eq("净变化", -8, sum.netChange());
         eq("出现最多的物品", "minecraft:iron_ingot", sum.dominantItem());
+    }
+
+    // ---- 第十轮第三次修复：中断标记（gap）与"观测空档"的区别 ----
+
+    // 15) 用户按了暂停 → 记一条 gap 标记 → 恢复之后**必须断开**。
+    //     同时：gap 不是"读失败"，不能混进 no-data 计数。
+    private static void t15BreakOnGapMarker() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(2, "minecraft:iron_ingot", 11),
+                Sample.gap(3),
+                new Sample(60, "minecraft:iron_ingot", 9),
+                new Sample(61, "minecraft:iron_ingot", 8));
+
+        ChartData d = ChartData.build(1L, s);
+        Series iron = d.byItem("minecraft:iron_ingot");
+        eq("铁 4 个点", 4, iron.points().size());
+        no("暂停前不断", iron.points().get(1).breakBefore());
+        yes("gap 之后必须断开", iron.points().get(2).breakBefore());
+        no("恢复之后自己连着", iron.points().get(3).breakBefore());
+        eq("gap 不计入 no-data", 0, d.noDataCount());
+        eq("gap 不算物品切换", 0, d.switches());
+        eq("时间轴推进到恢复点", 61L, d.lastTick());
+
+        // 只有标记、没有任何数据 → 图上没有线，但也不算"有数据"
+        ChartData only = ChartData.build(2L, List.of(Sample.gap(1), Sample.gap(2)));
+        no("只有 gap 时 hasData 为假", only.hasData());
+        eq("只有 gap 时没有数据线", 0, only.series().size());
+    }
+
+    // 16) 标记对统计是透明的：不占 min/max/avg 的样本，也不破坏"首尾净变化"
+    private static void t16MarkersAreTransparentToStats() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                Sample.gap(2),
+                Sample.noData(3),
+                new Sample(4, "minecraft:iron_ingot", 30));
+
+        Analyzer.Summary sum = Analyzer.summarize(s);
+        eq("有数据的 tick 只有 2 个", 2, sum.dataTicks());
+        eq("no-data 只数真读失败的（gap 不算）", 1, sum.noDataTicks());
+        eq("min 只看数据", 10, sum.min());
+        eq("max 只看数据", 30, sum.max());
+        eq("avg = (10+30)/2", 20, sum.average());
+        eq("净变化 = 30 - 10", 20, sum.netChange());
+    }
+
+    // 17) 多格聚合下某一种物品被抽空 → 它那条线断（但别的线不受影响）
+    private static void t17SeriesDropoutInMultiSlot() {
+        List<Sample> s = List.of(
+                new Sample(1, "minecraft:iron_ingot", 10),
+                new Sample(1, "minecraft:copper_ingot", 5),
+                new Sample(2, "minecraft:iron_ingot", 12),
+                new Sample(2, "minecraft:copper_ingot", 5),
+                // 铜那一格被抽空了：这个 tick 只剩铁
+                new Sample(3, "minecraft:iron_ingot", 14),
+                new Sample(4, "minecraft:iron_ingot", 16),
+                // 铜又来了
+                new Sample(5, "minecraft:iron_ingot", 18),
+                new Sample(5, "minecraft:copper_ingot", 7));
+
+        ChartData d = ChartData.build(1L, s);
+        Series iron = d.byItem("minecraft:iron_ingot");
+        Series copper = d.byItem("minecraft:copper_ingot");
+        eq("铁 5 个点", 5, iron.points().size());
+        for (int i = 1; i < 5; i++) {
+            no("铁第 " + (i + 1) + " 点一直连着（它每个数据 tick 都在）", iron.points().get(i).breakBefore());
+        }
+        eq("铜 3 个点", 3, copper.points().size());
+        yes("铜首点断（契约）", copper.points().get(0).breakBefore());
+        no("铜第 2 点连着", copper.points().get(1).breakBefore());
+        yes("铜消失两 tick 后回来 → 必须断开", copper.points().get(2).breakBefore());
     }
 
     // ---- 断言 ----
