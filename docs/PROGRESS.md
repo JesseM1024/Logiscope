@@ -110,10 +110,10 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 
 ## 下一步（按顺序）
 
-1. **跑第八轮实机验证**（`VERIFY.md` 第二节）。重点：
-   - `Q1–Q6`（光标锚定缩放 + 反馈）—— 本轮交互重做
-   - `Q7`（下标歧义警告立刻弹出）—— 去抖吞警告的修复
-   - `Q9–Q11`（`/tick rate` 下数据正确 + 速率 n/t）—— 时间刻度重做
+1. **跑第九轮实机验证**（`VERIFY.md` 第三节）。重点：
+   - `S2`（`/tick rate 40` 下每世界 tick 一条、64/t 不再记成 128）—— 第八轮翻车项直接复现
+   - `S1`（`/tick rate 200` 连续无空白；样本间隔 ~10t 属物理极限，可接受）
+   - `S3–S6`（tick rate 5/20 回归 + 关 GUI 接缝）
    - `D6`（可靠卸载法复测 no_data 增长）—— 一直没测
 2. 通过后把 `wip-*` 标签升格为正式里程碑 `g2-waveform`，G2 / G2.1 打勾。
 3. 再考虑 G4（标注与差值）或 G5（导出）。两者都可做：
@@ -133,9 +133,19 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 
 ---
 
+## 第九轮做了什么（修复第八轮暴露的问题）
+
+| # | 改动 | 文件 |
+|---|---|---|
+| 1 | **采样时钟重做（N13）**：第八轮实测 tick rate 200/40 下采样节奏与数据全错。根因（sources jar 核实）：客户端 `Level#getGameTime()` 是错拍阶梯——`ClientLevel#tickTime()` 每客户端 tick 本地 +1，服务端每 20 个服务端 tick 才纠正一次绝对值；tick rate 20 时恰好重合所以之前测不出。修法 = **两只钟拆开**：① 样本时间戳改用服务端线程读的权威 `ServerLevel#getGameTime()`（`WorldProbe#worldGameTime`，每客户端 tick 一个 `server.execute` 刷新 volatile，多人/主菜单退回客户端值）；② `WorldProbe` 异步读值新鲜度改按**客户端 tick** 判定（`latest(maxAgeClientTicks)`，读值延迟是真实时间量）。`seed/request` 签名随之简化 | `collect/WorldProbe`（`tickClient`/`worldGameTime`/`latest`）、`collect/Sampler`、`ui/ScopeScreen`（`latest` 调用点） |
+
+物理极限（记录在案，不是 bug）：客户端每秒最多观测 20 次，tick rate 200 时样本间隔 ~10t 不可再细，但累计值与 n/t 速率恒正确。详见 `ARCHITECTURE.md` CP15。
+
+---
+
 ## 已知问题 / 已接受的限制
 
-完整列表在 `VERIFY.md` 第三节 F 组。这里只列**值得记住**的几条：
+完整列表在 `VERIFY.md` 第四节 F 组。这里只列**值得记住**的几条：
 
 | 项 | 说明 |
 |---|---|

@@ -789,6 +789,43 @@ selectWindowStart = win[0];
 
 ---
 
+### CP15 · 两只时钟：权威世界 tick + 客户端 tick（第八轮 N13）　风险：中 ⚠️
+
+```
+实测：tick rate 200 → 采样 20t 一次、连续两三 t 相同数据；
+      tick rate 40 → 10t 错误数据（64/t 的 IO 记成 128）+ 10t no_data 虚线。
+```
+
+**根因（sources jar 核实）**：客户端的 `Level#getGameTime()` 根本不是世界 tick 的
+忠实时钟，而是一条**错拍的阶梯**——
+
+| 事实 | 出处 |
+|---|---|
+| 客户端每客户端 tick 把本地 gameTime **+1** | `ClientLevel#tickTime()`（且受客户端 `tickRateManager` 控制） |
+| 服务端每 **20 个服务端** tick 才发一次绝对时间包砸给客户端 | `MinecraftServer#tickChildren` 里 `tickCount % 20 == 0 → synchronizeTime` |
+
+- tick rate 20：本地 +1 恰好等于纠正值 → 无缝（第七轮之前一切正常，问题被掩盖）。
+- tick rate 40：世界每客户端 tick 走 2，本地只 +1，且每 10 个客户端 tick 被 +20 纠正
+  → 阶梯平台期被"世界没走 tick"判定吞掉（成段虚线），跳变时一条样本横跨 20 个
+  世界 tick（IO 速率全错）。
+- tick rate 200：每 2 个客户端 tick 被 +20 纠正 → 采样 20t 一次 + 重复值。
+
+**修法：把"世界 tick"和"读值延迟"拆成两只钟**（都在 `WorldProbe`）：
+
+| 钟 | 用途 | 实现 |
+|---|---|---|
+| **权威世界 tick** `worldGameTime(fallback)` | 样本时间戳、"世界没走 tick 就跳过采样"判定 | 单人：`Sampler#onClientTick` 每 tick 提交一个 `server.execute` 任务，在**服务端线程**读 `ServerLevel#getGameTime()` 缓存进 volatile（权威、随 `/tick rate` 正确伸缩、freeze/ESC 时冻结）；多人/主菜单退回客户端值 |
+| **客户端 tick** `tickClient()` | `WorldProbe` 异步读值的新鲜度（`latest(maxAge)`） | 读值延迟是真实时间量（提交到服务端线程、1~2 个客户端 tick 后回来），与世界流速无关；tick rate 200 时按世界 tick 判新鲜会把刚回来的真值判成超龄 |
+
+**仍然存在、且记录在案的物理极限**：客户端每秒最多观测 20 次 —— tick rate 200 时
+世界每客户端 tick 走 ~10t，中间 9 个状态**不可观测**，样本间隔 ~10t 是采集端的
+物理极限，不是 bug。数据的累计值仍是对的，速率按 n/t 换算也仍是对的。
+
+**多人限制（不变）**：没有集成服务端就没有权威时钟，退回客户端阶梯值 ——
+而多人下 FOLLOWING 本来就不可用，RECORDING（界面开着）受影响有限。
+
+---
+
 ## 三、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |
@@ -814,6 +851,7 @@ selectWindowStart = win[0];
 | 建立选区 | **自动冻结**视图 | 继续实时滚动 | 不冻结的话刚框住那段几秒后跑出屏幕，选择就没意义了（CP12） |
 | 面板尺寸 | 右下角可缩放 + 静态字段记住 | 固定尺寸 | 波形要放坐标轴/图例/框选，固定 272×190 画不下；尺寸也是使用偏好（CP12） |
 | 关界面接缝 | 用 `lastKnown` 兜住 + 垫进 `WorldProbe` 缓存 | 接受 1 tick 假 no_data | "读不到"和"还没读到"是两回事，把等待包装成失败是制造假警报（CP9 之一） |
+| 采样时钟 | 服务端线程读权威 `gameTime`，客户端 tick 只管新鲜度 | 客户端 `Level#getGameTime()` 直接用 | 客户端 gameTime 是错拍阶梯（本地 +1 / 服务端 20t 纠正一次），tick rate ≠ 20 时采样节奏与数值全错（CP15） |
 
 ### 已知限制（不是 bug，是取舍）
 

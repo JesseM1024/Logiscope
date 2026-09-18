@@ -615,7 +615,7 @@ public final class ScopeScreen extends Screen {
         }
 
         if (sampler.state() == Sampler.State.FOLLOWING) {
-            ContainerAccess.SlotView world = WorldProbe.latest(sampler.currentTick(), 5);
+            ContainerAccess.SlotView world = WorldProbe.latest(5);
             if (world != null) {
                 return world.empty() ? tr("logiscope.slot.empty") : world.shortName() + " x" + world.count();
             }

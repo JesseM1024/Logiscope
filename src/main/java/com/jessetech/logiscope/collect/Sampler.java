@@ -45,14 +45,27 @@ import org.jetbrains.annotations.Nullable;
  *   于是整个切换过程**一格都不缺、也不会冒出假 no_data**。
  *   真读不到的时候才会记 no_data —— 该断的地方照样断。
  *
- * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12）】
- *   样本的时间戳用 {@code Level#getGameTime()}（世界 tick 计数），不用客户端节拍。
+ * 【时间轴的刻度：世界 tick，不是客户端 tick（第七轮 N12 → 第八轮 N13）】
+ *   样本的时间戳用**世界 tick 计数**，不用客户端节拍。
  *   为什么：`/tick rate` 改的是**服务端**流速，客户端 tick 仍是每秒 20 个 ——
  *   按客户端节拍采样会得到"每 0.05s 一条、其中一大半是世界没动时的重复值"，
  *   数据全错（第七轮实测）。按世界 tick 采样后：
  *     · 世界没走 tick（流速调慢 / ESC 暂停）→ 跳过，不记重复样本
  *     · 横轴单位恒为"世界 tick"，统计块速率恒为 n per tick
  *   WorldProbe 的年龄判定、seed/request 也全部用同一刻度（世界没走 → 缓存不算陈旧）。
+ *
+ *   【第八轮 N13：但客户端的 getGameTime() 也不是忠实的世界时钟】
+ *     实测 tick rate 200 → 采样 20t 一次；tick rate 40 → 成段错值 + 成段虚线。
+ *     sources jar 核实的根因：客户端 {@code ClientLevel#tickTime()} 每客户端 tick
+ *     本地 +1，而服务端每 20 个服务端 tick 才发一次绝对时间包纠正。
+ *     tick rate 20 时两条节拍恰好重合（所以第七轮之前测不出来）；
+ *     tick rate ≠ 20 时客户端看到的 gameTime 是一条**错拍的阶梯**。
+ *     修法：单人存档（也是唯一能关界面跟踪的场景）直接在服务端线程读
+ *     {@code ServerLevel#getGameTime()} 作权威时钟（见 WorldProbe#worldGameTime）；
+ *     多人退回客户端值，语义退化为"客户端近似"。
+ *     仍存在且记录在案的物理极限：客户端每秒最多观测 20 次 —— tick rate 200 时
+ *     世界每客户端 tick 走 ~10t，中间 9 个状态**不可观测**，样本间隔 ~10t 是极限，
+ *     不是 bug。
  */
 public final class Sampler {
 
@@ -63,7 +76,7 @@ public final class Sampler {
     /** 容量 = 20 tick/秒 × 60 秒 × 30 分 = 半小时 */
     private static final int CAPACITY = 20 * 60 * 30;
 
-    /** 世界侧读值的最大可容忍延迟（tick）。超了就算没读到。 */
+    /** 世界侧读值的最大可容忍延迟（**客户端** tick，≈250ms 真实时间，与世界流速无关）。 */
     private static final int WORLD_READ_MAX_AGE = 5;
 
     private final SampleStore store = new SampleStore(CAPACITY);
@@ -96,7 +109,7 @@ public final class Sampler {
     private long lastNotifyTick = Long.MIN_VALUE / 2;
 
     /**
-     * 当前世界 tick（Level#getGameTime()，见类注释）。
+     * 当前世界 tick（见类注释 N13：单人 = 服务端权威值，多人退回客户端 gameTime）。
      * 主菜单等没有世界的场合退回客户端节拍 —— 此时采样照旧，但语义退化为"客户端 tick"。
      */
     private long curGameTime;
@@ -259,14 +272,14 @@ public final class Sampler {
     private void enterFollowing() {
         WorldProbe.resetReadCache();
         // 把最后一次已知值垫进缓存，抹掉异步管道的启动延迟（见 WorldProbe#seed）
-        WorldProbe.seed(lastKnown, curGameTime);
+        WorldProbe.seed(lastKnown);
         // ★ 立刻发出第一次世界侧读取 ★
         // 不发的话，下一 tick 的 latest() 只能拿到 seed（上一 GUI 值）——
         // 旧值被续命 1~2 tick，1t IO 测试里表现为切换瞬间脉冲被拉宽（第六轮 M1）。
         // 提前发，异步真值最早在下一 tick 就接管；seed 退化成"异步失败时的兜底"。
         // 过渡 tick 本身仍记 lastKnown：那一 tick 我们手里只有它，
         // 记空洞或假 no_data 都更糟（这是物理极限，见 Sampler 类注释的接缝说明）。
-        WorldProbe.request(target, curGameTime);
+        WorldProbe.request(target);
         state = State.FOLLOWING;
         notifyPlayer("logiscope.msg.following");
     }
@@ -305,14 +318,18 @@ public final class Sampler {
     /** 由主类注册到游戏总线，签名固定为 (event) */
     public static void onClientTick(ClientTickEvent.Post event) {
         ContainerAnchor.tick();
+        // 先推进 WorldProbe 的客户端 tick 计数 + 刷新权威世界时钟（第八轮 N13）
+        WorldProbe.tickClient();
         LogiScopeMod.sampler().tick();
     }
 
     public void tick() {
         tick++;
-        // 时间刻度 = 世界 tick（第七轮 N12，见类注释）。主菜单等无世界场合退回客户端节拍。
+        // 时间刻度 = 世界 tick（N12/N13，见类注释）。主菜单等无世界场合退回客户端节拍。
         Minecraft mc = Minecraft.getInstance();
-        curGameTime = mc.level != null ? mc.level.getGameTime() : tick;
+        curGameTime = mc.level != null
+                ? WorldProbe.worldGameTime(mc.level.getGameTime())
+                : tick;
         switch (state) {
             case RECORDING -> tickRecording();
             case FOLLOWING -> tickFollowing();
@@ -400,7 +417,7 @@ public final class Sampler {
                 // ★ 补住切换 tick ★
                 // 世界侧缓存里还留着切换前一刻的真值；不垫的话这一 tick 什么都不记，
                 // 时间轴断一格，波形在这里凭空断开（与关界面方向对称）。
-                ContainerAccess.SlotView bridge = WorldProbe.latest(curGameTime, WORLD_READ_MAX_AGE);
+                ContainerAccess.SlotView bridge = WorldProbe.latest(WORLD_READ_MAX_AGE);
                 if (bridge != null) {
                     store.add(new Sample(curGameTime, bridge.itemId(), bridge.count()));
                 }
@@ -410,8 +427,8 @@ public final class Sampler {
             // 开的是别的容器：继续按坐标跟踪，不打断
         }
 
-        WorldProbe.request(target, curGameTime);
-        ContainerAccess.SlotView view = WorldProbe.latest(curGameTime, WORLD_READ_MAX_AGE);
+        WorldProbe.request(target);
+        ContainerAccess.SlotView view = WorldProbe.latest(WORLD_READ_MAX_AGE);
         if (view == null) {
             store.add(Sample.noData(curGameTime));
         } else {
