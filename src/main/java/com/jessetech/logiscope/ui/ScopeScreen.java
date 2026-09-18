@@ -8,9 +8,12 @@ import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
+import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.Archives;
 import com.jessetech.logiscope.bind.ContainerAnchor;
+import com.jessetech.logiscope.bind.DataCommand;
+import com.jessetech.logiscope.bind.DataTarget;
 import com.jessetech.logiscope.bind.ProbeContext;
 import com.jessetech.logiscope.bind.ProbeTarget;
 import com.jessetech.logiscope.collect.ContainerAccess;
@@ -92,9 +95,9 @@ import java.util.Set;
  */
 public final class ScopeScreen extends Screen {
 
-    /** 页面（REPLAY = 存档回放，第十一轮 / G5 加入） */
+    /** 页面（REPLAY = 存档回放 G5；DATA = NBT 取数探针第十一轮③） */
     public enum Page {
-        ROOT, PICKER, CHART, REPLAY
+        ROOT, PICKER, CHART, REPLAY, DATA
     }
 
     /** 选格页的"槽位清单从哪来" */
@@ -168,6 +171,8 @@ public final class ScopeScreen extends Screen {
     private static final String SERIES_PREFIX = "series:";
     /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
     private static final int COLOR_ANALYZE = 0xFFE070D8;
+    /** DATA 页自动重发 `data get block` 的节拍（客户端 tick）—— 1 秒一次就是"实时"了 */
+    private static final long DataRefreshTicks = 20;
 
     // ==================================================================
     // 会话状态（每次打开重置）
@@ -217,6 +222,34 @@ public final class ScopeScreen extends Screen {
     private boolean analyzeIo;
     /** 「运算」弹窗是否开着 */
     private boolean opPopupOpen;
+
+    // ---- NBT 取数探针（第十一轮③ / DATA 页）----
+    /** 这一页在读哪个探针的方块（来自选格页「Probe data」） */
+    private int dataSrcProbeId = Integer.MIN_VALUE;
+    /** 采样值路径（可手输，也可点下面的值填进来） */
+    private String dataPath = "";
+    /** 名称字面量（可手输；点一个字符串值也会填这里） */
+    private String dataName = "";
+    /**
+     * 名称的**来源路径**（非空 = 名称跟着 NBT 走，用于流体 / 化学品这类可变物品）。
+     * 用户一旦手输名称，这个就被清掉（手输优先，见 {@link #dataNameEdited}）。
+     */
+    @Nullable
+    private String dataNamePath;
+    /** 当前聚焦的输入格：0 = 没有，1 = 值路径，2 = 名称 */
+    private int dataFocus;
+    private int dataScroll;
+    private int dataTextScroll;
+    /** `data get block` 解析出来的"路径 = 值"列表 */
+    private List<Snbt.Entry> dataEntries = List.of();
+    /** 上一次解析用的原文（变了才重解析） */
+    private String dataParsedFrom = "";
+    /** 自动刷新：下一次发命令的客户端 tick */
+    private long dataNextRequestTick;
+    /** 命令原文按当前宽度折行后的结果（缓存：宽度或原文变了才重算） */
+    private List<String> dataTextLines = List.of();
+    private String dataTextCachedFrom = "";
+    private int dataTextCachedWidth = -1;
     /** 计算结果（框选 + 曲线 + 对象 + 运算 四元组变化时才重算，其余帧直接用缓存） */
     private String analyzeTitle = "";
     private List<String> analyzeLines = List.of();
@@ -459,6 +492,9 @@ public final class ScopeScreen extends Screen {
         if (page == Page.REPLAY && replayArchive == null) {
             page = Page.ROOT;
         }
+        if (page == Page.DATA && dataSrcBlock() == null) {
+            page = Page.ROOT;
+        }
         if (page == Page.PICKER) {
             ProbeInstance p = mgr.find(pickerProbeId);
             if (p == null) {
@@ -486,6 +522,9 @@ public final class ScopeScreen extends Screen {
     @Override
     public void tick() {
         refreshSnapshots();
+        if (page == Page.DATA) {
+            tickDataPage();
+        }
         if (page == Page.PICKER) {
             ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
             if (p != null && p.target().hasPersistentId()) {
@@ -784,6 +823,26 @@ public final class ScopeScreen extends Screen {
         return page == Page.CHART || page == Page.REPLAY ? 3 : 2;
     }
 
+    // ------------------------------------------------------------------
+    // DATA 页（NBT 取数探针）的几何
+    // ------------------------------------------------------------------
+
+    private record DataRects(int textTop, int textH, int listTop, int listRows,
+                             int editTop, int cellW) {
+    }
+
+    private DataRects dataRects(Layout L) {
+        int contentTop = L.infoTop() + L.infoRows() * ROW_H + 2;
+        int buttonTop = L.buttons().isEmpty() ? L.y() + L.h() - PAD : L.buttons().get(0).y() - 3;
+        int editTop = Math.max(contentTop + 30, buttonTop - CHIP_H - 1);
+        int avail = Math.max(40, editTop - contentTop - 4);
+        int textH = Math.max(16, avail * 2 / 5);
+        int listTop = contentTop + textH + 4;
+        int listRows = Math.max(1, (editTop - listTop - 2) / ROW_H);
+        int cellW = Math.max(40, (L.w() - 3 * PAD) / 2);
+        return new DataRects(contentTop, textH, listTop, listRows, editTop, cellW);
+    }
+
     private List<Item> buttonItems() {
         List<Item> out = new ArrayList<>();
         switch (page) {
@@ -800,6 +859,10 @@ public final class ScopeScreen extends Screen {
                         menu));
                 out.add(new Item("clear_cells", tr("logiscope.btn.clear_cells"), selectionCount() > 0));
                 out.add(new Item("done", tr("logiscope.btn.done"), selectionCount() > 0));
+                // NBT 取数探针的入口：需要"这台设备有坐标"（没坐标读不到方块实体）
+                ProbeInstance pp = pickerProbe();
+                out.add(new Item("probe_data", tr("logiscope.btn.probe_data"),
+                        pp != null && pp.target().hasPersistentId()));
                 out.add(new Item("to_root", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -821,6 +884,13 @@ public final class ScopeScreen extends Screen {
             }
             case REPLAY -> {
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
+                out.add(new Item("close", tr("logiscope.btn.close"), true));
+            }
+            case DATA -> {
+                out.add(new Item("data_refresh", tr("logiscope.btn.data_refresh"), true));
+                out.add(new Item("data_sample", tr("logiscope.btn.data_sample"),
+                        !dataPath.isBlank() && dataSrcBlock() != null));
+                out.add(new Item("data_back", tr("logiscope.btn.to_picker"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
         }
@@ -1040,6 +1110,7 @@ public final class ScopeScreen extends Screen {
                 renderToolbar(g, L.toolbar(), mouseX, mouseY);
                 renderLegend(g, L.legend(), mouseX, mouseY);
             }
+            case DATA -> renderDataPage(g, L, mouseX, mouseY);
         }
 
         renderButtons(g, L.buttons(), mouseX, mouseY);
@@ -1110,6 +1181,7 @@ public final class ScopeScreen extends Screen {
             case PICKER -> "LogiScope · " + tr("logiscope.page.picker");
             case CHART -> "LogiScope · " + tr("logiscope.page.chart");
             case REPLAY -> "LogiScope · " + tr("logiscope.page.replay");
+            case DATA -> "LogiScope · " + tr("logiscope.page.data");
         };
         g.drawString(this.font, title, x + 4, y + 4, 0xFFE6E6F0, false);
 
@@ -1130,6 +1202,7 @@ public final class ScopeScreen extends Screen {
             case ROOT -> "[ " + tr("logiscope.status.probes") + " " + mgr.count() + " ]";
             case PICKER -> "[ " + tr("logiscope.status.picking") + " " + selectionCount() + " ]";
             case REPLAY -> "[ " + tr("logiscope.status.replay") + " ]";
+            case DATA -> "[ " + tr("logiscope.status.data") + " ]";
             case CHART -> {
                 ProbeInstance p = currentProbe();
                 if (p == null) {
@@ -1157,6 +1230,9 @@ public final class ScopeScreen extends Screen {
         }
         if (page == Page.REPLAY) {
             return COLOR_ANALYZE;
+        }
+        if (page == Page.DATA) {
+            return DataCommand.statusColor();
         }
         ProbeInstance p = currentProbe();
         if (p == null) {
@@ -1230,6 +1306,16 @@ public final class ScopeScreen extends Screen {
                 int mmW = L.w() - 2 * PAD - this.font.width(sw) - 8;
                 g.drawString(this.font, cut(mm, mmW), left, y, 0xC8C8D4, false);
                 g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
+            }
+            case DATA -> {
+                ProbeInstance src = dataSrcProbe();
+                String head = src == null ? tr("logiscope.hint.no_target")
+                        : src.name() + "  " + src.target().anchorText();
+                g.drawString(this.font, cut(head, L.w() - 2 * PAD), left, y, 0xBFBFBF, false);
+                y += ROW_H;
+                String line = tr("logiscope.data.src") + "  " + tr(DataCommand.statusKey());
+                g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y,
+                        DataCommand.statusColor(), false);
             }
             case REPLAY -> {
                 // 回放页的信息区：存档名 / 探针来源 / 统计
@@ -2134,6 +2220,11 @@ public final class ScopeScreen extends Screen {
             return true;
         }
 
+        // 3.5) DATA 页：值列表 / 编辑格
+        if (page == Page.DATA && handleDataClick(mx, my, L, button)) {
+            return true;
+        }
+
         // 4) 工具栏 / 图例 / 按钮
         for (Chip c : allChips(L)) {
             if (c.enabled() && c.hit(mx, my)) {
@@ -2210,7 +2301,7 @@ public final class ScopeScreen extends Screen {
     private void openProbe(ProbeInstance p) {
         LogiScopeMod.probes().setActive(p.id());
         scrollRow = 0;
-        if (p.hasSlots()) {
+        if (p.hasAnything()) {
             page = Page.CHART;
             live = true;
             selection = null;
@@ -2644,6 +2735,19 @@ public final class ScopeScreen extends Screen {
                 analyzeIo = !analyzeIo;
             }
             case "calc_op" -> opPopupOpen = !opPopupOpen;
+            case "probe_data" -> enterDataPage();
+            case "data_refresh" -> {
+                BlockPos pos = dataSrcBlock();
+                if (pos != null) {
+                    DataCommand.request(pos);
+                    say(tr(DataCommand.statusKey()));
+                }
+            }
+            case "data_sample" -> startDataSampling();
+            case "data_back" -> {
+                cellMode = false;
+                page = Page.PICKER;
+            }
             case "close" -> closeScope();
             case "live" -> {
                 // 回到实时 = 放弃选择。两者不并存（选择会冻结视图，见 endSelection）
@@ -2857,6 +2961,17 @@ public final class ScopeScreen extends Screen {
             if (dir == 0) {
                 return true;
             }
+            // DATA 页：滚命令原文 / 滚值列表（看光标落在哪一块）
+            if (page == Page.DATA) {
+                DataRects R = dataRects(L);
+                int my = (int) mouseY;
+                if (my >= R.textTop() && my < R.textTop() + R.textH()) {
+                    dataTextScroll = Math.max(0, dataTextScroll - dir);
+                } else {
+                    dataScroll = Math.max(0, dataScroll - dir);
+                }
+                return true;
+            }
             // 根页 / 选格页：滚轮翻列表（需求要求保留"滚轮列表选择"这条路）
             if (page == Page.ROOT || page == Page.PICKER) {
                 if (page == Page.ROOT && L.archRows() > 0 && mouseY >= L.archTop()) {
@@ -2887,6 +3002,367 @@ public final class ScopeScreen extends Screen {
         // 面板外滚轮让给容器（部分模组的容器界面用滚轮翻页）
         AbstractContainerScreen<?> bg = backgroundContainer();
         return bg != null && bg.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+    }
+
+    @Override
+    public boolean charTyped(char codePoint, int modifiers) {
+        if (page == Page.DATA && dataFocus != 0 && !Character.isISOControl(codePoint)) {
+            if (dataFocus == 1) {
+                if (dataPath.length() < 120) {
+                    dataPath += codePoint;
+                }
+            } else if (dataName.length() < 48) {
+                dataName += codePoint;
+                dataNamePath = null;   // 手输名称 → 不再跟 NBT 走（手输优先）
+            }
+            return true;
+        }
+        return super.charTyped(codePoint, modifiers);
+    }
+
+    @Override
+    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (page == Page.DATA && dataFocus != 0) {
+            switch (keyCode) {
+                case 259 -> {   // Backspace
+                    if (dataFocus == 1) {
+                        dataPath = chop(dataPath);
+                    } else {
+                        dataName = chop(dataName);
+                    }
+                    return true;
+                }
+                case 256, 257, 335 -> {   // Esc / Enter / 小键盘 Enter → 收起焦点
+                    dataFocus = 0;
+                    return true;
+                }
+                case 86 -> {   // Ctrl+V：路径又长又难打，支持粘贴
+                    if (hasControlDown()) {
+                        pasteIntoFocusedField();
+                        return true;
+                    }
+                }
+                default -> {
+                }
+            }
+        }
+        return super.keyPressed(keyCode, scanCode, modifiers);
+    }
+
+    private static String chop(String s) {
+        return s.isEmpty() ? s : s.substring(0, s.length() - 1);
+    }
+
+    private void pasteIntoFocusedField() {
+        try {
+            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+            if (clip == null) {
+                return;
+            }
+            clip = clip.trim();
+            if (dataFocus == 1) {
+                dataPath = clip.length() > 120 ? clip.substring(0, 120) : clip;
+            } else {
+                dataName = clip.length() > 48 ? clip.substring(0, 48) : clip;
+                dataNamePath = null;
+            }
+        } catch (Exception ignored) {
+            // 剪贴板不可用时静默（不该因为粘贴失败把界面搞崩）
+        }
+    }
+
+    // ==================================================================
+    // NBT 取数探针（第十一轮③ / DATA 页）
+    // ==================================================================
+
+    /** 「Probe data」：进入这一页，开始实时抓 `data get block` */
+    private void enterDataPage() {
+        ProbeInstance p = pickerProbe();
+        if (p == null || !p.target().hasPersistentId()) {
+            say(tr("logiscope.flash.no_target"));
+            return;
+        }
+        dataSrcProbeId = p.id();
+        dataPath = "";
+        dataName = "";
+        dataNamePath = null;
+        dataFocus = 0;
+        dataEntries = List.of();
+        dataParsedFrom = "";
+        dataTextLines = List.of();
+        dataTextCachedFrom = "";
+        dataTextScroll = 0;
+        dataScroll = 0;
+        dataNextRequestTick = 0;
+        page = Page.DATA;
+        DataCommand.request(p.target().pos());
+        dataNextRequestTick = LogiScopeMod.probes().currentTick() + DataRefreshTicks;
+    }
+
+    /** 每客户端 tick：抓数（实时刷新）+ 解析 */
+    private void tickDataPage() {
+        DataCommand.tick();
+        BlockPos pos = dataSrcBlock();
+        if (pos == null) {
+            return;
+        }
+        long now = LogiScopeMod.probes().currentTick();
+        if (now >= dataNextRequestTick) {
+            DataCommand.request(pos);
+            dataNextRequestTick = now + DataRefreshTicks;
+        }
+        reparseData();
+    }
+
+    @Nullable
+    private BlockPos dataSrcBlock() {
+        ProbeInstance p = LogiScopeMod.probes().find(dataSrcProbeId);
+        return p != null && p.target().hasPersistentId() ? p.target().pos() : null;
+    }
+
+    @Nullable
+    private ProbeInstance dataSrcProbe() {
+        return LogiScopeMod.probes().find(dataSrcProbeId);
+    }
+
+    /** 命令原文变了就重新解析成"路径 = 值"（解析失败 → 空表，界面会说明） */
+    private void reparseData() {
+        String text = DataCommand.text();
+        if (text == null || text.equals(dataParsedFrom)) {
+            return;
+        }
+        dataParsedFrom = text;
+        Snbt.Node root = Snbt.parse(text);
+        dataEntries = root == null ? List.of() : Snbt.flatten(root);
+        dataScroll = 0;
+        dataTextScroll = 0;
+    }
+
+    /** 命令原文按当前宽度折行（缓存：宽度或原文变了才重算） */
+    private void ensureDataTextWrapped(int width) {
+        String text = DataCommand.text();
+        if (text == null) {
+            dataTextLines = List.of();
+            return;
+        }
+        if (text.equals(dataTextCachedFrom) && width == dataTextCachedWidth) {
+            return;
+        }
+        dataTextCachedFrom = text;
+        dataTextCachedWidth = width;
+        List<String> out = new ArrayList<>();
+        int i = 0;
+        while (i < text.length() && out.size() < 400) {
+            int len = Math.min(text.length() - i, 96);
+            String chunk = text.substring(i, i + len);
+            // 折到放得下为止（贪心：能放多少放多少）
+            while (len > 1 && this.font.width(chunk) > width) {
+                len--;
+                chunk = text.substring(i, i + len);
+            }
+            out.add(chunk);
+            i += len;
+        }
+        dataTextLines = out;
+    }
+
+    private void renderDataPage(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        DataRects R = dataRects(L);
+        int left = L.x() + PAD;
+        int width = L.w() - 2 * PAD;
+
+        // ---- 1) 命令原文（实时）----
+        g.fill(left, R.textTop(), left + width, R.textTop() + R.textH(), 0xFF13131B);
+        ring(g, left, R.textTop(), width, R.textH(), 0xFF33333F);
+        DataCommand.Status st = DataCommand.status();
+        if (st == DataCommand.Status.OK || (DataCommand.text() != null && !DataCommand.text().isEmpty())) {
+            ensureDataTextWrapped(width - 8);
+            int lineH = 10;
+            int maxLines = Math.max(1, (R.textH() - 4) / lineH);
+            dataTextScroll = Math.max(0, Math.min(dataTextScroll,
+                    Math.max(0, dataTextLines.size() - maxLines)));
+            int ty = R.textTop() + 3;
+            for (int i = dataTextScroll;
+                 i < Math.min(dataTextLines.size(), dataTextScroll + maxLines); i++) {
+                g.drawString(this.font, dataTextLines.get(i), left + 3, ty, 0xFF9BE1CB, false);
+                ty += lineH;
+            }
+            if (dataTextLines.size() > maxLines) {
+                String more = (dataTextScroll + maxLines) + " / " + dataTextLines.size();
+                g.drawString(this.font, more, left + width - 4 - this.font.width(more),
+                        R.textTop() + R.textH() - 10, 0xFF707070, false);
+            }
+        } else {
+            String msg = tr(DataCommand.statusKey());
+            g.drawString(this.font, msg, left + 4, R.textTop() + 3, DataCommand.statusColor(), false);
+            if (st == DataCommand.Status.NO_PERMISSION) {
+                g.drawString(this.font, cut(tr("logiscope.data.hint.permission"), width - 8),
+                        left + 4, R.textTop() + 14, 0xFF8A8AA0, false);
+            }
+        }
+
+        // ---- 2) 值列表（解析出来的"路径 = 值"）----
+        int listTop = R.listTop();
+        if (dataEntries.isEmpty()) {
+            g.drawString(this.font, tr("logiscope.data.no_values"), left, listTop, 0x8A8AA0, false);
+        } else {
+            int maxRows = R.listRows();
+            dataScroll = Math.max(0, Math.min(dataScroll,
+                    Math.max(0, dataEntries.size() - maxRows)));
+            for (int i = 0; i < maxRows; i++) {
+                int idx = dataScroll + i;
+                if (idx >= dataEntries.size()) {
+                    break;
+                }
+                Snbt.Entry e = dataEntries.get(idx);
+                int ry = listTop + i * ROW_H;
+                boolean hover = isIn(mouseX, mouseY, L.x() + 4, ry - 1, L.w() - 8, ROW_H);
+                if (hover) {
+                    g.fill(L.x() + 4, ry - 1, L.x() + L.w() - 4, ry + ROW_H - 1, 0x40FFFFFF);
+                }
+                boolean picked = e.path().equals(dataPath);
+                if (picked) {
+                    g.fill(L.x() + 4, ry - 1, L.x() + L.w() - 4, ry + ROW_H - 1, 0x303FE0A0);
+                }
+                boolean named = e.textual() && e.path().equals(dataNamePath);
+                // 数值叶子 = 可采样（亮）；字符串叶子 = 可作名称（青）
+                int pathColor = e.numeric() ? (picked ? 0xFF3FE0A0 : 0xFFE0E0EC)
+                        : (named ? 0xFFE070D8 : 0xFF9BE1CB);
+                String value = e.node().raw();
+                int vw = this.font.width(value);
+                int avail = L.w() - 8 - vw - 8;
+                g.drawString(this.font, cut(e.path() + (named ? "  [名称]" : ""), Math.max(20, avail)),
+                        L.x() + 8, ry, pathColor, false);
+                g.drawString(this.font, value, L.x() + L.w() - 6 - vw, ry, 0xFF9099A8, false);
+            }
+            int footerY = listTop + Math.min(dataEntries.size(), R.listRows()) * ROW_H;
+            String footer = (dataScroll + R.listRows()) + " / " + dataEntries.size()
+                    + "  ·  " + tr("logiscope.data.hint.pick");
+            g.drawString(this.font, cut(footer, L.w() - 2 * PAD), L.x() + PAD, footerY, 0xFF707070, false);
+        }
+
+        // ---- 3) 虚拟容器：一行两格（值 / 名称）----
+        int cellY = R.editTop();
+        String nameText = dataNamePath != null && !dataName.isBlank() ? dataName : dataName;
+        drawEditCell(g, left, cellY, R.cellW(), tr("logiscope.data.field.value"),
+                dataPath, dataFocus == 1, false);
+        drawEditCell(g, left + R.cellW() + PAD, cellY, R.cellW(), tr("logiscope.data.field.name"),
+                nameText, dataFocus == 2, dataNamePath != null);
+    }
+
+    /** 一个可编辑的小格：上面一行小标签，下面一格内容（焦点时描边 + 光标） */
+    private void drawEditCell(GuiGraphics g, int x, int y, int w, String label,
+                              String value, boolean focused, boolean autoName) {
+        g.drawString(this.font, label, x, y - 9, 0xFF8A8AA0, false);
+        int border = focused ? 0xFF8A8AC8 : 0xFF4A4A5E;
+        g.fill(x, y, x + w, y + CHIP_H, focused ? 0xFF2A2A38 : 0xFF1C1C26);
+        ring(g, x, y, w, CHIP_H, border);
+        String shown = value == null ? "" : value;
+        int avail = w - 12;
+        String draw = this.font.width(shown) > avail ? cut(shown, avail) : shown;
+        int color = shown.isEmpty() ? 0xFF6A6A78 : 0xFFE0E0EC;
+        g.drawString(this.font, shown.isEmpty() ? tr("logiscope.data.field.empty") : draw,
+                x + 5, y + 3, color, false);
+        if (autoName && !shown.isEmpty()) {
+            // 名称跟着 NBT 走时给一个品红点（与"名称来源是 NBT"同一语汇）
+            g.fill(x + w - 5, y + 3, x + w - 2, y + 6, COLOR_ANALYZE);
+        }
+        if (focused && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
+            int cx = x + 5 + Math.min(this.font.width(shown), avail);
+            g.fill(cx, y + 3, cx + 1, y + CHIP_H - 3, 0xFFE0E0EC);
+        }
+    }
+
+    /** DATA 页的鼠标点击：值列表（左键取值路径 / 右键用它的文字作名称）+ 两个编辑格 */
+    private boolean handleDataClick(int mx, int my, Layout L, int button) {
+        DataRects R = dataRects(L);
+        int left = L.x() + PAD;
+
+        // 编辑格
+        if (my >= R.editTop() && my < R.editTop() + CHIP_H) {
+            if (isIn(mx, my, left, R.editTop(), R.cellW(), CHIP_H)) {
+                dataFocus = 1;
+                return true;
+            }
+            if (isIn(mx, my, left + R.cellW() + PAD, R.editTop(), R.cellW(), CHIP_H)) {
+                dataFocus = 2;
+                return true;
+            }
+        }
+
+        // 值列表
+        if (my >= R.listTop()) {
+            int row = (my - R.listTop()) / ROW_H;
+            int idx = dataScroll + row;
+            if (row >= 0 && row < R.listRows() && idx < dataEntries.size()) {
+                Snbt.Entry e = dataEntries.get(idx);
+                if (button == 0) {
+                    if (e.numeric()) {
+                        dataPath = e.path();
+                    } else {
+                        // 数值叶子才可采样：点到字符串值就当作"指定名称"
+                        dataName = e.node().text() == null ? e.path() : e.node().text();
+                        dataNamePath = e.path();
+                    }
+                    return true;
+                }
+                if (button == 1) {
+                    dataName = e.node().text() == null ? e.path() : e.node().text();
+                    dataNamePath = e.textual() ? e.path() : null;
+                    return true;
+                }
+            }
+            return true;
+        }
+
+        // 命令原文区：点一下收起焦点（并允许滚轮）
+        if (my < R.listTop()) {
+            dataFocus = 0;
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 「开始采样」：新建一个**数据探针**并按这条路径逐 tick 取值。
+     *
+     * 与物品探针的入口（选格 → 完成）并列的第二条创建路径：选格页那条走
+     * "菜单槽 / ItemHandler 能力"，这条走 "NBT 路径"。两者产出的都是 ProbeInstance，
+     * 所以图表 / 框选 / 标记 / 存档 / 计算全部通用。
+     */
+    private void startDataSampling() {
+        ProbeInstance src = dataSrcProbe();
+        if (src == null) {
+            return;
+        }
+        String path = dataPath.trim();
+        if (path.isEmpty()) {
+            say(tr("logiscope.flash.data_need_path"));
+            return;
+        }
+        ProbeTarget t = src.target();
+        ProbeInstance created = LogiScopeMod.probes().create(
+                new ProbeTarget(List.of(), t.deviceName(), t.dimension(), t.pos()));
+        if (created == null) {
+            say(tr("logiscope.flash.too_many_probes"));
+            return;
+        }
+        created.configureData(new DataTarget(path, dataNamePath, dataName.trim(),
+                t.deviceName(), t.dimension(), t.pos()));
+        // 选格页那个"还没选格的空实例"顺手清掉（不留垃圾，与 leavePicker 同一个规矩）
+        if (!src.hasSlots()) {
+            LogiScopeMod.probes().remove(src.id());
+        }
+        LogiScopeMod.probes().setActive(created.id());
+        hiddenItems.clear();
+        ioShown.clear();
+        selection = null;
+        selectionStats = List.of();
+        live = true;
+        userZoomed = false;
+        builtVersion = Long.MIN_VALUE;
+        page = Page.CHART;
+        say(tr("logiscope.flash.data_sampling").replace("%s", path));
     }
 
     // ==================================================================

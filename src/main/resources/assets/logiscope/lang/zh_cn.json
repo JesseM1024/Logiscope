@@ -1,5 +1,6 @@
 {
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -97,5 +98,25 @@
   "logiscope.calc.op.total": "变化总量",
   "logiscope.calc.op.events": "变更区间",
   "logiscope.calc.no_data": "区间内没有样本",
-  "logiscope.calc.no_flow": "该曲线没有 IO 数据"
+  "logiscope.calc.no_flow": "该曲线没有 IO 数据",
+  "logiscope.page.data": "Probe data",
+  "logiscope.status.data": "数据探测",
+  "logiscope.btn.probe_data": "Probe data",
+  "logiscope.btn.data_refresh": "刷新",
+  "logiscope.btn.data_sample": "开始采样",
+  "logiscope.btn.to_picker": "回选格",
+  "logiscope.data.src": "状态",
+  "logiscope.data.field.value": "值 / 路径（可手输，支持 a.b[0]）",
+  "logiscope.data.field.name": "名称（可空 = 用值或名字）",
+  "logiscope.data.field.empty": "点下面的值，或直接输入…",
+  "logiscope.data.no_values": "还没有取到数据：确认开了作弊/管理员权限，且这个方块有方块实体",
+  "logiscope.data.hint.permission": "这条命令需要命令权限（单人在创建世界时开作弊，或服务器给 OP）",
+  "logiscope.data.hint.pick": "左键 数值 = 取值路径 · 左键 文字 / 右键 = 用它当名称",
+  "logiscope.data.status.idle": "尚未请求",
+  "logiscope.data.status.waiting": "读取中…",
+  "logiscope.data.status.ok": "已获取",
+  "logiscope.data.status.no_permission": "没有命令权限",
+  "logiscope.data.status.fail": "读取失败（没有方块实体？）",
+  "logiscope.flash.data_need_path": "先填一个取值路径",
+  "logiscope.flash.data_sampling": "已开始按 NBT 路径采样：%s"
 }

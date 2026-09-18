@@ -1,5 +1,6 @@
 {
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -97,5 +98,25 @@
   "logiscope.calc.op.total": "Total change",
   "logiscope.calc.op.events": "Change events",
   "logiscope.calc.no_data": "no samples in range",
-  "logiscope.calc.no_flow": "no IO data for this series"
+  "logiscope.calc.no_flow": "no IO data for this series",
+  "logiscope.page.data": "Probe data",
+  "logiscope.status.data": "Data probe",
+  "logiscope.btn.probe_data": "Probe data",
+  "logiscope.btn.data_refresh": "Refresh",
+  "logiscope.btn.data_sample": "Start sampling",
+  "logiscope.btn.to_picker": "Back",
+  "logiscope.data.src": "status",
+  "logiscope.data.field.value": "value / path (a.b[0])",
+  "logiscope.data.field.name": "name (empty = value)",
+  "logiscope.data.field.empty": "click a value below, or type…",
+  "logiscope.data.no_values": "no data yet: needs command permission and a block entity",
+  "logiscope.data.hint.permission": "needs command permission (cheats / OP)",
+  "logiscope.data.hint.pick": "click number = value path · click text / right-click = use as name",
+  "logiscope.data.status.idle": "idle",
+  "logiscope.data.status.waiting": "reading…",
+  "logiscope.data.status.ok": "ok",
+  "logiscope.data.status.no_permission": "no command permission",
+  "logiscope.data.status.fail": "failed (no block entity?)",
+  "logiscope.flash.data_need_path": "set a value path first",
+  "logiscope.flash.data_sampling": "NBT sampling started: %s"
 }
