@@ -1,18 +1,22 @@
 package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeMod;
+import com.jessetech.logiscope.collect.ContainerAccess;
 import com.jessetech.logiscope.ui.ScopeScreen;
 import com.mojang.blaze3d.platform.InputConstants;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
+import net.minecraft.client.gui.screens.inventory.EffectRenderingInventoryScreen;
 import net.neoforged.bus.api.IEventBus;
+import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.RegisterKeyMappingsEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
-import org.lwjgl.glfw.GLFW;
+import org.jetbrains.annotations.Nullable;
 
 /**
- * 绑定层：把「按键」翻译成「打开示波器的意图」。
+ * 绑定层：把「按键」翻译成「打开/收起示波器面板的意图」。
  *
  * ★ 关键逻辑路径 CP2 ★
  * vanilla 的 KeyMapping 只在【没有界面打开】时才会被 tick 消费。
@@ -22,19 +26,42 @@ import org.lwjgl.glfw.GLFW;
  * 解法：监听 ScreenEvent.KeyPressed.Pre。
  * 这个事件在 Screen 处理按键【之前】触发，且可以 cancel，
  * 因此我们既能拿到按键，又能阻止它被原界面继续处理。
+ *
+ * ★★ 两个必须记住的坑 ★★
+ *
+ * 坑 1：不要在输入框里抢键。
+ *   玩家在 JEI 搜索框里打 "hopper"，那个 'o' 一样会走到这个事件里来。
+ *   所以先判断"当前是不是有文本输入被聚焦"，是就完全不响应。
+ *
+ * 坑 2：KeyMapping#matches **不看修饰键**。
+ *   源码只有一句比较：key.getType() == KEYSYM && key.getValue() == keyCode。
+ *   所以把快捷键设成 Ctrl+O 毫无意义 —— 单独按 o 一样命中，
+ *   于是"改了 Ctrl+O 还是在搜索框里触发"。
+ *   真正的出路是换一个不会被当作正文输入的键（本项目用 ]）+ 上面的聚焦守卫。
  */
 public final class KeyBindings {
 
-    private KeyBindings() {
-    }
-
     public static final String CATEGORY = "key.categories.logiscope";
 
+    /** 长按连发的去抖窗口（tick）。20 tick = 1 秒 */
+    private static final int REPEAT_GUARD_TICKS = 5;
+
+    /** 上一次真正响应快捷键的 tick */
+    private static long lastHotkeyTick = Long.MIN_VALUE / 2;
+
+    /**
+     * 默认键位 `]`。
+     * 不用 O/I/E 这类字母键：它们在搜索框里是正文，必然打架。
+     * 用 InputConstants.KEY_RBRACKET（= 93）而不是写裸数字，可读性好得多。
+     */
     public static final KeyMapping OPEN_SCOPE = new KeyMapping(
             "logiscope.key.open_scope",
             InputConstants.Type.KEYSYM,
-            GLFW.GLFW_KEY_O,
+            InputConstants.KEY_RBRACKET,
             CATEGORY);
+
+    private KeyBindings() {
+    }
 
     /** 由主类在模组总线上调用 */
     public static void register(IEventBus modBus) {
@@ -49,6 +76,11 @@ public final class KeyBindings {
      * ★ 关键逻辑路径 CP2 的实现 ★
      *
      * 必须是 public：主类在另一个包，要用方法引用注册到事件总线。
+     *
+     * ★ 为什么要做去抖 ★
+     * 这个事件对「按下」和「长按连发」都会触发（KeyboardHandler 里 action==1 || action==2
+     * 都走 screen 这条分支），而且事件本身不带 action 信息。
+     * 不去抖的话，按住 `]` 会以每秒 ~30 次的频率把面板开了又关。
      */
     public static void onScreenKeyPressed(ScreenEvent.KeyPressed.Pre event) {
         if (!OPEN_SCOPE.matches(event.getKeyCode(), event.getScanCode())) {
@@ -60,35 +92,105 @@ public final class KeyBindings {
             return;
         }
 
-        // 只有在「模组设备的容器界面」打开时才响应。
-        // inventoryMenu 是玩家自己的背包，不算外部设备，排除掉。
-        if (mc.player.containerMenu == mc.player.inventoryMenu) {
+        // 连发去抖：同一个按键动作 5 tick（=0.25 秒）内只认一次
+        long now = LogiScopeMod.sampler().currentTick();
+        if (now - lastHotkeyTick < REPEAT_GUARD_TICKS) {
+            event.setCanceled(true);
             return;
         }
 
-        // 已经开着示波器了就别再叠一层
-        if (mc.screen instanceof ScopeScreen) {
+        Screen screen = event.getScreen();
+
+        // ★ 正在打字就别抢键 ★
+        // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）
+        if (TextInputGuard.isTypingNow(screen)) {
             return;
         }
 
-        openScope(mc);
+        // 面板已经开着 → 再按一次就是收起（开关语义）
+        if (screen instanceof ScopeScreen scope) {
+            lastHotkeyTick = now;
+            scope.closeScope();
+            event.setCanceled(true);
+            return;
+        }
 
-        // 阻止按键继续传给原界面（否则可能触发原模组的快捷键）
-        event.setCanceled(true);
+        // 有外部容器界面 → 压一层浮层，原界面继续画在下面
+        if (ContainerAccess.hasForeignContainerOpen() && !isOwnInventoryScreen(screen)) {
+            lastHotkeyTick = now;
+            ScopeScreen.openOverlay(mc);
+            event.setCanceled(true);
+            return;
+        }
+
+        // 没有容器界面，但确实挂着探头 → 单独开一个面板看数据
+        // （关掉界面继续跟踪时就是这个入口）
+        if (LogiScopeMod.sampler().target() != null) {
+            lastHotkeyTick = now;
+            ScopeScreen.openStandalone(mc);
+            event.setCanceled(true);
+        }
     }
 
     /**
-     * 打开示波器界面。
+     * 没有界面打开时，上面的 Screen 事件**根本不会触发**，
+     * 按键这时才走标准的 KeyMapping 路径（Minecraft#handleKeybinds 只在 screen == null 时跑）。
+     * 所以想"关掉容器界面之后还能按 ] 把面板叫出来看波形"，必须在这里补一条。
      *
-     * ★ 关键逻辑路径 CP3 ★
-     * 用 setScreen 替换当前界面，而不是关闭它。
-     * 要点：setScreen 会调用旧 Screen 的 removed()，但【不会】调用 onClose()，
-     * 因此 player.containerMenu 依然有效 —— 采样不会中断。
-     * 关闭示波器时用 setScreen(parent) 还原，原设备界面就回来了。
+     * ★ 无论有没有界面打开都要把点击队列排空 ★
+     * 否则界面开着时攒下的点击会在面板关掉的那一刻集中兑现，把面板又立刻弹回来。
+     * 排空之后只有在"当前没有界面"时才真的响应。
      */
-    private static void openScope(Minecraft mc) {
-        Screen parent = mc.screen;
-        LogiScopeMod.LOGGER.debug("[LogiScope] opening scope over {}", parent == null ? "null" : parent.getClass().getSimpleName());
-        mc.setScreen(new ScopeScreen(parent));
+    public static void onClientTick(ClientTickEvent.Post event) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+
+        boolean clicked = false;
+        while (OPEN_SCOPE.consumeClick()) {
+            clicked = true;
+        }
+
+        if (!clicked || mc.screen != null) {
+            return;
+        }
+        if (LogiScopeMod.sampler().target() != null) {
+            lastHotkeyTick = LogiScopeMod.sampler().currentTick();
+            ScopeScreen.openStandalone(mc);
+        }
+    }
+
+    /**
+     * 由 ScreenEvent.Init.Post 调用：容器界面初始化完成时，
+     * 把它和"玩家右键的那个方块"关联起来，得到持久身份（维度 + 坐标）。
+     *
+     * 这是"关掉界面之后还能找回来"的唯一可靠时机，见 ContainerAnchor 的类注释。
+     */
+    public static void onScreenInit(ScreenEvent.Init.Post event) {
+        if (!(event.getScreen() instanceof AbstractContainerScreen<?> containerScreen)) {
+            return;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return;
+        }
+        ContainerAnchor.onContainerScreenOpened(containerScreen.getMenu().containerId);
+    }
+
+    /**
+     * 当前界面是不是"玩家自己的背包界面"。
+     *
+     * 单人的生存背包走 player.inventoryMenu，ContainerAccess 已经排除了；
+     * 但**创造模式的背包不走它** —— 它有自己的 ItemPickerMenu，
+     * 于是「containerMenu != inventoryMenu」为真，会被误判成"外部设备"。
+     * 实测表现：创造模式里在背包界面按 `]` 会弹出面板（面板上还会列出一堆
+     * 创造物品标签页的内容）。这不是崩溃，但语义是错的。
+     *
+     * 两种背包界面共同的基类是 EffectRenderingInventoryScreen，
+     * 按基类排除即可，也不必分别引用两个具体类。
+     */
+    private static boolean isOwnInventoryScreen(@Nullable Screen screen) {
+        return screen instanceof EffectRenderingInventoryScreen<?>;
     }
 }
