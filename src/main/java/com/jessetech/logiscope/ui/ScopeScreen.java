@@ -2737,9 +2737,9 @@ public final class ScopeScreen extends Screen {
             case "calc_op" -> opPopupOpen = !opPopupOpen;
             case "probe_data" -> enterDataPage();
             case "data_refresh" -> {
-                BlockPos pos = dataSrcBlock();
-                if (pos != null) {
-                    DataCommand.request(pos);
+                ProbeInstance src = dataSrcProbe();
+                if (src != null) {
+                    DataCommand.request(src.target().dimension(), src.target().pos());
                     say(tr(DataCommand.statusKey()));
                 }
             }
@@ -3095,20 +3095,20 @@ public final class ScopeScreen extends Screen {
         dataScroll = 0;
         dataNextRequestTick = 0;
         page = Page.DATA;
-        DataCommand.request(p.target().pos());
+        DataCommand.request(p.target().dimension(), p.target().pos());
         dataNextRequestTick = LogiScopeMod.probes().currentTick() + DataRefreshTicks;
     }
 
     /** 每客户端 tick：抓数（实时刷新）+ 解析 */
     private void tickDataPage() {
         DataCommand.tick();
-        BlockPos pos = dataSrcBlock();
-        if (pos == null) {
+        ProbeInstance src = dataSrcProbe();
+        if (src == null) {
             return;
         }
         long now = LogiScopeMod.probes().currentTick();
         if (now >= dataNextRequestTick) {
-            DataCommand.request(pos);
+            DataCommand.request(src.target().dimension(), src.target().pos());
             dataNextRequestTick = now + DataRefreshTicks;
         }
         reparseData();
@@ -3290,11 +3290,14 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // 值列表
-        if (my >= R.listTop()) {
+        // 值列表：**只吃列表行带内的点击**。
+        // ★ 第十一轮④修的 bug：原先写的是 `my >= R.listTop()` —— 把列表以下
+        //   的一切（包括底部的「开始采样」按钮）全部吞掉，按钮永远点不到。
+        int listBottom = R.listTop() + R.listRows() * ROW_H;
+        if (my >= R.listTop() && my < listBottom) {
             int row = (my - R.listTop()) / ROW_H;
             int idx = dataScroll + row;
-            if (row >= 0 && row < R.listRows() && idx < dataEntries.size()) {
+            if (idx < dataEntries.size()) {
                 Snbt.Entry e = dataEntries.get(idx);
                 if (button == 0) {
                     if (e.numeric()) {
@@ -3320,6 +3323,7 @@ public final class ScopeScreen extends Screen {
             dataFocus = 0;
             return true;
         }
+        // 其余（列表带与编辑格之间 / 按钮区）→ 交给按钮循环（false = 不吞）
         return false;
     }
 
