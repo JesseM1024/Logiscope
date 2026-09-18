@@ -75,5 +75,15 @@
   "logiscope.label.probe": "探针",
   "logiscope.legend.io": "IO",
   "logiscope.legend.quantity": "数量",
-  "logiscope.info.kinds_dropped": "+%s 未显示"
+  "logiscope.info.kinds_dropped": "+%s 未显示",
+  "logiscope.page.replay": "回放",
+  "logiscope.btn.archive": "存档并停止",
+  "logiscope.info.archives": "存档 · 读取分析数据",
+  "logiscope.info.analyze": "分析 %s",
+  "logiscope.hint.no_archives": "还没有存档 · 图表页点「存档并停止」生成",
+  "logiscope.legend.analyze": "分析",
+  "logiscope.status.replay": "存档回放",
+  "logiscope.flash.archived": "已导出存档 %s · 已停止记录",
+  "logiscope.flash.replay_loaded": "已载入存档 %s",
+  "logiscope.flash.archive_failed": "导出失败 · 探针保留"
 }

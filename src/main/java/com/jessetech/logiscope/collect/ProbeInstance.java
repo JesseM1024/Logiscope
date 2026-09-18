@@ -4,6 +4,7 @@ import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeTarget;
+import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
 import net.minecraft.client.Minecraft;
@@ -90,6 +91,12 @@ public final class ProbeInstance {
     /** 容量来自配置（`bufferSamples`，默认 72000 条样本）；**改了会热切换**，见 ensureCapacity */
     private final SampleStore store = new SampleStore(LogiScopeConfig.bufferSamples());
     private final WorldProbe probe = new WorldProbe();
+    /**
+     * 波形标记（G4）。★ 独立于环形缓冲 ★ —— 缓冲写满滚动时标记不会被覆盖掉
+     * （用户标记"这里开始出问题"，十分钟后标记必须还在）。随探针实例走：
+     * 重新选格（configure）/ 清空记录（clearData）/ 删除实例（dispose）时一并清空。
+     */
+    private final MarkerList markers = new MarkerList();
 
     /** 采样互斥：客户端线程（菜单路径）与服务端线程（tick 路径）都可能写样本 */
     private final Object sampleLock = new Object();
@@ -136,6 +143,11 @@ public final class ProbeInstance {
 
     public SampleStore store() {
         return store;
+    }
+
+    /** 波形标记（G4）：独立于环形缓冲，右键波形加/删，随记录一起导出 */
+    public MarkerList markers() {
+        return markers;
     }
 
     public ProbeTarget target() {
@@ -193,6 +205,7 @@ public final class ProbeInstance {
             this.target = newTarget;
             this.watchedContainerId = ContainerAccess.currentContainerId();
             this.store.clear();
+            this.markers.clear();
             this.manualPause = false;
             this.warnedUnverifiedIndex = false;
             this.lastSampledGameTime = Long.MIN_VALUE;
@@ -234,6 +247,7 @@ public final class ProbeInstance {
     public void clearData() {
         synchronized (sampleLock) {
             store.clear();
+            markers.clear();
             lastSampledGameTime = Long.MIN_VALUE;
         }
     }
@@ -257,6 +271,7 @@ public final class ProbeInstance {
     void dispose() {
         synchronized (sampleLock) {
             store.clear();
+            markers.clear();
             probe.reset();
             target = ProbeTarget.EMPTY;
             state = State.ARMED;

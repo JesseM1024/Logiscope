@@ -302,6 +302,24 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 
 ---
 
+## 第十一轮（图例分半图标 + G4 标注 + G5 导出回放）
+
+| # | 需求 | 落地 |
+|---|---|---|
+| 1 | 图例图标**上下分半**：上半 = 存量线颜色，下半 = IO 线颜色 | `ScopeScreen#renderLegend`：色板劈成两半，关掉的那层显示灰；**两层全关时字体才变暗**（原先只开 IO 时整块是暗的，用户分不清"关了"还是"IO 开着"） |
+| 2 | G4 波形标记 | `store/MarkerList`（纯类，升序 / 同 tick 去重）+ `ProbeInstance#markers`（**独立于环形缓冲**，写满滚动不覆盖）。**右键**波形加 / 删（±3px，原计划左击+双击改为右键，按用户建议避免与框选冲突）；悬浮读数：tick / 秒 / 各可见线的物品与数量（`ChartRenderer#drawMarkers`） |
+| 3 | G4 差值 | 框选两点 → Δ数量 / Δtick / 平均速率，G2 已覆盖，本轮不改 |
+| 4 | G5 导出 | 新 `archive` 包：`ArchiveFormat`（纯格式层：Gson JSON + CSV，`format` 版本号 + 逐字段默认值 = 向前兼容）+ `Archives`（文件系统 / 游戏侧）。目录 `.minecraft/logiscope/<存档名>/`，存档名 = `yyyy-MM-dd_HH-mm-ss`，内含 recording.json + recording.csv；no_data / gap 是标记行 **count 留空** |
+| 5 | G5「存档并停止」交互 | 图表页新按钮：导出 → **写成功才**删探针与缓存（失败则探针原地保留）→ 直连进入回放页 |
+| 6 | G5 回放页 | 新 `Page.REPLAY`：复用图表页全部机制（数据塞进同一个 `chartData`，呈现层对"活的还是回放的"无感）。根页**上半 = running probes、下半 = 存档列表**（默认高亮当前/最近存档，点击任意行跨存档读取）。滚轮分区滚动 |
+| 7 | 回放可扩展性 | 图例弹窗多一项「分析」：选中曲线（品红描边，`replaySelectedItem`），后续数学运算挂这个字段叠上去；存档 JSON 的 `format`/逐字段默认值允许未来加字段不用迁移 |
+
+**离线验证**：TestChart 183 → **211 条**（+`MarkerList` 12 条 + `ArchiveFormat` CSV/JSON 往返 16 条）；
+dev-check 的 classpath 需加 `dev-check/lib/gson-2.10.1.jar`（ArchiveFormat 用 Gson，
+jar 已随项目提交）。
+
+---
+
 ## 已知问题 / 已接受的限制
 
 完整列表在 [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md) 第三节。这里只列**值得记住**的几条：

@@ -169,6 +169,7 @@ public final class ChartRenderer {
      * @param selection      框选区间；null = 没有
      * @param draft          true = 还在拖（只画框，不画统计）
      * @param selectionStats 框选区间的逐线统计（拖完才算，所以拖的时候传空表）
+     * @param markers        波形标记（G4）：用户右键打的记号（tick 升序）
      * @param mouseX/mouseY  真实鼠标坐标，用来画十字线读数
      */
     public record View(
@@ -180,6 +181,7 @@ public final class ChartRenderer {
             @Nullable Selection selection,
             boolean draft,
             List<ChartData.SeriesRange> selectionStats,
+            List<Long> markers,
             int mouseX,
             int mouseY) {
     }
@@ -371,6 +373,9 @@ public final class ChartRenderer {
         if (sel != null) {
             drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data);
         }
+
+        // ---- 波形标记（G4）----
+        drawMarkers(g, font, data, view);
 
         // ---- 十字线读数 ----
         drawCrosshair(g, font, data, view);
@@ -565,6 +570,89 @@ public final class ChartRenderer {
         if (extra > 0) {
             g.drawString(font, "+" + extra, bx + 2, ly, COLOR_LABEL, false);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 波形标记（G4）
+    // ------------------------------------------------------------------
+
+    /** 标记线颜色：调色板里没有的品红系，跟数据线 / 框选（琥珀）/ 准线（白）都分得开 */
+    private static final int COLOR_MARKER = 0xFFE070D8;
+    private static final int COLOR_MARKER_LINE = 0x80E070D8;
+    /** 光标离标记线不超过这个像素数就算"指着它"（悬浮读数 / 右键删除的容差同源） */
+    public static final int MARKER_HIT_PX = 3;
+
+    /**
+     * 画标记：一条贯穿绘图区的竖线 + 顶部小旗。
+     *
+     * 悬浮在标记附近（±{@link #MARKER_HIT_PX}px）时给读数：
+     * 所在 tick、换算秒，以及每条可见线在这一 tick 的值（G4 验收标准第 2 条）。
+     * 取值规则与十字线相同：找该 tick 之前最近的采样点（台阶状数据）。
+     */
+    private void drawMarkers(GuiGraphics g, Font font, ChartData data, View view) {
+        List<Long> markers = view.markers();
+        if (markers.isEmpty()) {
+            return;
+        }
+        long span = Math.max(1L, end - start);
+        long tolerance = Math.max(1L, span / Math.max(1, plotW)) + 1;
+        int mx = view.mouseX();
+        int my = view.mouseY();
+        boolean mouseInPlot = mx >= plotX && mx < plotR && my >= plotY && my < plotB;
+
+        Long hovered = null;
+        for (long t : markers) {
+            if (t < start || t > end) {
+                continue;
+            }
+            int x = xOf(t);
+            if (x < plotX || x >= plotR) {
+                continue;
+            }
+            boolean near = mouseInPlot && Math.abs(x - mx) <= MARKER_HIT_PX;
+            g.fill(x, plotY + 1, x + 1, plotB - 1, near ? COLOR_MARKER : COLOR_MARKER_LINE);
+            g.fill(x, plotY + 1, x + 5, plotY + 4, COLOR_MARKER);
+            if (near) {
+                hovered = t;
+            }
+        }
+        if (hovered == null) {
+            return;
+        }
+
+        // ---- 悬浮读数：tick / 秒 / 各可见线的值 ----
+        StringBuilder sb = new StringBuilder()
+                .append("M ").append(hovered).append("t  ").append(fmtSecs(hovered - start));
+        int shown = 0;
+        int total = 0;
+        for (Series s : data.series()) {
+            if (!readable(view, s)) {
+                continue;
+            }
+            total++;
+            if (shown >= 3) {
+                continue;
+            }
+            sb.append("  ").append(label(data.indexOf(s.itemId()), s.itemId()));
+            if (view.hidden().contains(s.itemId())) {
+                // 只开 IO 的物品：读数给净流量（与十字线同一语汇）
+                sb.append(" Δ").append(flowAt(s, hovered, tolerance));
+            } else {
+                sb.append(' ').append(valueAt(s, hovered, tolerance));
+            }
+            shown++;
+        }
+        if (total > shown) {
+            sb.append("  +").append(total - shown);
+        }
+
+        String text = sb.toString();
+        int tw = font.width(text);
+        int tx = Math.max(plotX + 2, Math.min(mx + 3, plotR - 3 - tw));
+        int ty = plotY + 6;
+        g.fill(tx - 2, ty - 2, tx + tw + 3, ty + 10, 0xE0181822);
+        g.fill(tx - 2, ty - 2, tx - 1, ty + 10, COLOR_MARKER);
+        g.drawString(font, text, tx, ty, COLOR_TEXT, false);
     }
 
     // ------------------------------------------------------------------
