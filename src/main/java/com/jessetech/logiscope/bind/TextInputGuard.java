@@ -81,7 +81,7 @@ public final class TextInputGuard {
 
     public static void onCharTypedPre(ScreenEvent.CharacterTyped.Pre event) {
         lastCharConsumed = true;
-        lastCharTick = LogiScopeMod.sampler().currentTick();
+        lastCharTick = LogiScopeMod.probes().currentTick();
     }
 
     public static void onCharTypedPost(ScreenEvent.CharacterTyped.Post event) {
@@ -143,7 +143,7 @@ public final class TextInputGuard {
         if (!lastCharConsumed) {
             return false;
         }
-        return LogiScopeMod.sampler().currentTick() - lastCharTick <= CONSUMED_CHAR_TTL;
+        return LogiScopeMod.probes().currentTick() - lastCharTick <= CONSUMED_CHAR_TTL;
     }
 
     // ------------------------------------------------------------------

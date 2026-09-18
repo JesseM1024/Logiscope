@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.ui;
 
+import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
@@ -66,6 +67,12 @@ public final class ChartRenderer {
 
     /** "格子空着"单独给一个低饱和的灰蓝：它不是物品，不该和物品线抢注意力 */
     private static final int EMPTY_SLOT_COLOR = 0xFF707888;
+
+    /**
+     * "多格监控、里面装着不同物品"的合成线颜色（见 {@code analysis/Aggregator}）。
+     * 与空槽的灰蓝刻意拉开距离：一个是"什么都没有"，一个是"有东西但说不清是哪种"。
+     */
+    private static final int MIXED_SLOT_COLOR = 0xFFA89880;
 
     // ------------------------------------------------------------------
     // 布局与配色常量
@@ -170,6 +177,9 @@ public final class ChartRenderer {
     public static int colorOf(int seriesIndex, String itemId) {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return EMPTY_SLOT_COLOR;
+        }
+        if (Aggregator.MIXED_ITEM.equals(itemId)) {
+            return MIXED_SLOT_COLOR;
         }
         return PALETTE[Math.floorMod(seriesIndex, PALETTE.length)];
     }
@@ -664,6 +674,9 @@ public final class ChartRenderer {
     public static String label(int seriesIndex, String itemId) {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
+        }
+        if (Aggregator.MIXED_ITEM.equals(itemId)) {
+            return tr("logiscope.slot.mixed");
         }
         int i = itemId.indexOf(':');
         return i < 0 ? itemId : itemId.substring(i + 1);

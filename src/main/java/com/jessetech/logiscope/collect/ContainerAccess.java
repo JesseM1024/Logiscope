@@ -3,6 +3,7 @@ package com.jessetech.logiscope.collect;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
@@ -51,12 +52,39 @@ public final class ContainerAccess {
     }
 
     /**
-     * 列出所有槽位的快照，供界面展示与选择。
+     * 这个槽位是不是**玩家自己背包**里的格子。
+     *
+     * ★ 第九轮补的一个洞（原实现与文档不一致）★
+     * 旧文档（ARCHITECTURE.md CP1）写着 "ContainerAccess#snapshot 会把玩家自己的背包
+     * 整体排除掉"，但代码只判了 "整个菜单 == inventoryMenu" 这一种情况 ——
+     * 于是**打开箱子时**，列表里其实混着下面 36 格玩家背包。
+     * 单格时代它只是"列表有点长"；多格监控 + 可视化选格开始之后，
+     * 它变成"点到自己背包的格子也会被当成设备槽"，语义就错了。
+     *
+     * 判定依据：vanilla 给玩家背包建的槽位是 {@code new Slot(player.getInventory(), i, x, y)}，
+     * 也就是 {@code slot.container} 恰好是玩家的 Inventory 实例（`Slot.container` 是 public 字段）。
+     */
+    public static boolean isPlayerSlot(Slot slot) {
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return false;
+        }
+        Inventory inv = mc.player.getInventory();
+        return slot.container == inv;
+    }
+
+    /** 这个槽位能不能被选作监控目标（设备槽、非假槽） */
+    public static boolean isSelectable(Slot slot) {
+        return !isPlayerSlot(slot) && !slot.isFake();
+    }
+
+    /**
+     * 列出所有**设备槽位**的快照，供界面展示与选择。
      *
      * ★ 只列「外部设备」的槽位 ★
-     * 面板可以在"关掉容器界面之后"单独打开（见 ScopeScreen 的独立模式），
-     * 那时 player.containerMenu 是玩家自己的背包。若不排除，
-     * 玩家会在列表里看到自己背包的 36 个格子并误以为那是机器 —— 语义是错的。
+     *   · 没有外部容器界面时直接返回空（面板可以在关掉容器界面后单独打开，
+     *     那时 containerMenu 是玩家自己的背包，列出来会让人误以为那是机器）
+     *   · 有外部容器界面时，跳过玩家背包那 36 格与模组的假槽位（见 isSelectable）
      */
     public static List<SlotView> snapshot() {
         List<SlotView> out = new ArrayList<>();
@@ -68,21 +96,38 @@ public final class ContainerAccess {
             return out;
         }
         for (int i = 0; i < menu.slots.size(); i++) {
-            SlotView v = toView(menu, i);
-            if (v != null) {
-                out.add(v);
+            Slot slot = menu.slots.get(i);
+            if (!isSelectable(slot)) {
+                continue;
             }
+            out.add(make(i, slot.getContainerSlot(), slot.getItem()));
         }
         return out;
     }
 
-    /** 读单个槽位；越界或没有菜单时返回 null */
+    /** 读单个菜单槽位；越界或没有菜单时返回 null */
     public static SlotView read(int slotIndex) {
         AbstractContainerMenu menu = currentMenu();
         if (menu == null || slotIndex < 0 || slotIndex >= menu.slots.size()) {
             return null;
         }
         return toView(menu, slotIndex);
+    }
+
+    /** 按容器内下标反查菜单槽；找不到返回 null（第九轮新增，给"无 GUI 建的探针"用不上，留给后续扩展） */
+    public static SlotView findByContainerIndex(int containerSlotIndex) {
+        AbstractContainerMenu menu = currentMenu();
+        if (menu == null) {
+            return null;
+        }
+        for (int i = 0; i < menu.slots.size(); i++) {
+            Slot slot = menu.slots.get(i);
+            if (!isSelectable(slot) || slot.getContainerSlot() != containerSlotIndex) {
+                continue;
+            }
+            return toView(menu, i);
+        }
+        return null;
     }
 
     private static SlotView toView(AbstractContainerMenu menu, int index) {
