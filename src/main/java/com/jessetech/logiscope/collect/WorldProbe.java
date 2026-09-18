@@ -10,6 +10,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.capabilities.Capabilities;
 import net.neoforged.neoforge.items.IItemHandler;
@@ -34,12 +35,77 @@ import org.jetbrains.annotations.Nullable;
  */
 public final class WorldProbe {
 
-    /** 缓存结果 + 它是哪一 tick 提交的，用来判断新鲜度 */
-    private record Snapshot(@Nullable ContainerAccess.SlotView view, long requestedAtTick) {
+    /** 缓存结果 + 它是哪一客户端 tick 提交的，用来判断新鲜度（见 clientTick 注释） */
+    private record Snapshot(@Nullable ContainerAccess.SlotView view, long atClientTick) {
     }
 
     private static volatile Snapshot cached;
     private static volatile boolean pending;
+
+    // ==================================================================
+    // 两只时钟（第八轮 N13）
+    // ==================================================================
+
+    /**
+     * 客户端 tick 计数。
+     *
+     * 异步读取的「新鲜度」用它判定，**不用世界 tick** ——
+     * 读值延迟是真实时间量（提交到服务端线程，1~2 个客户端 tick 后回来），
+     * 与世界流速无关。tick rate 200 时世界 tick 一次跳 ~10，
+     * 按世界 tick 判新鲜会把刚回来的真值判成超龄（第八轮实测：成段 no_data 虚线）。
+     */
+    private static volatile long clientTick;
+
+    /**
+     * 权威世界 tick：服务端线程读出的 {@code ServerLevel#getGameTime()}，-1 = 不可用。
+     *
+     * 为什么客户端自己的 {@code Level#getGameTime()} 不能当世界时钟（第八轮 N13 实测，
+     * sources jar 核实）：
+     *   · 客户端 {@code ClientLevel#tickTime()} 每客户端 tick 本地 +1；
+     *   · 服务端 {@code MinecraftServer} 每 20 个**服务端** tick（tickCount % 20）才发一次
+     *     {@code ClientboundSetTimePacket}，把绝对值砸给客户端。
+     *   tick rate 20 时两条节拍恰好重合（本地 +1 与纠正值相等，无感）；
+     *   tick rate 40 时世界每客户端 tick 走 2，本地却只 +1，且每 10 个客户端 tick
+     *   被纠正 +20 —— 客户端看到的 gameTime 是一条**错拍的阶梯**。
+     *   拿它当采样时钟：阶梯平台期被"世界没走 tick"判定吞掉（成段无数据），
+     *   阶梯跳变时一条样本横跨 20 个世界 tick（IO 速率全错）。
+     * 单人存档直接在服务端线程读权威值；多人没有集成服务端，退回客户端值（限制见类注释）。
+     */
+    private static volatile long serverGameTime = -1;
+
+    /**
+     * 由 {@code Sampler#onClientTick} 每客户端 tick 调一次：
+     * 推进客户端 tick 计数 + 刷新权威世界 tick。
+     */
+    public static void tickClient() {
+        clientTick++;
+        Minecraft mc = Minecraft.getInstance();
+        IntegratedServer server = mc.getSingleplayerServer();
+        if (server == null) {
+            // 离开单人存档（断线 / 回主菜单）：权威值作废，防止跨世界串值
+            serverGameTime = -1;
+            return;
+        }
+        try {
+            server.execute(() -> {
+                ServerLevel level = server.getLevel(Level.OVERWORLD);
+                if (level != null) {
+                    serverGameTime = level.getGameTime();
+                }
+            });
+        } catch (Throwable ignored) {
+            // 服务器正在关闭：下一客户端 tick 会重试
+        }
+    }
+
+    /**
+     * 权威世界 tick。有集成服务端就用服务端线程读出的真值；
+     * 还没读到过 / 多人 → 退回 fallback（客户端 Level#getGameTime()，语义退化为"客户端近似"）。
+     */
+    public static long worldGameTime(long fallback) {
+        long t = serverGameTime;
+        return t >= 0 ? t : fallback;
+    }
 
     private WorldProbe() {
     }
@@ -182,11 +248,12 @@ public final class WorldProbe {
         return target.containerSlotIndex();
     }
 
-    /** 丢掉全部缓存（读值缓存 + 下标验证）。切换探针 / 拔探头时调用。 */
+    /** 丢掉全部缓存（读值缓存 + 下标验证 + 权威时钟）。切换探针 / 拔探头时调用。 */
     public static void reset() {
         cached = null;
         pending = false;
         mapping = null;
+        serverGameTime = -1;
     }
 
     /**
@@ -210,25 +277,23 @@ public final class WorldProbe {
      * 所以那条 no_data 是"异步管道的启动延迟"，不是"这台机器读不到"，纯属误导。
      *
      * 修法：进入 FOLLOWING 时把上一 tick 刚读到的值（最多 50 ms 旧）当作一次快照塞进缓存，
-     * 让时间轴续上；真正的异步结果在 1–2 tick 内到达并覆盖它。
+     * 让时间轴续上；真正的异步结果在 1–2 个客户端 tick 内到达并覆盖它。
      * 若确实读不到（多人 / 区块卸载 / 方块被拆），这个垫值会在 maxAge 之后自然过期，
      * 之后照样记 no_data —— 该断的地方还是会断。
-     *
-     * @param tick 这次垫值算作哪一 tick 的观测（一般传当前 tick）
      */
-    public static void seed(@Nullable ContainerAccess.SlotView view, long tick) {
+    public static void seed(@Nullable ContainerAccess.SlotView view) {
         if (view == null) {
             return;
         }
-        cached = new Snapshot(view, tick);
+        cached = new Snapshot(view, clientTick);
         // 刻意不动 pending：垫值只是"缓一下"，不该阻止真正的异步请求发出去
     }
 
     /**
-     * 请求一次世界侧读取。**每 tick 调一次即可**，不要在同一 tick 里反复调。
+     * 请求一次世界侧读取。**每客户端 tick 调一次即可**，不要在同一 tick 里反复调。
      * 上一发请求还没被服务端线程处理完时会直接跳过，避免任务堆积。
      */
-    public static void request(@Nullable ProbeTarget target, long tick) {
+    public static void request(@Nullable ProbeTarget target) {
         if (target == null || !target.hasPersistentId() || pending) {
             return;
         }
@@ -242,10 +307,11 @@ public final class WorldProbe {
         }
 
         pending = true;
+        long atClient = clientTick;
         try {
             server.execute(() -> {
                 ContainerAccess.SlotView view = readNow(server, target);
-                cached = new Snapshot(view, tick);
+                cached = new Snapshot(view, atClient);
                 pending = false;
             });
         } catch (Throwable t) {
@@ -257,17 +323,19 @@ public final class WorldProbe {
     /**
      * 取最近一次读到的值。
      *
-     * @param nowTick 当前 tick
-     * @param maxAge  最多容忍多少 tick 的陈旧度。超龄返回 null（记 no_data），
-     *                避免服务端卡顿时把一堆陈旧值当成新值写进时间序列。
+     * @param maxAgeClientTicks 最多容忍多少个**客户端 tick** 的陈旧度。超龄返回 null
+     *                          （记 no_data），避免服务端卡顿时把一堆陈旧值当成新值
+     *                          写进时间序列。用客户端 tick 而不是世界 tick 的原因见
+     *                          {@link #clientTick} 的注释：读值延迟是真实时间量，
+     *                          与世界流速无关。
      */
     @Nullable
-    public static ContainerAccess.SlotView latest(long nowTick, int maxAge) {
+    public static ContainerAccess.SlotView latest(int maxAgeClientTicks) {
         Snapshot snap = cached;
         if (snap == null || snap.view() == null) {
             return null;
         }
-        return (nowTick - snap.requestedAtTick()) <= maxAge ? snap.view() : null;
+        return (clientTick - snap.atClientTick()) <= maxAgeClientTicks ? snap.view() : null;
     }
 
     /** ★ 必须在服务端线程执行 ★ */
