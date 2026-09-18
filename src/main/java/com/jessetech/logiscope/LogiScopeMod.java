@@ -1,6 +1,7 @@
 package com.jessetech.logiscope;
 
 import com.jessetech.logiscope.bind.ContainerAnchor;
+import com.jessetech.logiscope.bind.DataCommand;
 import com.jessetech.logiscope.bind.KeyBindings;
 import com.jessetech.logiscope.bind.TextInputGuard;
 import com.jessetech.logiscope.collect.ProbeManager;
@@ -9,6 +10,7 @@ import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
+import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
@@ -83,6 +85,13 @@ public final class LogiScopeMod {
         // 集成服务端与客户端同进程（纯客户端模组在专用服务器上不会被加载），
         // 事件在 tickChildren 之后发 —— 读到的就是这一 tick 结束时的状态。
         NeoForge.EVENT_BUS.<ServerTickEvent.Post>addListener(ProbeManager::onServerTick);
+
+        // 「Probe data」：抓 `data get block` 的系统回执（只认我们刚发出去的那一条），
+        // 并顺手吞掉它 —— 界面已经显示了，不必再刷聊天框
+        NeoForge.EVENT_BUS.<ClientChatReceivedEvent.System>addListener(DataCommand::onChatReceived);
+
+        // 命令回执的超时计时（1 秒没回就当失败，不然状态永远卡在"等待"）
+        NeoForge.EVENT_BUS.<ClientTickEvent.Post>addListener(e -> DataCommand.tick());
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来
