@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.collect;
 
+import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.bind.DataTarget;
 import net.minecraft.core.BlockPos;
@@ -34,6 +35,29 @@ public final class DataProbe {
     public Double readNumber(ServerLevel level, DataTarget target) {
         Tag tag = navigate(readRoot(level, target.pos()), Snbt.parsePath(target.valuePath()));
         return asDouble(tag);
+    }
+
+    /**
+     * **NBT 槽位目标**的读数（第十六轮）：
+     * 读方块本体 NBT → 解析 → 在 {@code valuePath} 那个列表里找 {@code slot == nbtSlot} 的元素。
+     *
+     * @return null = 这台设备现在读不到（方块实体没了 / 区块不在）→ 上层记 no_data；
+     *         非 null = 这一刻的值。元素**不存在**时返回一条 {@code count = 0} 的空条目 ——
+     *         "这一格是空的"就该是 0（而不是 no_data，因为设备本身读得到）。
+     */
+    @Nullable
+    public NbtSlotLayout.Entry readSlotAnchor(ServerLevel level, DataTarget target) {
+        CompoundTag root = readRoot(level, target.pos());
+        if (root == null) {
+            return null;
+        }
+        Snbt.Node tree = Snbt.parse(root.getAsString());
+        NbtSlotLayout.Entry e = NbtSlotLayout.bySlot(tree, target.valuePath(), target.nbtSlot());
+        if (e == null) {
+            // 格子空了（机器把元素从列表里删掉了）：数量 0，名称沿用选择时记下的那个
+            return new NbtSlotLayout.Entry(target.nbtSlot(), null, 0);
+        }
+        return e;
     }
 
     /** 按路径取字符串（给"名称来自 NBT"的场景用） */

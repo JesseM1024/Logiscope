@@ -5,6 +5,7 @@
 
 
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -156,5 +157,9 @@
   "logiscope.anchor.open_menu": "已打开的容器（无坐标）",
   "logiscope.data.name_mark": "[名称]",
   "logiscope.tip.probe_title": "探针详情 · 数据 %s · 槽 %s",
-  "logiscope.tip.line_data": "数据"
+  "logiscope.tip.line_data": "数据",
+  "logiscope.picker.nbt_slot": "NBT 槽位型，按 slot 监测",
+  "logiscope.flash.slot_anchor_added": "已按 NBT slot 添加 %s 个监测目标",
+  "logiscope.flash.slot_anchor_skipped": "跳过 %s 个空格 / 无法区分的格子（NBT 里没有对应元素）",
+  "logiscope.flash.slot_anchor_none": "没有可监测的格子：空格子在 NBT 里没有元素，拿不到 slot 号"
 }

@@ -2,6 +2,7 @@ package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.Aggregator;
+import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.DataTarget;
 import com.jessetech.logiscope.bind.ProbeTarget;
@@ -616,6 +617,21 @@ public final class ProbeInstance {
                 }
                 int got = 0;
                 for (DataTarget dt : dts) {
+                    if (dt.isSlotAnchor()) {
+                        // ★ NBT 槽位目标（第十六轮）★：只认 NBT 里的 slot 号，
+                        // 与菜单/GUI 状态无关 —— 于是不会再有"开界面 2 个、关界面 8 个"
+                        NbtSlotLayout.Entry e = dataProbe.readSlotAnchor(level, dt);
+                        if (e == null) {
+                            continue;   // 设备读不到 —— 留空（不写 0，也不连累别的目标）
+                        }
+                        String name = e.itemId() != null && !e.itemId().isBlank()
+                                ? e.itemId()
+                                : dt.fallbackName();
+                        bufIds[got] = name;
+                        bufCounts[got] = e.count();
+                        got++;
+                        continue;
+                    }
                     Double v = dataProbe.readNumber(level, dt);
                     if (v == null) {
                         continue;   // 方块实体没了 / 路径不存在 / 非数字 —— 这个目标留空

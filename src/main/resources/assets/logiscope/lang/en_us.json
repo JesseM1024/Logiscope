@@ -5,6 +5,7 @@
 
 
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -156,5 +157,9 @@
   "logiscope.anchor.open_menu": "open container (no coords)",
   "logiscope.data.name_mark": "[name]",
   "logiscope.tip.probe_title": "probe details · data %s · slots %s",
-  "logiscope.tip.line_data": "data"
+  "logiscope.tip.line_data": "data",
+  "logiscope.picker.nbt_slot": "NBT slot-list, track by slot",
+  "logiscope.flash.slot_anchor_added": "added %s NBT slot targets",
+  "logiscope.flash.slot_anchor_skipped": "skipped %s empty or ambiguous slots (no matching NBT element)",
+  "logiscope.flash.slot_anchor_none": "nothing to track: empty slots have no NBT element, so there is no slot number"
 }
