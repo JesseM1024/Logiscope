@@ -8,6 +8,7 @@ import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
+import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.Archives;
@@ -234,6 +235,16 @@ public final class ScopeScreen extends Screen {
     private final int[] tipBuf = new int[4];
     @Nullable
     private int[] tipRect;
+
+    // ---- NBT 槽位型容器（第十六轮）：slot 号写在 NBT 自己身上，按 slot 监测才准 ----
+    /** 当前选格目标是不是"NBT 自带 slot 号"的容器（MEK 那类） */
+    private boolean nbtSlotMode;
+    /** 检测到的物品列表路径（如 Items） */
+    private String nbtSlotListPath = "";
+    /** 检测到的元素（slot / 物品 / 数量），用于"按内容反查 slot 号" */
+    private List<NbtSlotLayout.Entry> nbtSlotEntries = List.of();
+    private String nbtSlotParsedFrom = "";
+    private long nbtSlotNextRequest;
 
     // ---- 回放计算（第十一轮②）----
     /** 运算选择（工具栏「运算」弹窗）。OP_* 常量见下 */
@@ -553,6 +564,15 @@ public final class ScopeScreen extends Screen {
             ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
             if (p != null && p.target().hasPersistentId()) {
                 ProbeSlots.request(p.target().dimension(), p.target().pos());
+                // ★ NBT 槽位型容器的检测（第十六轮）★
+                // 顺手把方块 NBT 抓一次（单人 = 服务端直读，不花权限），解析出
+                // "这个容器是不是把 slot 号写在 NBT 里"。是的话，选格就按 slot 走。
+                DataCommand.tick();
+                if (LogiScopeMod.probes().currentTick() >= nbtSlotNextRequest) {
+                    DataCommand.request(p.target().dimension(), p.target().pos());
+                    nbtSlotNextRequest = LogiScopeMod.probes().currentTick() + 20;
+                }
+                parseNbtSlotLayout();
             }
             syncContainerSelection();
         }
@@ -1342,8 +1362,13 @@ public final class ScopeScreen extends Screen {
                     case WORLD -> tr("logiscope.src.world");
                     case NONE -> tr("logiscope.src.none");
                 };
-                g.drawString(this.font, badge + " · " + tr("logiscope.info.selected") + " " + selectionCount(),
-                        left, y, 0x9BE1CB, false);
+                String line = badge + " · " + tr("logiscope.info.selected") + " " + selectionCount();
+                if (nbtSlotMode) {
+                    // 这类容器的槽位号写在 NBT 里：明确告诉用户"选格会按 slot 监测"
+                    line += "  ·  " + tr("logiscope.picker.nbt_slot").replace("%s", nbtSlotListPath)
+                            + " (" + nbtSlotEntries.size() + ")";
+                }
+                g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0x9BE1CB, false);
             }
             case CHART -> {
                 ProbeInstance p = currentProbe();
@@ -2567,6 +2592,15 @@ public final class ScopeScreen extends Screen {
             return;
         }
 
+        // ★ NBT 槽位型容器（第十六轮）★
+        // 这类机器（MEK 等）把槽位号写在 NBT 的 `slot` 字段里，菜单位置与容器下标都可能
+        // 对不上。所以**不组 SlotRef**，改成："把点到的格子按内容反查成 slot 号"，
+        // 之后无论 GUI 开还是关，都只按 slot 号读 NBT —— 一条路，不会自相矛盾。
+        if (nbtSlotMode) {
+            commitNbtSlotAnchors(p);
+            return;
+        }
+
         List<ProbeTarget.SlotRef> refs = new ArrayList<>();
         List<ContainerAccess.SlotView> forVerify = new ArrayList<>();
 
@@ -2615,8 +2649,69 @@ public final class ScopeScreen extends Screen {
         say(tr("logiscope.flash.probe_configured"));
     }
 
+    /**
+     * NBT 槽位模式下的「完成」：把选中的格子解析成 NBT slot 号，作为**数据目标**挂上去。
+     *
+     * 规则（用户原话的落地）：
+     *   · 点到的格子有物品 → 用"物品 id + 数量"在 NBT 列表里反查 slot 号，**唯一命中**才采用；
+     *   · 空格子（NBT 里没有对应元素，拿不到 slot 号）→ **不选它**；
+     *   · 同物品同数量命中多个（分不清哪一格）→ 也不选（宁可少选，不猜）。
+     *
+     * 选完 probes 的目标里**不含任何 SlotRef**（所以之后完全不碰菜单），
+     * 只有数据目标 —— 这条探针就是"纯数据探针"，走服务端直读。
+     */
+    private void commitNbtSlotAnchors(ProbeInstance p) {
+        Snbt.Node tree = Snbt.parse(DataCommand.text());
+        int added = 0;
+        int skipped = 0;
+        for (ContainerAccess.SlotView v : menuSlots) {
+            if (!selMenuSlots.contains(v.menuSlotIndex())) {
+                continue;
+            }
+            List<NbtSlotLayout.Entry> hits =
+                    NbtSlotLayout.byContent(tree, nbtSlotListPath, v.itemId(), v.count());
+            if (hits.size() != 1) {
+                skipped++;
+                continue;
+            }
+            NbtSlotLayout.Entry hit = hits.get(0);
+            String name = hit.itemId() != null && !hit.itemId().isBlank() ? hit.itemId() : v.itemId();
+            p.addDataTarget(DataTarget.slotAnchor(nbtSlotListPath, name,
+                    p.target().deviceName(), p.target().dimension(), p.target().pos(), hit.slot()));
+            added++;
+        }
+        if (added == 0 && p.dataTargets().isEmpty()) {
+            say(tr("logiscope.flash.slot_anchor_none"));
+            return;
+        }
+
+        ProbeTarget old = p.target();
+        // 槽位列表留空：这类容器的物品读数**只走 NBT**，不走菜单/能力下标
+        p.configure(new ProbeTarget(List.of(), old.deviceName(), old.dimension(), old.pos()), null);
+        LogiScopeMod.probes().setActive(p.id());
+
+        hiddenItems.clear();
+        ioShown.clear();
+        legendPopup = null;
+        selection = null;
+        selectionStats = List.of();
+        live = true;
+        userZoomed = false;
+        builtVersion = Long.MIN_VALUE;
+        cellMode = false;
+        page = Page.CHART;
+        if (skipped > 0) {
+            say(tr("logiscope.flash.slot_anchor_skipped").replace("%s", String.valueOf(skipped)));
+        } else {
+            say(tr("logiscope.flash.slot_anchor_added").replace("%s", String.valueOf(added)));
+        }
+    }
+
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
     private void leavePicker() {
+        nbtSlotMode = false;
+        nbtSlotListPath = "";
+        nbtSlotEntries = List.of();
         ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
         if (p != null && !p.hasAnything()) {
             LogiScopeMod.probes().remove(p.id());
@@ -3276,6 +3371,22 @@ public final class ScopeScreen extends Screen {
     // ==================================================================
     // 悬浮详情（第十三轮⑤）：+N / data xN / 槽列表 —— 鼠标悬浮出完整列表
     // ==================================================================
+
+    /**
+     * 解析抓起到的 NBT，判断这是不是"NBT 自带 slot 号"的容器（第十六轮）。
+     * 判定纯逻辑在 {@link NbtSlotLayout}（离线有断言），这里只做缓存与状态更新。
+     */
+    private void parseNbtSlotLayout() {
+        String text = DataCommand.text();
+        if (text == null || text.equals(nbtSlotParsedFrom)) {
+            return;
+        }
+        nbtSlotParsedFrom = text;
+        NbtSlotLayout.Layout layout = NbtSlotLayout.detect(Snbt.parse(text));
+        nbtSlotMode = layout != null;
+        nbtSlotListPath = layout == null ? "" : layout.listPath();
+        nbtSlotEntries = layout == null ? List.of() : layout.entries();
+    }
 
     /** 探针详情标题：与面板上的 "槽 … · 数据 xN" 呼应 */
     private String probeTipTitle(ProbeInstance p) {

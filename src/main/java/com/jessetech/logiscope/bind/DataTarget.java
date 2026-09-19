@@ -30,7 +30,32 @@ public record DataTarget(
         String literalName,
         String blockLabel,
         ResourceKey<Level> dimension,
-        BlockPos pos) {
+        BlockPos pos,
+        int nbtSlot) {
+
+    /** 普通路径目标（第十一轮③那套） */
+    public DataTarget(String valuePath, @Nullable String namePath, String literalName,
+                      String blockLabel, ResourceKey<Level> dimension, BlockPos pos) {
+        this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1);
+    }
+
+    /**
+     * **NBT 槽位目标**（第十六轮）：{@code valuePath} = 物品列表在 NBT 里的路径
+     * （如 {@code Items}），{@code nbtSlot} = 元素自带 {@code slot} 号。
+     * 读数 = "列表里 slot == nbtSlot 的元素的 Item.Count"。
+     *
+     * 这一路**完全不碰菜单**，所以 GUI 开不开读数都一样 —— 正是 MEK 那类
+     * "槽位号写在 NBT 里"的机器需要的语义。
+     */
+    public static DataTarget slotAnchor(String listPath, String itemId, String blockLabel,
+                                        ResourceKey<Level> dimension, BlockPos pos, int slot) {
+        return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot);
+    }
+
+    /** 是不是 NBT 槽位目标 */
+    public boolean isSlotAnchor() {
+        return nbtSlot >= 0;
+    }
 
     public boolean hasNamePath() {
         return namePath != null && !namePath.isBlank();
@@ -51,6 +76,9 @@ public record DataTarget(
     /** 面板上的一行描述 */
     public String describe() {
         String label = blockLabel == null || blockLabel.isBlank() ? "block" : blockLabel;
+        if (isSlotAnchor()) {
+            return label + " · " + valuePath + "[slot=" + nbtSlot + "] · " + anchorText();
+        }
         return label + " · " + valuePath + " · " + anchorText();
     }
 }

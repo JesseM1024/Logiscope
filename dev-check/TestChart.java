@@ -30,6 +30,7 @@ import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
+import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.RectRuns;
@@ -79,6 +80,7 @@ public class TestChart {
         t27Offsets();
         t28CombineAll();
         t29RenderGeometry();
+        t30NbtSlotLayout();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -937,6 +939,49 @@ public class TestChart {
         yes("同列尖峰被 min-max 竖条覆盖", covered);
     }
 
+
+
+    // 30) NBT 槽位型容器（第十六轮）：MEK 那类"slot 号写在 NBT 里"的布局检测与反查
+    private static void t30NbtSlotLayout() {
+        String mek = "barrel has the following data: {Items:["
+                + "{Slot:0b,Item:{id:\"minecraft:cobblestone\",Count:2}},"
+                + "{Slot:5b,Item:{id:\"minecraft:iron_ingot\",Count:64}}"
+                + "],Energy:1234}";
+        Snbt.Node tree = Snbt.parse(mek);
+        NbtSlotLayout.Layout layout = NbtSlotLayout.detect(tree);
+        yes("识别出槽位列表", layout != null);
+        if (layout == null) {
+            return;
+        }
+        eq("列表路径", "Items", layout.listPath());
+        eq("元素个数", 2, layout.entries().size());
+        eq("第 1 个 slot", 0, layout.entries().get(0).slot());
+        eq("第 1 个物品", "minecraft:cobblestone", layout.entries().get(0).itemId());
+        eq("第 1 个数量", 2, layout.entries().get(0).count());
+        eq("第 2 个 slot", 5, layout.entries().get(1).slot());
+        eq("第 2 个数量", 64, layout.entries().get(1).count());
+
+        // 按 slot 找（采样的读法）
+        eq("slot=5 的数量", 64, NbtSlotLayout.bySlot(tree, "Items", 5).count());
+        eq("slot=0 的数量", 2, NbtSlotLayout.bySlot(tree, "Items", 0).count());
+        eq("slot=3 不存在（空格子）", null, NbtSlotLayout.bySlot(tree, "Items", 3));
+
+        // 按内容反查（拾取时把"点到的格子"翻成 slot 号）
+        List<NbtSlotLayout.Entry> hit = NbtSlotLayout.byContent(tree, "Items", "minecraft:iron_ingot", 64);
+        eq("唯一命中", 1, hit.size());
+        eq("命中 slot", 5, hit.get(0).slot());
+        eq("数量不符 → 不命中", 0, NbtSlotLayout.byContent(tree, "Items", "minecraft:iron_ingot", 63).size());
+        eq("空格子的物品 → 不命中", 0, NbtSlotLayout.byContent(tree, "Items", "", 0).size());
+
+        // 不是槽位列表的东西不该被误判
+        eq("流体列表不误判", null, NbtSlotLayout.detect(Snbt.parse("{tanks:[{FluidName:\"minecraft:water\",amount:5000}]}")));
+        eq("只有 Count 没有 Slot 也不误判", null, NbtSlotLayout.detect(Snbt.parse("{Items:[{Count:1,id:\"minecraft:stone\"}]}")));
+        eq("空列表不误判", null, NbtSlotLayout.detect(Snbt.parse("{Items:[]}")));
+        // 扁平形状（id/Count 直接写在元素上）也要认
+        NbtSlotLayout.Layout flat = NbtSlotLayout.detect(Snbt.parse("{Items:[{Slot:7,id:\"minecraft:stone\",Count:3}]}"));
+        yes("扁平元素也能识别", flat != null && flat.entries().size() == 1);
+        eq("扁平元素数量", 3, flat == null ? -1 : flat.entries().get(0).count());
+    }
 
     // ---- 断言 ----
 
