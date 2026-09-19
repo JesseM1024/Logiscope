@@ -270,7 +270,7 @@ public final class ProbeInstance {
             base = target.slotSummary() + " · " + target.anchorText();
         }
         int n = dataTargets.size();
-        return n > 0 ? base + " · 数据 x" + n : base;
+        return n > 0 ? base + " · " + Component.translatable("logiscope.info.data_count", n).getString() : base;
     }
 
     // ------------------------------------------------------------------
