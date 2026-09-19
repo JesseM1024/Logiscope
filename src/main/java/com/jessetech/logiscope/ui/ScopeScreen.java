@@ -171,6 +171,8 @@ public final class ScopeScreen extends Screen {
     private static final String SERIES_PREFIX = "series:";
     /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
     private static final int COLOR_ANALYZE = 0xFFE070D8;
+    /** NBT 原文悬浮高亮：黄（用户反馈淡紫在深底上难认；黄与深底对比最强） */
+    private static final int COLOR_HILIGHT = 0x80FFD24A;
     /** DATA 页自动重发 `data get block` 的节拍（客户端 tick）—— 1 秒一次就是"实时"了 */
     private static final long DataRefreshTicks = 20;
 
@@ -240,6 +242,8 @@ public final class ScopeScreen extends Screen {
     private int dataFocus;
     private int dataScroll;
     private int dataTextScroll;
+    /** 追踪目标列表的滚动位置（目标可以攒很多，固定两三行放不下） */
+    private int dataTgtScroll;
     /** `data get block` 解析出来的"路径 = 值"列表 */
     private List<Snbt.Entry> dataEntries = List.of();
     /** 上一次解析用的原文（变了才重解析） */
@@ -841,9 +845,10 @@ public final class ScopeScreen extends Screen {
         int avail = Math.max(56, editTop - contentTop - 4);
         int textH = Math.max(14, avail * 3 / 10);
         int listTop = contentTop + textH + 3;
-        // 目标区：1 行表头 + 2 行目标（固定），剩下的给值列表（再扣 1 行 footer）
-        int tgtRows = 2;
+        // 目标区：1 行表头 + N 行目标。N 随窗口高度增减（默认面板正好 3 行），
+        // 超出的行靠滚动（目标可以攒很多，固定两行不够用）
         int below = Math.max(ROW_H * 4, editTop - listTop - 2);
+        int tgtRows = Math.max(1, Math.min(8, below / 3 / ROW_H));
         int listRows = Math.max(1, (below - (1 + tgtRows) * ROW_H) / ROW_H - 1);
         int tgtTop = listTop + (listRows + 1) * ROW_H;
         int cellW = Math.max(40, (L.w() - 3 * PAD) / 2);
@@ -2972,12 +2977,14 @@ public final class ScopeScreen extends Screen {
             if (dir == 0) {
                 return true;
             }
-            // DATA 页：滚命令原文 / 滚值列表（看光标落在哪一块）
+            // DATA 页：滚原文 / 滚目标列表 / 滚值列表（看光标落在哪一块）
             if (page == Page.DATA) {
                 DataRects R = dataRects(L);
                 int my = (int) mouseY;
                 if (my >= R.textTop() && my < R.textTop() + R.textH()) {
                     dataTextScroll = Math.max(0, dataTextScroll - dir);
+                } else if (my >= R.tgtTop()) {
+                    dataTgtScroll = Math.max(0, dataTgtScroll - dir);
                 } else {
                     dataScroll = Math.max(0, dataScroll - dir);
                 }
@@ -3104,6 +3111,7 @@ public final class ScopeScreen extends Screen {
         dataTextCachedFrom = "";
         dataTextScroll = 0;
         dataScroll = 0;
+        dataTgtScroll = 0;
         dataNextRequestTick = 0;
         page = Page.DATA;
         DataCommand.request(p.target().dimension(), p.target().pos());
@@ -3230,7 +3238,7 @@ public final class ScopeScreen extends Screen {
                     int x1 = left + 3 + this.font.width(lineText.substring(0, from));
                     int x2 = left + 3 + this.font.width(lineText.substring(0, to));
                     int yTop = R.textTop() + 3 + (li - dataTextScroll) * lineH;
-                    g.fill(x1, yTop, Math.max(x2, x1 + 2), yTop + 9, 0x50E070D8);
+                    g.fill(x1, yTop, Math.max(x2, x1 + 2), yTop + 9, COLOR_HILIGHT);
                 }
             }
             int ty = R.textTop() + 3;
@@ -3293,16 +3301,19 @@ public final class ScopeScreen extends Screen {
             g.drawString(this.font, cut(footer, L.w() - 2 * PAD), L.x() + PAD, footerY, 0xFF707070, false);
         }
 
-        // ---- 3) 追踪目标列表（确认添加后出现在这里；只能删，不能改）----
+        // ---- 3) 追踪目标列表（确认添加后出现在这里；只能删，不能改；可滚动）----
         ProbeInstance src = dataSrcProbe();
         List<DataTarget> dts = src == null ? List.of() : src.dataTargets();
+        dataTgtScroll = Math.max(0, Math.min(dataTgtScroll,
+                Math.max(0, dts.size() - R.tgtRows())));
         g.drawString(this.font, tr("logiscope.data.targets") + " · " + dts.size()
                 + "  ·  " + tr("logiscope.data.targets_hint"), left, R.tgtTop(), COLOR_ANALYZE, false);
         for (int i = 0; i < R.tgtRows(); i++) {
-            if (i >= dts.size()) {
+            int idx = dataTgtScroll + i;
+            if (idx >= dts.size()) {
                 break;
             }
-            DataTarget dt = dts.get(i);
+            DataTarget dt = dts.get(idx);
             int ry = R.tgtTop() + (i + 1) * ROW_H;
             boolean overDel = isIn(mouseX, mouseY, L.x() + L.w() - 4 - DEL_W, ry - 1, DEL_W, ROW_H);
             boolean over = isIn(mouseX, mouseY, L.x() + 4, ry - 1, L.w() - 8, ROW_H);
@@ -3320,9 +3331,10 @@ public final class ScopeScreen extends Screen {
                     overDel ? 0xFFFFD0D0 : 0xFFC0A0A8, false);
         }
         if (dts.size() > R.tgtRows()) {
-            String more = "+" + (dts.size() - R.tgtRows());
-            g.drawString(this.font, more, left, R.tgtTop() + (R.tgtRows() + 1) * ROW_H,
-                    0xFF9099A8, false);
+            String more = (dataTgtScroll + R.tgtRows()) + " / " + dts.size()
+                    + "  " + tr("logiscope.hint.scroll");
+            g.drawString(this.font, cut(more, L.w() - 2 * PAD),
+                    left, R.tgtTop() + (R.tgtRows() + 1) * ROW_H, 0xFF9099A8, false);
         }
 
         // ---- 4) 虚拟容器：一行两格（值 / 名称）----
@@ -3407,10 +3419,11 @@ public final class ScopeScreen extends Screen {
                 int row = (my - R.tgtTop() - ROW_H) / ROW_H;   // 第一行是表头
                 ProbeInstance src2 = dataSrcProbe();
                 List<DataTarget> dts = src2 == null ? List.of() : src2.dataTargets();
-                if (row >= 0 && row < R.tgtRows() && row < dts.size()
+                int idx = dataTgtScroll + row;
+                if (row >= 0 && row < R.tgtRows() && idx < dts.size()
                         && isIn(mx, my, L.x() + L.w() - 4 - DEL_W,
                                 R.tgtTop() + (row + 1) * ROW_H - 1, DEL_W, ROW_H)) {
-                    src2.removeDataTarget(dts.get(row).valuePath());
+                    src2.removeDataTarget(dts.get(idx).valuePath());
                 }
             }
             return true;
