@@ -30,6 +30,10 @@ import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
+import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.WaveColumns;
+import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
@@ -74,6 +78,7 @@ public class TestChart {
         t26Snbt();
         t27Offsets();
         t28CombineAll();
+        t29RenderGeometry();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -860,6 +865,78 @@ public class TestChart {
         eq("对照：combine 全跳过 → air 占位", 1, m3);
         eq("对照：combine 产出 air x0", 0, outCounts3[0]);
     }
+
+
+    // 29) 渲染几何（第十三轮）：游程合并 + 列聚合。离线把"画成什么样/花费多少次 fill"钉死
+    private static void t29RenderGeometry() {
+        // ---- RectRuns 的两条等价合并规则 ----
+        RectRuns r = new RectRuns();
+        r.push(0, 1, 10, 11);
+        r.push(1, 2, 10, 11);
+        eq("y 相同的相邻矩形并宽", "0-2@10-11", r.dump());
+        r.push(2, 3, 5, 11);           // 同 x 区间、y 相接 → 包围盒
+        eq("同 x 且 y 相接 → 包围盒", "0-2@10-11 2-3@5-11", r.dump());
+        r.clear();
+        r.push(0, 1, 10, 11);
+        r.push(1, 2, 20, 21);          // x 相接但 y 不同：不能并（并了会多画像素）
+        eq("对角矩形不合并", "0-1@10-11 1-2@20-21", r.dump());
+        r.clear();
+        r.push(0, 1, 10, 10);          // 空矩形直接丢
+        eq("空矩形被丢弃", 0, r.size());
+        r.clear();
+        r.push(0, 1, 10, 11);
+        r.push(1, 2, 10, 11);
+        r.push(2, 3, 10, 11);
+        eq("三连并成一条", "0-3@10-11", r.dump());
+        eq("合并前计数（= 老实现的 fill 次数）", 3, r.pushes());
+
+        // ---- WaveColumns：常数序列塌成 1 个矩形（台阶数据的极限情形）----
+        List<SeriesPoint> flat = new ArrayList<>();
+        for (int t = 0; t <= 1200; t++) {
+            flat.add(new SeriesPoint(t, 500, t == 0));
+        }
+        WaveColumns wc = new WaveColumns();
+        RectRuns out = new RectRuns();
+        wc.emit(flat, 0, 1200, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), out);
+        eq("常数序列：700 列合并成 1 个矩形", 1, out.size());
+        eq("常数序列：合并前是 1399（700 列 + 699 连接）", 1399, out.pushes());
+        eq("列数", 700, wc.lastColumns());
+
+        // ---- 两段台阶：中间一条跳变竖线 ----
+        List<SeriesPoint> two = new ArrayList<>();
+        for (int t = 0; t <= 1200; t++) {
+            two.add(new SeriesPoint(t, t < 600 ? 500 : 600, t == 0));
+        }
+        RectRuns o2 = new RectRuns();
+        wc.emit(two, 0, 1200, 700, 0, v -> 100 - (v - 500), v -> (int) Math.round(100 - (v - 500)), o2);
+        eq("两段台阶 → 3 个矩形（两段底 + 一条跳变）", 3, o2.size());
+
+        // ---- 断档不连线：breakBefore 处线是断的 ----
+        List<SeriesPoint> broken = List.of(
+                new SeriesPoint(0, 10, true),
+                new SeriesPoint(1, 10, false),
+                new SeriesPoint(2, 20, true),    // 断档
+                new SeriesPoint(3, 20, false));
+        RectRuns o3 = new RectRuns();
+        wc.emit(broken, 0, 3, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), o3);
+        eq("断档处不产生连接矩形（2 段各 1 条）", 2, o3.size());
+
+        // ---- 同一列里的尖峰：取 min-max，竖条覆盖整段（不能被平均掉）----
+        List<SeriesPoint> spike = new ArrayList<>();
+        spike.add(new SeriesPoint(0, 0, true));
+        spike.add(new SeriesPoint(0, 64, false));    // 同一列（同 tick）的两个值
+        spike.add(new SeriesPoint(1, 0, false));
+        RectRuns o4 = new RectRuns();
+        wc.emit(spike, 0, 1, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), o4);
+        boolean covered = false;
+        for (int i = 0; i < o4.size(); i++) {
+            if (o4.y0(i) <= 36 && o4.y1(i) >= 101) {
+                covered = true;   // 100-64=36 到 100-0=100（+1）都在
+            }
+        }
+        yes("同列尖峰被 min-max 竖条覆盖", covered);
+    }
+
 
     // ---- 断言 ----
 

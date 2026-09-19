@@ -2,6 +2,8 @@ package com.jessetech.logiscope.ui;
 
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
+import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -106,12 +108,14 @@ public final class ChartRenderer {
     // 每帧复用的列聚合缓冲（不分配 → 不掉帧）
     // ------------------------------------------------------------------
 
-    private int[] colMin = new int[0];
-    private int[] colMax = new int[0];
-    private int[] colFirst = new int[0];
-    private int[] colLast = new int[0];
-    private boolean[] colHas = new boolean[0];
-    private boolean[] colStart = new boolean[0];
+    /**
+     * 列聚合 + 游程合并（第十三轮优化后搬进了纯类，见 {@link WaveColumns}）。
+     * 这里只留一个实例复用它的列缓冲与代际标记。
+     */
+    private final WaveColumns cols = new WaveColumns();
+
+    /** 波形矩形出口（游程合并，见 {@link RectRuns}）：一次 drawSeries 攒完再一次性 fill */
+    private final RectRuns rects = new RectRuns();
 
     // ------------------------------------------------------------------
     // 一次 render 期间有效的映射参数
@@ -358,7 +362,6 @@ public final class ChartRenderer {
         drawTimeAxis(g, font);
 
         // ---- 数据线 ----
-        ensureCols(plotW);
         if (anyFlow) {
             // 0 基线：流量线没有它就是一道看不出进出的波浪
             int y0 = yOf(0);
@@ -439,70 +442,26 @@ public final class ChartRenderer {
     // 数据线
     // ------------------------------------------------------------------
 
+    /**
+     * 画一条线。**第十三轮重写了这条路径**（性能），改动都是像素等价的：
+     *
+     * 1. **代际标记代替满数组清零**：不再每帧 `Arrays.fill` 两个 plotW 长数组；
+     * 2. **只扫"有数据的列"**（cMin..cMax），而不是 0..plotW 全程 ——
+     *    缩放到很近、或窗口里只有一小段数据时，原来要空转几百列；
+     * 3. **游程合并后再 fill**（{@link RectRuns}）：y 区间完全相同的相邻矩形并宽。
+     *    台阶数据（物品存量 / 液位 / 流体量）"连续几百列一个值"极常见，
+     *    那些列从 2N 个 fill 塌成 1 个 —— 帧率提升主要来自这一条。
+     *
+     * 几何与语义（断档不连线 / 稀疏列线性插值 / 同列取 min-max）一句话没改，
+     * 全部搬进纯类 {@link WaveColumns}（离线可断言、可压测，见 TestChart t29 / BenchRender）。
+     */
     private void drawSeries(GuiGraphics g, List<SeriesPoint> pts, int color) {
-        Arrays.fill(colHas, false);
-        Arrays.fill(colStart, false);
-
-        boolean any = false;
-        for (int i = lowerBound(pts, start); i < pts.size(); i++) {
-            SeriesPoint p = pts.get(i);
-            if (p.tick() > end) {
-                break;
-            }
-            int c = colOf(p.tick());
-            if (c < 0 || c >= plotW) {
-                continue;
-            }
-            if (!colHas[c]) {
-                colHas[c] = true;
-                colStart[c] = p.breakBefore();
-                colMin[c] = p.count();
-                colMax[c] = p.count();
-                colFirst[c] = p.count();
-                colLast[c] = p.count();
-            } else {
-                if (p.count() < colMin[c]) {
-                    colMin[c] = p.count();
-                }
-                if (p.count() > colMax[c]) {
-                    colMax[c] = p.count();
-                }
-                colLast[c] = p.count();
-            }
-            any = true;
-        }
-        if (!any) {
+        int columns = cols.emit(pts, start, end, plotW, plotX, this::yOf, this::yOfF, rects);
+        if (columns == 0) {
             return;
         }
-
-        int prev = -1;
-        for (int c = 0; c < plotW; c++) {
-            if (!colHas[c]) {
-                continue;
-            }
-            if (prev >= 0 && !colStart[c]) {
-                if (prev == c - 1) {
-                    // 相邻两列：一条竖直的连接线（数据是台阶状，跳变就发生在这里）
-                    vline(g, plotX + c, colFirst[c], colLast[prev], color);
-                } else {
-                    // 中间隔了几列没有采样点 —— 但这一段折线在数据上是连续的
-                    // （只是采样点稀疏，例如刚接上探头、或缩放到很近）。
-                    // 线性补上：不补的话折线会变成一串孤立的点。
-                    // 注意断档不会走到这里：断档会让下一列的 colStart = true。
-                    int v0 = colLast[prev];
-                    int v1 = colFirst[c];
-                    int d = c - prev;
-                    for (int k = prev + 1; k <= c; k++) {
-                        double a = v0 + (v1 - v0) * (double) (k - 1 - prev) / d;
-                        double b = v0 + (v1 - v0) * (double) (k - prev) / d;
-                        vlineF(g, plotX + k, a, b, color);
-                    }
-                }
-            }
-            // 本列的 min/max 竖线：落在同一个像素列里的所有采样点取极值，
-            // 于是"一瞬冲到 64 又落回 0"这种尖峰不会被平均掉（第 2 项取舍）。
-            vline(g, plotX + c, colMax[c], colMin[c], color);
-            prev = c;
+        for (int i = 0; i < rects.size(); i++) {
+            g.fill(rects.x0(i), rects.y0(i), rects.x1(i), rects.y1(i), color);
         }
     }
 
@@ -824,18 +783,6 @@ public final class ChartRenderer {
             return;
         }
         g.fill(x, yOfF(Math.max(vA, vB)), x + 1, yOfF(Math.min(vA, vB)) + 1, color);
-    }
-
-    private void ensureCols(int n) {
-        if (colHas.length >= n) {
-            return;
-        }
-        colMin = new int[n];
-        colMax = new int[n];
-        colFirst = new int[n];
-        colLast = new int[n];
-        colHas = new boolean[n];
-        colStart = new boolean[n];
     }
 
     /** 第一个 tick >= 目标 的点下标（点按 tick 升序，所以可以二分） */
