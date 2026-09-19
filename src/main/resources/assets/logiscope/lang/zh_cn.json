@@ -1,6 +1,7 @@
 {
 
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -118,5 +119,10 @@
   "logiscope.data.status.no_permission": "多人且无命令权限（单人无需权限）",
   "logiscope.data.status.fail": "读取失败（没有方块实体？）",
   "logiscope.flash.data_need_path": "先填一个取值路径",
-  "logiscope.flash.data_sampling": "已开始按 NBT 路径采样：%s"
+  "logiscope.flash.data_sampling": "已开始按 NBT 路径采样：%s",
+  "logiscope.btn.data_confirm": "确认添加",
+  "logiscope.data.targets": "追踪目标",
+  "logiscope.data.targets_hint": "回选格点「完成」后与容器格一起开始",
+  "logiscope.flash.data_added": "已添加追踪：%s",
+  "logiscope.flash.data_dup": "该路径已在追踪中：%s"
 }

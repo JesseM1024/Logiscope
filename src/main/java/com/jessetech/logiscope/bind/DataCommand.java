@@ -174,6 +174,13 @@ public final class DataCommand {
         };
     }
 
+    /** 进世界时清残留：上一局的 NBT 文本与状态不应带到下一局（与 clearAll 同一时刻调用） */
+    public static void reset() {
+        text = "";
+        status = Status.IDLE;
+        waiting = false;
+    }
+
     /** 测试/调试用：直接塞一段文本（离线断言与手填路径时用不到读取） */
     public static void injectForTest(String raw) {
         text = raw;

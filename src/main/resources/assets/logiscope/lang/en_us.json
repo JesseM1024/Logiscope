@@ -1,6 +1,7 @@
 {
 
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -118,5 +119,10 @@
   "logiscope.data.status.no_permission": "multiplayer without command permission",
   "logiscope.data.status.fail": "failed (no block entity?)",
   "logiscope.flash.data_need_path": "set a value path first",
-  "logiscope.flash.data_sampling": "NBT sampling started: %s"
+  "logiscope.flash.data_sampling": "NBT sampling started: %s",
+  "logiscope.btn.data_confirm": "Add",
+  "logiscope.data.targets": "Tracking targets",
+  "logiscope.data.targets_hint": "back to picker, press Done to start",
+  "logiscope.flash.data_added": "tracking added: %s",
+  "logiscope.flash.data_dup": "already tracking: %s"
 }
