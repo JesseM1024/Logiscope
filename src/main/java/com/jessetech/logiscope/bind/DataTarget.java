@@ -73,6 +73,15 @@ public record DataTarget(
         return dimension.location().getPath() + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
+    /**
+     * 目标列表里那一行的"值"部分：锚点带上它自己的 slot 号。
+     * ★ 只影响**显示**（以及用户按格删改），采样用的名字仍是物品 id —— 所以
+     * "同种物品多格求和"不受这个后缀影响（用户要求：聚合计算不要被后缀干扰）。★
+     */
+    public String displayValue() {
+        return isSlotAnchor() ? valuePath + "[slot=" + nbtSlot + "]" : valuePath;
+    }
+
     /** 面板上的一行描述 */
     public String describe() {
         String label = blockLabel == null || blockLabel.isBlank() ? "block" : blockLabel;

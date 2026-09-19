@@ -6,6 +6,7 @@
 
 
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -161,5 +162,10 @@
   "logiscope.picker.nbt_slot": "NBT slot-list, track by slot",
   "logiscope.flash.slot_anchor_added": "added %s NBT slot targets",
   "logiscope.flash.slot_anchor_skipped": "skipped %s empty or ambiguous slots (no matching NBT element)",
-  "logiscope.flash.slot_anchor_none": "nothing to track: empty slots have no NBT element, so there is no slot number"
+  "logiscope.flash.slot_anchor_none": "nothing to track: empty slots have no NBT element, so there is no slot number",
+  "logiscope.btn.nbt_mode": "NBT tracking: off",
+  "logiscope.btn.nbt_mode_on": "NBT tracking: ON",
+  "logiscope.picker.nbt_mode_hint": "NBT tracking: read by the slot number in the data, independent of the GUI (off by default, so non-slot machines stay on the normal path)",
+  "logiscope.flash.slot_anchor_ambiguous": "%s picks were ambiguous, all matching slots were added",
+  "logiscope.flash.nbt_mode_off": "NBT tracking off"
 }
