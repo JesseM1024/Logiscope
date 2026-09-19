@@ -630,3 +630,24 @@ gradlew.bat runClient
 
 改代码前**必读** `ARCHITECTURE.md` 的第二节（关键逻辑路径 CP1–CP12），
 尤其是标 ⚠️ 的那几条 —— 它们每一个都是在实机上踩出来的。
+
+
+### ③ 第十六轮④：实机反馈（先入档，再动代码）
+
+| # | 现象 | 根因 |
+|---|---|---|
+| 1 | MEK 终极熔炼工厂（9 进 9 出）：点了 2 个原料格 + 2 个输出格 → 「完成」后只跟到 **1 个原料格 + 全部输出格** | **`Slot#getContainerSlot()` 在 Mekanism 上恒为 0**（字节码：`InventoryContainerSlot` 构造时 `super(emptyInventory, 0, x, y)` —— 容器下标**硬编码 0**）。而 `resolvePick` 把"容器下标 == 某个 NBT slot"当**最高优先级**判据 ⇒ ① 点到的格物品恰好撞上 slot 0 → 只认那一格，两格原料**互相覆盖**塌成 1 格；② 撞不上的（输出格 slot 9..17）→ 退到"全纳入"，2 个输出格**炸成全部输出格** |
+| 2 | 回选格页再点「完成」应当是**覆写**，不是追加/更新 | 第十六轮②定的"追加"语义被用户推翻（C24-2b 作废） |
+
+**顺带坐实的三条外部事实（免得再挖一遍）**：
+
+- **Mekanism 10.7 的物品栏 NBT 形状 = `items:[{id,count,slot:byte}, …]`**：
+  `ContainerType.ITEM` 的 (containerTag, containerKey) = (`items`, `slot`)，由
+  `DataHandlerUtils.writeContents` 写入 —— **空槽根本不写进列表**，且 `slot` 就是该元素在
+  机器物品栏列表里的下标（列表本身按 slot 升序）。
+- `MekanismTileContainer.addSlots` 的动作顺序 = *玩家背包 → 2 个虚拟升级槽 → 按
+  `getInventorySlots(null)` 顺序逐个加*。所以**机器格在菜单里的相对顺序 == 数据里的 slot 顺序**，
+  中间可能夹着**空着**的虚拟/能量格。
+- NeoForge 的 `SlotItemHandler` 恰恰相反：`super(emptyInventory, index, x, y)` —— 它的
+  `getContainerSlot()` **就是 handler 下标**（= NBT 的 `Slot`）。所以"容器下标"这条路
+  **只对一部分模组成立**，绝不能当通则用（正是第十五轮 CP23 教训的同一形状）。
