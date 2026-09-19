@@ -428,9 +428,6 @@ public final class ScopeScreen extends Screen {
     private int scrollArchives;
     /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
     private List<Archives.Info> archiveList = List.of();
-    /** 「打开存储文件夹」chip 的命中矩形（渲染时记录，见 renderOpenFolderChip） */
-    @Nullable
-    private int[] openFolderRect;
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -944,6 +941,9 @@ public final class ScopeScreen extends Screen {
                 ProbeManager mgr = LogiScopeMod.probes();
                 out.add(new Item("create", tr("logiscope.btn.create_probe"),
                         !mgr.isFull() && hasTarget));
+                // 第十六轮⑦修订：与 new probe / hide 同一行（原先浮在存档列表下，
+                // 实测被 new probe 挡住）
+                out.add(new Item("open_folder", tr("logiscope.btn.open_folder"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
             case PICKER -> {
@@ -1218,8 +1218,10 @@ public final class ScopeScreen extends Screen {
         g.fill(x - 1, y - 1, x + L.w() + 1, y + L.h() + 1, 0xFF5A5A68);
         g.fill(x, y, x + L.w(), y + L.h(), 0xF2101017);
 
-        renderTopGlow(g, L);
+        // ★ 光效必须画在标题栏背景**之后**：renderTitle 会整条 fill 标题区，
+        //   先画就被完全盖住（实测踩过）
         renderTitle(g, L, mouseX, mouseY);
+        renderTopGlow(g, L);
         renderInfo(g, L);
 
         switch (page) {
@@ -1575,7 +1577,6 @@ public final class ScopeScreen extends Screen {
         if (list.isEmpty()) {
             g.drawString(this.font, tr("logiscope.hint.no_archives"), x + PAD + 4, y + ROW_H,
                     0x8A8AA0, false);
-            renderOpenFolderChip(g, L, mouseX, mouseY);
             return;
         }
         scrollArchives = Math.max(0, Math.min(scrollArchives, Math.max(0, list.size() - L.archRows())));
@@ -1614,32 +1615,6 @@ public final class ScopeScreen extends Screen {
                     + "  " + tr("logiscope.hint.scroll");
             g.drawString(this.font, more, x + PAD, y + ROW_H + L.archRows() * ROW_H, 0xFF707070, false);
         }
-        renderOpenFolderChip(g, L, mouseX, mouseY);
-    }
-
-    /**
-     * 存档列表下方的「打开存储文件夹」chip（第十六轮⑦）。
-     * 命中矩形渲染时记进 {@link #openFolderRect}（渲染与点击共用同一份几何）。
-     */
-    private void renderOpenFolderChip(GuiGraphics g, Layout L, int mouseX, int mouseY) {
-        openFolderRect = null;
-        if (page != Page.ROOT || L.archRows() <= 0) {
-            return;
-        }
-        List<Archives.Info> list = archiveList;
-        int by = L.archTop() + ROW_H + L.archRows() * ROW_H;
-        if (!list.isEmpty() && list.size() > L.archRows()) {
-            by += ROW_H;   // 让开 "N / M  可滚动" 那一行
-        }
-        by += 3;
-        if (by + CHIP_H > L.y() + L.h()) {
-            return;   // 面板太矮：不画也不可点（宁缺毋错位）
-        }
-        String label = tr("logiscope.btn.open_folder");
-        int w = this.font.width(label) + 14;
-        Chip c = new Chip("open_folder", label, L.x() + PAD, by, w, CHIP_H, true, 0);
-        renderChip(g, c, mouseX, mouseY, c.hit(mouseX, mouseY), 0);
-        openFolderRect = new int[]{c.x(), c.y(), c.w(), c.h()};
     }
 
     /** 用系统文件管理器打开存档目录 {@code .minecraft/logiscope/}（第十六轮⑦） */
@@ -1909,7 +1884,11 @@ public final class ScopeScreen extends Screen {
 
     private void renderButtons(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
-            renderChip(g, c, mouseX, mouseY, c.enabled() && c.hit(mouseX, mouseY), 0);
+            // ★ accent 在渲染时求值（不取构造时存的 c.accent()）：
+            //   语义色（主界面淡绿 / 回选格淡蓝 / NBT ON 黄）依赖运行状态，
+            //   而按钮行只在 rebuild 时重建 —— 每帧求值才不会滞后。
+            //   之前两个 bug 都在这条链上：传 0 = 颜色全丢；构造时求值 = 状态切换后滞后。
+            renderChip(g, c, mouseX, mouseY, c.enabled() && c.hit(mouseX, mouseY), accentFor(c.id()));
         }
     }
 
@@ -2557,11 +2536,6 @@ public final class ScopeScreen extends Screen {
         }
 
         // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
-        if (page == Page.ROOT && openFolderRect != null
-                && isIn(mx, my, openFolderRect[0], openFolderRect[1], openFolderRect[2], openFolderRect[3])) {
-            openStorageFolder();
-            return true;
-        }
         if (page == Page.ROOT) {
             // 存档行（下半部分）先判：它几何上在探针列表之外
             if (L.archRows() > 0 && !archiveList.isEmpty()) {
@@ -3185,6 +3159,7 @@ public final class ScopeScreen extends Screen {
         }
         switch (id) {
             case "create" -> createProbe();
+            case "open_folder" -> openStorageFolder();
             case "cell_mode" -> {
                 cellMode = !cellMode;
                 cellDragButton = -1;
