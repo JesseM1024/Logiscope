@@ -382,6 +382,7 @@ jar 已随项目提交）。
 | 1 | 探针跨存档残留（A 存档建的出现在 B 存档） | **`LoggingIn` → `ProbeManager#clearAll`**：探针绑定"这个世界里的这台设备"，实例表却是进程级的——进世界清空，僵尸探针在结构上不可能出现。`DataCommand` 残留文本同刻清 |
 | 2 | DATA 页三段式：NBT 原文 / 值选择 / 追踪目标 | 「开始采样」改为「确认添加」：目标攒进探针的 `dataTargets` 列表（按 valuePath 去重；列表里**值与名称锁定只能删**）。回选格点「完成」后与容器格一起开始——**数据目标与物品槽位共存**（`sampleOnServerTick` 两段式：物品守卫 `lastSampledGameTime`、数据守卫独立的 `lastDataTick`，因为界面开着且下标未验证时物品走菜单路、数据仍走服务端直读，两条路节拍不锁相） |
 | 3 | 悬浮高亮联动 | `Snbt` 每个叶子记录**源文本偏移**（`Node#start/end`），原文折行时记录每行起始偏移；悬浮值列表行 → 按偏移换算行列 → 原文对应字段画品红底色 |
+| 4 | 修：NBT 频繁变化时值列表/原文**每秒弹回顶部** | `reparseData` 重解析后不再重置滚动位置——NBT 数值每秒都变，"文本变了 = 回顶"对这种页面是灾难；滚动只在进页时归零，选中按路径匹配天然稳定 |
 
 **顺带的结构调整**：`ProbeInstance` 的单数 `dataTarget` → 复数 `dataTargets`
 （COW 列表，服务端遍历 / 渲染增删）；`configureData` 删除（`addDataTarget` 取代）；
