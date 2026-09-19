@@ -94,9 +94,47 @@ public final class Archives {
     // ------------------------------------------------------------------
 
     /** 存档列表里的一行小结（不载入样本） */
-    public record Info(String dirName, String created, String world, String probeName,
-                       String probeDesc, long firstTick, long lastTick,
+    public record Info(String dirName, String displayName, String created, String world,
+                       String probeName, String probeDesc, long firstTick, long lastTick,
                        int markerCount, int sampleCount, Path dir) {
+    }
+
+    /** 自定义名称的文件名（第十三轮④）：有它就用它当"名称"，没有就退回探针名 / 目录名 */
+    public static final String NAME_FILE = "name.txt";
+
+    /** 一个存档目录当前显示用的名称 */
+    public static String displayName(Path dir, String probeName) {
+        Path f = dir.resolve(NAME_FILE);
+        try {
+            if (Files.isRegularFile(f)) {
+                String n = Files.readString(f, StandardCharsets.UTF_8).trim();
+                if (!n.isEmpty()) {
+                    return n;
+                }
+            }
+        } catch (IOException ignored) {
+            // 读不到就当没有自定义名
+        }
+        return probeName;
+    }
+
+    /**
+     * 重命名一份存档（第十三轮④）：只写 {@link #NAME_FILE}，**不动 recording.json**。
+     * 这样旧存档天然兼容、改名也不需要重写几万个样本。
+     * 传空串 = 清掉自定义名（回到探针名）。名称过长截到 48 字符。
+     */
+    public static boolean rename(Info info, String name) throws IOException {
+        Path f = info.dir().resolve(NAME_FILE);
+        String trimmed = name == null ? "" : name.trim();
+        if (trimmed.length() > 48) {
+            trimmed = trimmed.substring(0, 48);
+        }
+        if (trimmed.isEmpty()) {
+            Files.deleteIfExists(f);
+            return true;
+        }
+        Files.writeString(f, trimmed, StandardCharsets.UTF_8);
+        return true;
     }
 
     /**
@@ -117,9 +155,10 @@ public final class Archives {
                 }
                 try {
                     ArchiveFormat.Header h = ArchiveFormat.readHeader(json);
-                    out.add(new Info(dir.getFileName().toString(), h.created(), h.world(),
-                            h.probeName(), h.probeDesc(), h.firstTick(), h.lastTick(),
-                            h.markerCount(), h.sampleCount(), dir));
+                    String dirName = dir.getFileName().toString();
+                    out.add(new Info(dirName, displayName(dir, h.probeName()), h.created(),
+                            h.world(), h.probeName(), h.probeDesc(), h.firstTick(),
+                            h.lastTick(), h.markerCount(), h.sampleCount(), dir));
                 } catch (Exception e) {
                     // 坏存档不挡别的存档：记日志、跳过
                     LogiScopeMod.LOGGER.warn("[LogiScope] skipping broken archive {}: {}",

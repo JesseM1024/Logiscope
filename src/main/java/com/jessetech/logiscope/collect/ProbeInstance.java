@@ -476,14 +476,36 @@ public final class ProbeInstance {
         }
     }
 
+    /**
+     * 选中的槽位里 menuSlotIndex 是否有重复。
+     * 有重复 = 光看下标无法区分是哪一格（MEK 这类"全是 #0"的容器）→ 提示；
+     * 无重复 = 下标与格子一一对应，采样结果本来就正确 → 不提示。
+     */
+    private static boolean hasDuplicateMenuIndex(ProbeTarget t) {
+        List<ProbeTarget.SlotRef> slots = t.slots();
+        for (int i = 0; i < slots.size(); i++) {
+            for (int j = i + 1; j < slots.size(); j++) {
+                if (slots.get(i).menuSlotIndex() == slots.get(j).menuSlotIndex()) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     /** 界面关着 */
     private void tickFollowing(long gameTime) {
         // ★ 下标映射不可信的机器（MEK 这类自写槽位类的模组），必须明说 ★
         // 验证是挂探头那 1~2 tick 内在服务端做的（内容指纹匹配），
         // 匹配有歧义（例如对着空格子挂探头）就到此为止 —— 不瞎猜，让用户知道。
         // force：警告紧跟"转为坐标跟踪"，普通去抖会把它吞掉（第七轮 N3）。
+        // 第十三轮②：只在"序号有重复"时提示 ——
+        // MEK 那类容器每格的 menuSlotIndex 都是 0（自写槽位类），映射必然有歧义，
+        // 必须让用户知道；普通容器序号互不相同，按下标就能唯一对上、采样本来是对的，
+        // 这时再弹"下标不可信"就是误报（用户实测：点不同序号的空格子也会看到它）。
         if (!warnedUnverifiedIndex
-                && probe.mappingStatus(target) == WorldProbe.MappingStatus.UNVERIFIED) {
+                && probe.mappingStatus(target) == WorldProbe.MappingStatus.UNVERIFIED
+                && hasDuplicateMenuIndex(target)) {
             warnedUnverifiedIndex = true;
             notifyPlayer("logiscope.msg.index_unverified", true);
         }

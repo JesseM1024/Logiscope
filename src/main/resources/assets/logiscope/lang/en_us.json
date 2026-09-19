@@ -3,6 +3,7 @@
 
 
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -135,5 +136,17 @@
   "logiscope.calc.events": "%s change events",
   "logiscope.calc.delta": "delta mean %s var %s",
   "logiscope.calc.period": "period mean %s t var %s t",
-  "logiscope.data.auto": "(auto)"
+  "logiscope.data.auto": "(auto)",
+  "logiscope.info.samples": "samples",
+  "logiscope.btn.rename": "Rename",
+  "logiscope.rename.label": "archive name",
+  "logiscope.rename.hint": "Enter to confirm · Esc to cancel",
+  "logiscope.flash.renamed": "renamed: %s",
+  "logiscope.arch.col.name": "name",
+  "logiscope.arch.col.dir": "folder",
+  "logiscope.arch.col.count": "samples",
+  "logiscope.tip.slots": "selected slots: %s (scroll)",
+  "logiscope.tip.data_targets": "tracked NBT keys: %s (scroll)",
+  "logiscope.tip.hidden_series": "series folded away (scroll)",
+  "logiscope.tip.slot": "slot %s"
 }

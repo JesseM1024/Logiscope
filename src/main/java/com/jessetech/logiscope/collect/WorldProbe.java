@@ -120,7 +120,7 @@ public final class WorldProbe {
         Arrays.fill(idx, -1);
 
         ServerLevel level = server.getLevel(target.dimension());
-        if (level == null || !level.isLoaded(target.pos())) {
+        if (level == null || !ChunkTicking.ticking(level, target.pos())) {
             return new Mapping(target, idx, MappingStatus.UNAVAILABLE);
         }
         BlockEntity be = level.getBlockEntity(target.pos());
@@ -237,7 +237,10 @@ public final class WorldProbe {
         if (level == null || target == null || !target.hasPersistentId()) {
             return null;
         }
-        if (!level.isLoaded(target.pos())) {
+        if (!ChunkTicking.ticking(level, target.pos())) {
+            // 机器不在方块 tick 范围里（走远了 / 换了维度 / 区块卸载）= 数值冻结，
+            // 如实返回 null → 上层记 no_data。第十三轮①修：原先用 isLoaded，
+            // 边界区块也在区块表里，于是会一直读到卸载前的旧值。
             return null;
         }
         BlockEntity be = level.getBlockEntity(target.pos());
