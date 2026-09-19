@@ -28,10 +28,10 @@ import java.util.Locale;
  *   · **GUI 开不开都一样**（这一路完全不碰菜单），于是不存在"两条路径不一致"；
  *   · 元素不存在（格子空了）= 数量 0（这才是"这格是空的"的诚实表达）。
  *
- * 【拾取时的规则】点到一个格子时用"物品 id + 数量"去 NBT 里反查 slot 号：
- *   · 唯一命中 → 用它；
- *   · 没有命中（空格子，NBT 里没有对应元素）→ **不选它**（没法知道 slot 号）；
- *   · 命中多个（同物品同数量有好几格，分不清）→ 也**不选**（宁可少选，不猜）。
+ * 【拾取时的规则】见 {@link SlotAlign}（第十六轮④）—— 这里只提供它需要的原料：
+ * 按 slot 找元素（{@link #bySlot}）、按物品 id 反查（{@link #byItem}）。
+ * **"点到的格子 ↔ 哪个 slot"这件事不在本类里定** —— 它靠"顺序 + 内容"对齐，
+ * 因为"容器下标"这种做法在模组世界里会骗人（实测：Mekanism 每格都报 0）。
  *
  * 纯逻辑（不引用任何游戏类），离线可断言（TestChart t30）。
  */
@@ -74,36 +74,6 @@ public final class NbtSlotLayout {
             }
         }
         return best;
-    }
-
-    /**
-     * **把"点到的格子"定位到该监测哪一个（或哪几个）slot**（第十六轮③）。
-     *
-     * 优先级（越靠前越可信）：
-     *   1. **容器内下标恰好等于某个 NBT slot** → 就是它
-     *      （很多模组就是这么对齐的，能一击命中、真正实现"点哪格监测哪格"）；
-     *   2. 候选只有一个 → 就是它；
-     *   3. 候选多个且下标对不上 → **全都要**（宁可多纳入，也不要漏掉用户想看的格；
-     *      采样时它们名字相同 → 自动求和，图上是一条线）。
-     *
-     * @param candidates        同物品 id 的全部候选（来自 {@link #byItem}）
-     * @param containerSlotIndex 点到的格子在容器里的下标（对不上就传负数）
-     */
-    public static List<Entry> resolvePick(List<Entry> candidates, int containerSlotIndex) {
-        if (candidates == null || candidates.isEmpty()) {
-            return List.of();
-        }
-        if (containerSlotIndex >= 0) {
-            for (Entry e : candidates) {
-                if (e.slot() == containerSlotIndex) {
-                    return List.of(e);
-                }
-            }
-        }
-        if (candidates.size() == 1) {
-            return List.of(candidates.get(0));
-        }
-        return List.copyOf(candidates);
     }
 
     /** 按 slot 号找元素；不存在（= 这一格是空的）返回 null */

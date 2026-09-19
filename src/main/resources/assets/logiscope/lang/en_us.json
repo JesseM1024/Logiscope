@@ -160,12 +160,13 @@
   "logiscope.tip.probe_title": "probe details · data %s · slots %s",
   "logiscope.tip.line_data": "data",
   "logiscope.picker.nbt_slot": "NBT slot-list, track by slot",
-  "logiscope.flash.slot_anchor_added": "added %s NBT slot targets",
-  "logiscope.flash.slot_anchor_skipped": "skipped %s empty or ambiguous slots (no matching NBT element)",
-  "logiscope.flash.slot_anchor_none": "nothing to track: empty slots have no NBT element, so there is no slot number",
+  "logiscope.flash.slot_anchor_added": "now tracking %s NBT slot target(s) (overwrite: only the checked cells)",
+  "logiscope.flash.slot_anchor_skipped": "skipped %s cell(s) (no matching NBT element, or could not tell which slot)",
+  "logiscope.flash.slot_anchor_none": "none of the checked cells matched the data (just emptied, or ambiguous) - nothing changed",
+  "logiscope.flash.slot_anchor_need_cells": "check some cells first: NBT targets follow the checked cells (delete targets on the data page to clear)",
   "logiscope.btn.nbt_mode": "NBT tracking: off",
   "logiscope.btn.nbt_mode_on": "NBT tracking: ON",
-  "logiscope.picker.nbt_mode_hint": "NBT tracking: read by the slot number in the data, independent of the GUI (off by default, so non-slot machines stay on the normal path)",
-  "logiscope.flash.slot_anchor_ambiguous": "%s picks were ambiguous, all matching slots were added",
+  "logiscope.picker.nbt_mode_hint": "NBT tracking: targets come from the slot number in the data - the cell you click is the cell tracked, independent of the GUI; Done overwrites the checked cells (off by default, so non-slot machines stay on the normal path)",
+  "logiscope.data.slot_fallback": "slot %s",
   "logiscope.flash.nbt_mode_off": "NBT tracking off"
 }

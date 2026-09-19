@@ -651,3 +651,28 @@ gradlew.bat runClient
 - NeoForge 的 `SlotItemHandler` 恰恰相反：`super(emptyInventory, index, x, y)` —— 它的
   `getContainerSlot()` **就是 handler 下标**（= NBT 的 `Slot`）。所以"容器下标"这条路
   **只对一部分模组成立**，绝不能当通则用（正是第十五轮 CP23 教训的同一形状）。
+
+
+### ④ 第十六轮④：点格规则改为"顺序 + 内容"对齐 + 「完成」改覆写
+
+两条实测反馈的修法（根因见上一条③）：
+
+| 问题 | 修法 |
+|---|---|
+| 点 2 原料 + 2 输出 → 跟到 1 原料 + 全部输出 | 新纯类 **`analysis/SlotAlign`**：菜单里**非空**的机器格（按菜单顺序）与数据元素（按 slot 升序）**天然同序**，取按物品 id 的**最长公共子序列**，**唯一解才采用**（多解 / 对不上 = 拒绝）。`resolve` 把四条判据收进一个函数：① 顺序对齐 → ② 容器下标（**要求"该清单下标不重复"+"那个 slot 的元素就是这一格的物品"**）→ ③ 按物品 id 唯一命中 → ④ 空格子靠**统一位移**外推。**四条都不成立就不选**（旧规则的"全纳入"已删除） |
+| 回选格页再 Done 应该是**覆写** | `ProbeInstance.replaceSlotAnchors`：只换锚点，**数据页的纯路径目标保留**；一格都没解出来 → **什么都不动**（"读不到数据"≠"用户想清空"）；进页面时把已有锚点**回填成勾选状态**（C24-8），否则覆写会误清 |
+
+**为什么"顺序"是可信的**（这一条值得记）：
+- NBT 侧：`DataHandlerUtils.writeContents` 按物品栏列表顺序写 `slot = i`，且**空槽不写** → 列表本身按 slot 升序；
+- 菜单侧：`MekanismTileContainer.addSlots` 按 `getInventorySlots(null)` 顺序逐个 `addSlot`（前面多两个**空着**的虚拟升级槽）；
+- 于是"非空格序列"两边同序，**中间夹的空槽两侧同时消失**，不影响对齐。
+
+**容器下标判据的降级依据**（同一条教训的第二次）：`Slot#getContainerSlot()` 对
+NeoForge 的 `SlotItemHandler` 是 handler 下标（对），对 Mekanism 的 `InventoryContainerSlot`
+是硬编码 0（错）。**"一个字段在 A 模组里对、在 B 模组里错"时，正确的做法是给它加一条
+可验证的门槛（这里：清单内不重复 + 内容一致），而不是把它当首选。**
+
+**删除**：`NbtSlotLayout.resolvePick`（旧"按格区分"的三种优先级）与其断言 t32 ——
+留着它就是留一个已知会误判的判据（"把错的统一"的教训）。TestChart 322 → **336** 条（t33）。
+文档：ARCHITECTURE CP24 重写 C24-2/C24-2b，新增 **C24-2c / C24-8 / C24-9**；
+VERIFY 重建为 第十六轮④（N1–N14 + 回归 R1–R4）；历轮 Y 组归档进 VERIFY-HISTORY。

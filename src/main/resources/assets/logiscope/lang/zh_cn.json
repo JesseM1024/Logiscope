@@ -160,12 +160,13 @@
   "logiscope.tip.probe_title": "探针详情 · 数据 %s · 槽 %s",
   "logiscope.tip.line_data": "数据",
   "logiscope.picker.nbt_slot": "NBT 槽位型，按 slot 监测",
-  "logiscope.flash.slot_anchor_added": "已按 NBT slot 添加 %s 个监测目标",
-  "logiscope.flash.slot_anchor_skipped": "跳过 %s 个空格 / 无法区分的格子（NBT 里没有对应元素）",
-  "logiscope.flash.slot_anchor_none": "没有可监测的格子：空格子在 NBT 里没有元素，拿不到 slot 号",
+  "logiscope.flash.slot_anchor_added": "已更新为 %s 个 NBT slot 目标（覆写，只测勾上的格子）",
+  "logiscope.flash.slot_anchor_skipped": "跳过 %s 格（数据里没有对应元素，或分不出是哪一格）",
+  "logiscope.flash.slot_anchor_none": "勾上的格子一个都对不上数据（可能刚被抽空 / 分不出是哪一格）→ 本次未改动",
+  "logiscope.flash.slot_anchor_need_cells": "先勾格子：NBT 目标按勾选的格子建立（要清空请到数据页逐个删除）",
   "logiscope.btn.nbt_mode": "NBT 追踪：关",
   "logiscope.btn.nbt_mode_on": "NBT 追踪：开",
-  "logiscope.picker.nbt_mode_hint": "NBT 追踪：按数据里的 slot 号读，与 GUI 开关无关（默认关，避免误判机械手这类设备）",
-  "logiscope.flash.slot_anchor_ambiguous": "%s 处无法从数据区分，已纳入全部同物品格子",
+  "logiscope.picker.nbt_mode_hint": "NBT 追踪：按数据里的 slot 号建目标 —— 点哪格测哪格，与 GUI 开关无关；「完成」= 覆写勾选的格子（默认关，避免误判机械手这类设备）",
+  "logiscope.data.slot_fallback": "槽位 %s",
   "logiscope.flash.nbt_mode_off": "已退出 NBT 追踪（恢复按菜单/坐标读）"
 }

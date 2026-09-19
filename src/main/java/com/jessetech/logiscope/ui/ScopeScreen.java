@@ -9,6 +9,7 @@ import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
+import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.Archives;
@@ -247,6 +248,12 @@ public final class ScopeScreen extends Screen {
     private List<NbtSlotLayout.Entry> nbtSlotEntries = List.of();
     private String nbtSlotParsedFrom = "";
     private long nbtSlotNextRequest;
+    /**
+     * "还没把已有锚点回填到界面上"。
+     * 进选格页时数据可能还没抓到，回填会失败 —— 所以**每次 tick 再试**，
+     * 一抓到就回填（否则「完成」= 覆写 会把用户看不见的目标全清掉）。
+     */
+    private boolean nbtSeedPending;
 
     // ---- 回放计算（第十一轮②）----
     /** 运算选择（工具栏「运算」弹窗）。OP_* 常量见下 */
@@ -576,6 +583,13 @@ public final class ScopeScreen extends Screen {
                     nbtSlotNextRequest = LogiScopeMod.probes().currentTick() + 10;
                 }
                 parseNbtSlotLayout();
+                // 数据到了就把已有锚点勾回界面上（详见 nbtSeedPending 的注释）。
+                // 条件里加上"用户还没勾过"—— 万一数据来得比用户的手慢，也别把人家刚点的清掉。
+                if (nbtSeedPending && nbtSlotMode && !nbtSlotEntries.isEmpty()
+                        && selectionCount() == 0) {
+                    seedNbtSelection(p);
+                    nbtSeedPending = false;
+                }
             }
             syncContainerSelection();
         }
@@ -640,6 +654,15 @@ public final class ScopeScreen extends Screen {
         seedSelectionOnce(p);
         if (p.target().hasPersistentId()) {
             ProbeSlots.request(p.target().dimension(), p.target().pos());
+        }
+        // 这个探针本来就是"按 NBT slot 监测"的（有锚点、又没有菜单/坐标槽位）→ 直接按那套语义进来，
+        // 并把已有锚点勾出来。**只在"纯锚点探针"上这么做**：混合探针（既有槽位又有锚点）
+        // 必须由用户自己按按钮切换，否则一次「完成」会把槽位那半边的目标丢掉。
+        boolean pureAnchorProbe = p.target().slots().isEmpty()
+                && p.dataTargets().stream().anyMatch(DataTarget::isSlotAnchor);
+        if (pureAnchorProbe) {
+            nbtSlotMode = true;
+            nbtSeedPending = true;
         }
         page = Page.PICKER;
     }
@@ -2662,63 +2685,60 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * NBT 槽位模式下的「完成」：把**这一刻**的待测 slot 列表提取出来，作为数据目标挂上去。
+     * NBT 槽位模式下的「完成」：把**这一刻勾选的格子**翻译成"数据里的 slot 号"，然后
+     * **覆写**这个探针的全部槽位锚点。
      *
-     * 规则（第十六轮②按实测反馈修订）：
-     *   · **按物品 id 匹配**，不按"物品 id + 数量" —— 数量在运行中的机器上每秒都在变，
-     *     用数量匹配会因为"读快照的时刻不同"而漏格（实测：输入输出都点了，输出格却没进来）；
-     *   · **同一种物品命中多格 → 每一格各建一个锚点**：它们名字相同，采样时按名称合并
-     *     **自动相加**（"同种物品命中多格需要加起来"）；
-     *   · 只有"NBT 里根本找不到这个物品"的格子（空格子 / 物品刚被抽走）才**不选**；
-     *   · **追加语义**：再次回掉落格页选新格子并「完成」，是在已有列表上**追加/更新**
-     *     （同一 slot 去重），不会把之前选好的丢掉。
+     * ★ 两条语义（第十六轮④，都被实机推着改过一次）★
+     *   1. **覆写，不是追加**：界面上勾了几格，探针就只测那几格。第十六轮②的"追加"
+     *      让用户永远删不掉不想要的格子（只能去数据页一格一格 ×）。
+     *      **纯数据目标（数据页加的 FE / 流体）不受影响** —— 那是另一条线。
+     *   2. **宁可不选，也不给一个错的 slot 号**：全部判据都要求"内容"对上，
+     *      对不上就跳过并在提示里报数（见 {@link #resolveNbtSlot}）。
      *
-     * 目标里**不含任何 SlotRef**，所以这条探针是"纯数据探针"，采样完全不碰菜单。
+     * @see SlotAlign 为什么"顺序 + 内容"能定，而"容器下标"不能
      */
     private void commitNbtSlotAnchors(ProbeInstance p) {
         Snbt.Node tree = Snbt.parse(DataCommand.text());
-        int added = 0;
+        List<NbtSlotLayout.Entry> entries = NbtSlotLayout.entriesAt(tree, nbtSlotListPath);
+        List<ContainerAccess.SlotView> space = pickerList();
+        SlotAlign.Result align = SlotAlign.align(nbtCells(space), entries);
+        boolean idxUsable = containerIndexUnique(space);
+
+        List<DataTarget> next = new ArrayList<>();
         int skipped = 0;
-        int ambiguous = 0;
-        for (ContainerAccess.SlotView v : menuSlots) {
-            if (!selMenuSlots.contains(v.menuSlotIndex())) {
+        for (int i = 0; i < space.size(); i++) {
+            ContainerAccess.SlotView v = space.get(i);
+            if (!isSelected(v)) {
                 continue;
             }
-            String want = v.itemId();
-            if (want == null || want.isBlank()) {
-                skipped++;   // 空格子：NBT 里没有元素 ⇒ 拿不到 slot 号（用户规则：取消监测）
+            Integer slot = resolveNbtSlot(v, nbtOrdinal(space, i, v), entries, align, idxUsable);
+            if (slot == null) {
+                skipped++;      // 空格且推不出 slot / 分不出是哪一格 —— 不猜
                 continue;
             }
-            List<NbtSlotLayout.Entry> candidates = NbtSlotLayout.byItem(tree, nbtSlotListPath, want);
-            if (candidates.isEmpty()) {
-                skipped++;   // 这一刻 NBT 里没有这个物品（可能是空格 / 刚被抽走）
-                continue;
-            }
-            // ★ 按格区分（第十六轮③）★：优先"容器下标恰好等于某个 slot"的那个 —— 能真正
-            // 做到"点哪一格监测哪一格"；只有实在分不出来时才把同物品的格子全纳入。
-            List<NbtSlotLayout.Entry> picked = NbtSlotLayout.resolvePick(candidates, v.containerSlotIndex());
-            if (picked.size() > 1) {
-                ambiguous++;
-            }
-            for (NbtSlotLayout.Entry hit : picked) {
-                // 采样用的名字 = **物品 id**（不带任何后缀）→ 同物品多格在聚合时自然求和，
-                // slot 号只出现在目标列表的显示里（可单独删）。
-                String name = hit.itemId() != null && !hit.itemId().isBlank() ? hit.itemId() : want;
-                p.addDataTarget(DataTarget.slotAnchor(nbtSlotListPath, name,
-                        p.target().deviceName(), p.target().dimension(), p.target().pos(), hit.slot()));
-                added++;
-            }
+            // 采样用的名字：非空格 = **物品 id**（不带后缀）→ 同物品多格在聚合时自然求和；
+            // 空格 = 占位名（它现在没有物品，等有东西了名字会从数据里取，等于新开一条线）。
+            String name = v.empty() || v.itemId() == null || v.itemId().isBlank()
+                    ? tr("logiscope.data.slot_fallback").replace("%s", String.valueOf(slot))
+                    : v.itemId();
+            next.add(DataTarget.slotAnchor(nbtSlotListPath, name,
+                    p.target().deviceName(), p.target().dimension(), p.target().pos(), slot));
         }
-        if (added == 0 && p.dataTargets().isEmpty()) {
-            say(tr("logiscope.flash.slot_anchor_none"));
+
+        // 一格都没解出来 → 什么都不动。**绝不把已有锚点清空** —— "读不到数据"和
+        // "用户想清空"是两件事，混在一起就必然在某一侧撒谎（用户宁可不显示也不要错值）。
+        if (next.isEmpty()) {
+            say(tr(selectionCount() == 0
+                    ? "logiscope.flash.slot_anchor_need_cells"
+                    : "logiscope.flash.slot_anchor_none"));
             return;
         }
 
         ProbeTarget old = p.target();
         // 槽位列表留空：这类容器的物品读数**只走 NBT**，不走菜单/能力下标。
-        // ★ configure 只清样本，不碰 dataTargets ★ —— 所以"回选格页再选几格"
-        // 是**追加**（用户要求：更新 slot 列表，而不是重建）。
+        // dataTargets 由 replaceSlotAnchors 覆写（只换锚点，纯数据目标保留）。
         p.configure(new ProbeTarget(List.of(), old.deviceName(), old.dimension(), old.pos()), null);
+        int total = p.replaceSlotAnchors(next);
         LogiScopeMod.probes().setActive(p.id());
 
         hiddenItems.clear();
@@ -2731,21 +2751,113 @@ public final class ScopeScreen extends Screen {
         builtVersion = Long.MIN_VALUE;
         cellMode = false;
         page = Page.CHART;
-        String msg = tr("logiscope.flash.slot_anchor_added").replace("%s",
-                String.valueOf(p.dataTargets().size()));
-        if (ambiguous > 0) {
-            msg += "  ·  " + tr("logiscope.flash.slot_anchor_ambiguous")
-                    .replace("%s", String.valueOf(ambiguous));
-        }
+        String msg = tr("logiscope.flash.slot_anchor_added").replace("%s", String.valueOf(total));
         if (skipped > 0) {
             msg += "  ·  " + tr("logiscope.flash.slot_anchor_skipped").replace("%s", String.valueOf(skipped));
         }
         say(msg);
     }
 
+    /**
+     * 把"点到的这一格"翻译成"数据里的 slot 号"（第十六轮④）。
+     * 判据链本体在纯类里（{@link SlotAlign#resolve}，离线有断言 t33），这里只做装配：
+     * 空格子的 itemId 常被填成 {@code minecraft:air}，所以"空不空"必须用 {@code v.empty()} 判。
+     */
+    @Nullable
+    private Integer resolveNbtSlot(ContainerAccess.SlotView v, int ordinal,
+                                   List<NbtSlotLayout.Entry> entries,
+                                   SlotAlign.Result align, boolean idxUsable) {
+        boolean empty = v.empty() || v.itemId() == null || v.itemId().isBlank();
+        return SlotAlign.resolve(new SlotAlign.Pick(ordinal, v.containerSlotIndex(), v.itemId(), empty),
+                entries, align, idxUsable);
+    }
+
+    /**
+     * 机器格在"数据 slot 序号"上的位置：
+     *   · 菜单型容器 → 它在菜单机器格序列里的**序数**（模组按物品栏顺序 addSlot，两者同序）；
+     *   · 无 GUI 型容器 → 服务端读出来的 handler **下标本身就是 slot 号**（`ProbeSlots` 按 0..n-1 读）。
+     */
+    private int nbtOrdinal(List<ContainerAccess.SlotView> space, int i, ContainerAccess.SlotView v) {
+        if (source == Source.WORLD && v.containerSlotIndex() >= 0) {
+            return v.containerSlotIndex();
+        }
+        return i;
+    }
+
+    /** 对齐要的输入：**只放非空格**（空格子两侧都不在，因此不影响对齐），按序数升序 */
+    private List<SlotAlign.Cell> nbtCells(List<ContainerAccess.SlotView> space) {
+        List<SlotAlign.Cell> out = new ArrayList<>();
+        for (int i = 0; i < space.size(); i++) {
+            ContainerAccess.SlotView v = space.get(i);
+            if (v.empty() || v.itemId() == null || v.itemId().isBlank()) {
+                continue;
+            }
+            out.add(new SlotAlign.Cell(nbtOrdinal(space, i, v), v.menuSlotIndex(), v.itemId()));
+        }
+        return out;
+    }
+
+    /**
+     * 这个清单的"容器下标"能不能当身份用 —— 判据本体在 {@link SlotAlign#containerIndexReliable}
+     * （**同一份清单里出现重复下标 ⇒ 它不是身份**；Mekanism 每格都报 0，就是实测踩到的那个坑）。
+     */
+    private boolean containerIndexUnique(List<ContainerAccess.SlotView> space) {
+        List<Integer> idx = new ArrayList<>(space.size());
+        for (ContainerAccess.SlotView v : space) {
+            idx.add(v.containerSlotIndex());
+        }
+        return SlotAlign.containerIndexReliable(idx);
+    }
+
+    /**
+     * 打开 NBT 追踪时，把**已有的锚点勾回界面上**（按格反查用 {@link SlotAlign.Result#bySlot}，
+     * 当前空着的格子用统一位移外推）。
+     *
+     * 为什么必须有这一步：既然「完成」是**覆写**，那么"进页面时界面上没勾任何格"就等于
+     * "一点完成就把目标全清掉" —— 用户点了开追踪、想加一格，结果把原来的都清了，
+     * 这就成了新的坑。回填之后，界面上的勾选状态 == 探针当前的目标，覆写才是安全的。
+     */
+    private void seedNbtSelection(ProbeInstance p) {
+        selMenuSlots.clear();
+        selContainerSlots.clear();
+        if (p == null) {
+            return;
+        }
+        List<ContainerAccess.SlotView> space = pickerList();
+        Snbt.Node tree = Snbt.parse(DataCommand.text());
+        SlotAlign.Result align = SlotAlign.align(nbtCells(space),
+                NbtSlotLayout.entriesAt(tree, nbtSlotListPath));
+        Integer shift = align.shift();
+        for (DataTarget d : p.dataTargets()) {
+            if (!d.isSlotAnchor() || !d.valuePath().equals(nbtSlotListPath)) {
+                continue;
+            }
+            Integer ordinal = align.bySlot().get(d.nbtSlot());
+            if (ordinal == null && shift != null) {
+                ordinal = d.nbtSlot() + shift;
+            }
+            if (ordinal == null) {
+                continue;
+            }
+            for (int i = 0; i < space.size(); i++) {
+                ContainerAccess.SlotView v = space.get(i);
+                if (nbtOrdinal(space, i, v) == ordinal) {
+                    if (source == Source.MENU) {
+                        selMenuSlots.add(v.menuSlotIndex());
+                    } else {
+                        selContainerSlots.add(v.containerSlotIndex());
+                    }
+                    break;
+                }
+            }
+        }
+        syncContainerSelection();
+    }
+
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
     private void leavePicker() {
         nbtSlotMode = false;      // 每次进选格页都回到"默认关"（用户明确要求默认不启用）
+        nbtSeedPending = false;
         nbtSlotListPath = "";
         nbtSlotEntries = List.of();
         nbtSlotDetected = false;
@@ -2976,9 +3088,13 @@ public final class ScopeScreen extends Screen {
                 }
                 nbtSlotMode = !nbtSlotMode;
                 if (nbtSlotMode) {
-                    // 开的时候清掉"按菜单/下标"的选择，避免两套语义混在一条探针里
+                    // 开的时候清掉"按菜单/下标"的选择（避免两套语义混在一条探针里），
+                    // 再把**已有的锚点按格回填**成勾选状态 —— 「完成」是覆写，
+                    // 不先把当前状态显示出来，用户一进来点完成就会把目标全清掉。
                     selMenuSlots.clear();
                     selContainerSlots.clear();
+                    seedNbtSelection(pickerProbe());
+                    nbtSeedPending = false;
                     say(tr("logiscope.picker.nbt_mode_hint"));
                 } else {
                     say(tr("logiscope.flash.nbt_mode_off"));
