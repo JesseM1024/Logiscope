@@ -1,0 +1,14 @@
+回退方块 tick 采样门：恢复 isLoaded 语义（关掉 GUI 继续采，不要 no_data）
+
+用户判定：过去的"关闭 GUI 继续采"逻辑是正确的，不需要 no_data；第十四轮引入的
+"方块 tick 范围"判据副作用（走出模拟距离就变 no_data）不可接受，因此一并回退。
+
+- WorldProbe（verifyNow + readOnServer）与 ProbeSlots.readNow：判定回到 Level#isLoaded
+- DataProbe.readRoot：去掉 tick 判定，恢复原样（区块真卸载时 getBlockEntity 返回 null）
+- 删除 collect/ChunkTicking.java（已无引用；知识保留在 PROGRESS 与 ARCHITECTURE CP22）
+- 文档：PROGRESS 第十四轮① 改写为回退说明（含保留的两条 vanilla 事实）；
+  ARCHITECTURE CP22 改为"当前用 isLoaded（更严判据已回退）+ 保留事实"；
+  VERIFY 的 B5b/B5c/X2 改为回退后的期望；VERIFY-HISTORY 两行补回退备注
+- 至此采样路径与渲染优化版本（781c65e）语义一致；第十四轮只保留界面项
+  （序号警告收敛 / 样本行 / 存档重命名）与第十五轮的界面项（悬浮详情 / 漏翻）
+- build / TestChart 286 条 / verify-jar 全过

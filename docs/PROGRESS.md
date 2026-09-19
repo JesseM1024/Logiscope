@@ -446,23 +446,25 @@ jar 已随项目提交）。
 
 ## 第十四轮（B5 根因 + 界面细节：警告收敛 / 样本行 / 存档重命名 / 悬浮详情）
 
-### ① B5 失效：读到的"旧值"其实是**冻结值**
+### ① "卸载后还在写旧值" —— 试过"方块 tick 判据"，**用户判定不需要，已回退**
 
-**现象**（用户实测）：换维度、或同维度走出 1000 格外，原版容器 / 模组容器 /
-方块实体 NBT 三路都还在写"卸载前的数值"。
+**当时的报告**：换维度 / 走出 1000 格外，原版容器、模组容器、方块实体 NBT 三路都还在写
+"卸载前的数值"。
 
-**根因**：判定用的是 `Level#isLoaded(pos)` —— 它只回答"这个区块在区块表里吗"。
-**边界区块**（渲染距离内、模拟距离外）也在表里，但**不做方块 tick**：
-那些区块里的机器是停的，方块实体 NBT 停在最后一次 tick 的状态。于是每 tick
-读到的都是同一个冻结值 —— 曲线看着像"设备稳定运行在这个数"，其实是已经出范围了。
+**当时的分析**：`Level#isLoaded` 只回答"区块在不在表里"，**边界区块**（渲染距离内、
+模拟距离外）在表里但不做方块 tick —— 机器是停的，数值冻在最后一次 tick 上，
+于是曲线看着像"设备稳定运行"。据此把判据换成 vanilla 同源的
+`ServerLevel#shouldTickBlocksAt`（= 模拟距离），抽成 `collect/ChunkTicking`，
+三条读值路径（`WorldProbe` / `ProbeSlots` / `DataProbe`）统一走它。
 
-**修法**：与 vanilla 同源，改用 `ServerLevel#shouldTickBlocksAt(chunkPos)`
-（= 距离管理器的 block-ticking 范围，也就是模拟距离；服务端决定"这一格要不要
-tick 方块"用的就是它）。抽成 `collect/ChunkTicking`，三处读值路径统一走它：
-`WorldProbe.readOnServer`（物品）、`ProbeSlots.readNow`（选格页内容）、
-`DataProbe.readRoot`（NBT 数据目标）。
-顺带收益：这条判定**不会加载区块**（`getBlockEntity` 会经 `getChunkAt` 强制加载，
-既慢又会把区块按在内存里）。
+**实测后的结论**：**已全部回退**（`ChunkTicking` 删除，恢复 `Level#isLoaded` 语义）。
+理由（用户判定）：
+- 那个"严格判据"的副作用是**走出模拟距离就变 no_data**；
+- 而**"关掉 GUI 之后继续采"才是要的行为** —— 那条逻辑本来就是对的，**不需要 no_data**。
+
+**保留的知识**（别丢，将来真要处理"冻结值"能直接用）：
+`Level#getBlockEntity` 会**强制加载区块**并返回磁盘快照；判"机器到底跑不跑"要看
+`ServerLevel#shouldTickBlocksAt(chunkPos)`（= 模拟距离），而不是 `isLoaded`。
 
 ### ② 序号警告只在"序号有重复"时提示
 

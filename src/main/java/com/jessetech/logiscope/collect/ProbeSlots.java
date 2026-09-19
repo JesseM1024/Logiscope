@@ -129,8 +129,8 @@ public final class ProbeSlots {
     private static List<ContainerAccess.SlotView> readNow(net.minecraft.server.MinecraftServer server,
                                                           ResourceKey<Level> dim, BlockPos pos) {
         ServerLevel level = server.getLevel(dim);
-        if (level == null || !ChunkTicking.ticking(level, pos)) {
-            return null;   // 与读值路径同一条判定：机器没在跑就别拿冻结值当内容
+        if (level == null || !level.isLoaded(pos)) {
+            return null;
         }
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {

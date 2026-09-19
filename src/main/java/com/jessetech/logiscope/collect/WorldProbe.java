@@ -120,7 +120,7 @@ public final class WorldProbe {
         Arrays.fill(idx, -1);
 
         ServerLevel level = server.getLevel(target.dimension());
-        if (level == null || !ChunkTicking.ticking(level, target.pos())) {
+        if (level == null || !level.isLoaded(target.pos())) {
             return new Mapping(target, idx, MappingStatus.UNAVAILABLE);
         }
         BlockEntity be = level.getBlockEntity(target.pos());
@@ -237,10 +237,10 @@ public final class WorldProbe {
         if (level == null || target == null || !target.hasPersistentId()) {
             return null;
         }
-        if (!ChunkTicking.ticking(level, target.pos())) {
-            // 机器不在方块 tick 范围里（走远了 / 换了维度 / 区块卸载）= 数值冻结，
-            // 如实返回 null → 上层记 no_data。第十三轮①修：原先用 isLoaded，
-            // 边界区块也在区块表里，于是会一直读到卸载前的旧值。
+        if (!level.isLoaded(target.pos())) {
+            // 区块真卸载了才读不到。第十四轮试过更严的"方块 tick 范围"判据，用户判定
+            // **不需要**：那会让"走出模拟距离"也变成 no_data，而"关掉 GUI 继续采"
+            // 才是要的行为 —— 已回退（见 PROGRESS 的对应小节）。
             return null;
         }
         BlockEntity be = level.getBlockEntity(target.pos());
