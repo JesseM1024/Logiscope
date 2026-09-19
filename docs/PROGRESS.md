@@ -770,3 +770,19 @@ CSV 里整数原样（64 而不是 64.0）、小数用 double 字面量；
 
 **离线**：build / TestChart 376 → **398 条**（t37：形式与规范化、NaN/∞ 拒绝、溢出回退、
 2^63 全链路、小数系列、存档往返）/ BenchRender（降幅不变）/ verify-jar 全过。
+
+
+## 第十六轮⑦：QoL 打磨批（实测基线 `83584f0` 之后，用户指定 8 项）
+
+| # | 项 | 落地 |
+|---|---|---|
+| 1 | 根页「打开存储文件夹」 | 存档列表下方一个 chip（列表空/太矮时不显示，宁缺毋错位）；`Util.getPlatform().openFile` 打开 `Archives.rootDir()`（= `.minecraft/logiscope/`），不存在先 `Files.createDirectories`；失败提示（`flash.open_folder_fail`）。命中矩形渲染时记进 `openFolderRect`（渲染与点击同一份几何） |
+| 2 | 删"NBT slot-list, track by slot"句 | 选格页信息行只在 `nbtSlotMode` 时显示 `NBT tracking: ON (N)`；lang 键 `picker.nbt_slot` 删除（中英） |
+| 3 | NBT tracking ON 黄色 | `accentFor("nbt_mode")`：开 = `0xFFFFD24A` |
+| 4 | Probe data 移到 Done 左侧 | PICKER 按钮序列交换 |
+| 5 | list → Main screen 淡绿 | `to_list` 文案改"主界面 / Main screen"；`accentFor` 对 `to_root`/`list`/`replay_back` 返回 `COLOR_MAINSCREEN`（`0xFF90EE90`） |
+| 6 | 图表页按钮排序 | `pick/list` 移到末尾，顺序 = pause → resume → clear → archive → follow → **Back to slot（淡蓝 `COLOR_BACKSLOT`）→ Main screen（淡绿）** |
+| 7 | 计算页右键图例 = 分析 | `mouseClicked` 在"非左键一律吃掉"之前插入分支：REPLAY 页右键命中图例 → 切换 `replaySelectedItem`（与弹窗里「分析」行同一动作），左键弹菜单行为不变 |
+| 8 | 顶栏光效 | `renderTopGlow`：2px 底条（低 alpha）+ 移动亮斑（15 段梯形 alpha，半宽 45px，周期 2.8s）；页色 = 根页淡绿 / 选格+数据页淡蓝 / 图表淡黄 / 计算淡紫。每帧 ~16 次 fill，与背景同量级 —— **不需要降级呼吸光效** |
+
+**离线**：build / TestChart 398 条 / verify-jar 全过；lang 中英各 165 键一致。
