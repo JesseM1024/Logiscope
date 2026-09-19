@@ -23,6 +23,10 @@ import org.jetbrains.annotations.Nullable;
  * 而不是一条。
  *
  * @param blockLabel 设备名（方块名），只用于显示
+ * @param beType     建档时那台**方块实体的类型 id**（如 {@code mekanism:factory}，可空）。
+ *                   只给 NBT 槽位锚点用：采样时拿它跟"现在那块地方是什么方块实体"比，
+ *                   不一样就说明"这个 slot 号已经没有意义了"，该记 `no_data` 而不是记 0
+ *                   （见 {@code DataProbe#readSlotAnchor} 与第六节的"读不到 vs 空格子"）。
  */
 public record DataTarget(
         String valuePath,
@@ -31,25 +35,29 @@ public record DataTarget(
         String blockLabel,
         ResourceKey<Level> dimension,
         BlockPos pos,
-        int nbtSlot) {
+        int nbtSlot,
+        @Nullable String beType) {
 
     /** 普通路径目标（第十一轮③那套） */
     public DataTarget(String valuePath, @Nullable String namePath, String literalName,
                       String blockLabel, ResourceKey<Level> dimension, BlockPos pos) {
-        this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1);
+        this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null);
     }
 
     /**
      * **NBT 槽位目标**（第十六轮）：{@code valuePath} = 物品列表在 NBT 里的路径
-     * （如 {@code Items}），{@code nbtSlot} = 元素自带 {@code slot} 号。
+     * （如 {@code items}），{@code nbtSlot} = 元素自带 {@code slot} 号。
      * 读数 = "列表里 slot == nbtSlot 的元素的 Item.Count"。
      *
      * 这一路**完全不碰菜单**，所以 GUI 开不开读数都一样 —— 正是 MEK 那类
      * "槽位号写在 NBT 里"的机器需要的语义。
+     *
+     * @param beType 建档时的方块实体类型 id；给不出就传 null（那就退回"读不到就记 0"的老行为）
      */
     public static DataTarget slotAnchor(String listPath, String itemId, String blockLabel,
-                                        ResourceKey<Level> dimension, BlockPos pos, int slot) {
-        return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot);
+                                        ResourceKey<Level> dimension, BlockPos pos, int slot,
+                                        @Nullable String beType) {
+        return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot, beType);
     }
 
     /** 是不是 NBT 槽位目标 */

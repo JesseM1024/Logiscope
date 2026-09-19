@@ -281,7 +281,14 @@ public final class Snbt {
         return new Node(Kind.STRING, Map.of(), List.of(), tok, 0, false);
     }
 
-    /** 数字（含 SNBT 后缀 b/s/l/f/d）；不是数字返回 null */
+    /**
+     * 数字（含 SNBT 后缀 b/s/l/f/d）；不是数字返回 null。
+     *
+     * ★ 只认**有限**值 ★（第十六轮⑤）：SNBT 语法里根本没有 `NaN` / `Infinity` 这两个字面量，
+     * 而 `Double.parseDouble` 会照收 —— 收进来就会顺着 {@code numeric() == true} 一路
+     * 变成采样值，再被 `(int)` 变成 0 或 MAX_VALUE（错值当真值）。
+     * 现在它们按普通文本处理（走 STRING 分支），与"这不是数字"一致。
+     */
     @Nullable
     public static Double parseNumber(String token) {
         String t = trimSuffix(token);
@@ -289,7 +296,8 @@ public final class Snbt {
             return null;
         }
         try {
-            return Double.parseDouble(t);
+            double v = Double.parseDouble(t);
+            return Double.isFinite(v) ? v : null;
         } catch (NumberFormatException e) {
             return null;
         }

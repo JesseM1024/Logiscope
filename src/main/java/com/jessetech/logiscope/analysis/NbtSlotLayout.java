@@ -76,6 +76,23 @@ public final class NbtSlotLayout {
         return best;
     }
 
+    /**
+     * 这棵树的**方块实体类型 id**（根上的 {@code id} 字段，如 {@code mekanism:factory}）。
+     *
+     * 用来回答"这块地方的设备换掉了没有" —— 锚点建档时记下它，采样时跟方块实体现读的
+     * 类型比一比：不一样就说明"这个 slot 号对现在这个方块已经没有意义了"，该记 no_data
+     * 而不是记 0（第十六轮⑤）。`data get block` 的输出带 {@code id}
+     * （`BlockDataAccessor` 走 `saveWithFullMetadata` → `saveId`），所以建档时拿得到。
+     */
+    @Nullable
+    public static String rootTypeId(@Nullable Snbt.Node root) {
+        if (root == null || root.kind() != Snbt.Kind.COMPOUND) {
+            return null;
+        }
+        Snbt.Node id = root.children().get("id");
+        return id == null ? null : id.text();
+    }
+
     /** 按 slot 号找元素；不存在（= 这一格是空的）返回 null */
     @Nullable
     public static Entry bySlot(@Nullable Snbt.Node root, @Nullable String listPath, int slot) {
@@ -198,14 +215,22 @@ public final class NbtSlotLayout {
         return out;
     }
 
-    /** 找一个"整数"字段（名字在 keys 里，忽略大小写；数值可以是 byte/short/int/long） */
+    /**
+     * 找一个"整数"字段（名字在 keys 里，忽略大小写；数值可以是 byte/short/int/long）。
+     * **装不进 int 或不是有限值就当作没有这个字段** —— 直接 `(int)` 窄化会把
+     * 超大值变成 MAX_VALUE、NaN 变成 0，然后当成真实的 slot 号/数量用（第十六轮⑤）。
+     */
     @Nullable
     private static Integer intField(Snbt.Node compound, String[] keys) {
         Snbt.Node n = firstChild(compound, keys);
         if (n == null || !n.numeric()) {
             return null;
         }
-        return (int) n.number();
+        double v = n.number();
+        if (!Double.isFinite(v) || v < Integer.MIN_VALUE || v > Integer.MAX_VALUE) {
+            return null;
+        }
+        return (int) v;
     }
 
     @Nullable

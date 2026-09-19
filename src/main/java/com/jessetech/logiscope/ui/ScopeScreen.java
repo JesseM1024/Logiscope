@@ -548,7 +548,11 @@ public final class ScopeScreen extends Screen {
             }
         }
         refreshSnapshots();
-        // 存档清单每次打开面板扫一次（只读各存档的 JSON 头，几 KB 级）
+        // 存档清单每次**打开面板**扫一次。★ 注释修正（第十六轮⑤）★
+        // 旧注释写"只读各存档的 JSON 头，几 KB 级" —— 名实不符：readHeader 当时是整份
+        // 解析（几万条样本全部建成对象）。现在它改成流式读（只取头部、samples 整段跳过），
+        // 那句说法才真正成立。另外 vanilla 的 Screen#resize 只走 rebuildWidgets()、
+        // **不会**重跑 init()，所以拖动窗口不会反复扫盘（原先担心的那条不成立）。
         archiveList = Archives.scan();
 
         if (pendingFlashKey != null) {
@@ -2722,7 +2726,8 @@ public final class ScopeScreen extends Screen {
                     ? tr("logiscope.data.slot_fallback").replace("%s", String.valueOf(slot))
                     : v.itemId();
             next.add(DataTarget.slotAnchor(nbtSlotListPath, name,
-                    p.target().deviceName(), p.target().dimension(), p.target().pos(), slot));
+                    p.target().deviceName(), p.target().dimension(), p.target().pos(), slot,
+                    NbtSlotLayout.rootTypeId(tree)));
         }
 
         // 一格都没解出来 → 什么都不动。**绝不把已有锚点清空** —— "读不到数据"和
@@ -3398,6 +3403,14 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        // ★ 焦点别留在已经离开的页面上 ★（第十六轮⑤）
+        // 重命名框只活在回放页；用户点了「重命名」再点「返回列表」时，输入框不再绘制
+        // （renderRenameBox 的前置条件），但 renameFocus 还是 true → 下面那条
+        // "输入框激活时吃掉所有按键"会把**整个键盘**吃掉，表现就是"键盘突然坏了"
+        // （只有 Esc 能救）。这里按"页面还在不在"兜底清掉。
+        if (renameFocus && page != Page.REPLAY) {
+            renameFocus = false;
+        }
         if (renameFocus) {
             switch (keyCode) {
                 case 259 -> {   // Backspace

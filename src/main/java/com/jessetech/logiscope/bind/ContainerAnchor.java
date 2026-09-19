@@ -96,8 +96,11 @@ public final class ContainerAnchor {
         return active;
     }
 
+    /** 换世界时清干净（进游戏的 LoggingIn 里调）：锚点、"上一次的右键"与 id 一起清 */
     public static void clearActive() {
         active = null;
+        pending = null;
+        pendingAt = 0;
         activeContainerId = -1;
     }
 }

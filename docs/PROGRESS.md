@@ -680,3 +680,39 @@ VERIFY 重建为 第十六轮④（N1–N14 + 回归 R1–R4）；历轮 Y 组�
 **结论**：第十六轮④ 全部用例（N1–N14 + 回归 R1–R4）**实测通过**（2026-09-19）。
 当前版本 `952b8fb` 即"已验证可用"的基线；VERIFY.md 随之重建为"未测项 + 上一轮结论摘要"，
 本轮用例归档进 VERIFY-HISTORY 第四节。
+
+
+## 第十六轮⑤：代码审查 ①②③ 三组 8 条 P1 全修（提交见下）
+
+按审查报告（`docs/CODE-REVIEW.md`）的建议顺序修完（每条都补了离线断言，336 → **376** 条）：
+
+| # | 修法 | 断言 |
+|---|---|---|
+| 1 | **IO 统计口径**：`flowTotal`/`flowEvents` 不再拿 `breakBefore`（渲染的断线标记）当"值不可信"—— 流量点只在"相邻两格都观测到"时才产生，**每个值都成立**；缺口数改为"真的少了几笔 Δ"（段起点之后每一条断线算一次） | t34 |
+| 2 | **装不下 ≠ 怪数**：`(int) Math.round(v)` 前判有限性与 int 范围，越界/NaN 一律留空；`Snbt.parseNumber` 不再接受 `NaN`/`Infinity`；`NbtSlotLayout.intField` 不再直接窄化 | t36 |
+| 3 | **暂停水位**：`writeGapMarker` 取 `max(物品水位, 数据水位)`（原先只看物品路 ⇒ 纯数据探针暂停不写 gap） | 需实机（C1） |
+| 4 | **锁内重取目标**：`sampleOnServerTick` 的 `target`/`dataTargets` 与守卫全部搬进 `synchronized` 里重算（锁外那份只做早退预筛），避免 `configure()` 之后用旧设备写新会话 | 需实机（D1/R2） |
+| 5 | **换设备 = 读不到**：`DataTarget` 增加 `beType`（建档时取 `data get block` 的 `id`），采样时与 `BlockEntityType.getKey(be.getType())` 比 —— 换了 ⇒ `no_data`；还是同一种 ⇒ 元素不在就是 0 | 需实机（D1/D2） |
+| 6 | **跨世界清理**：`LoggingIn` 里补调 `ContainerAnchor.clearActive()`（顺带清 pending）与 `ProbeSlots.reset()` | 需实机（E1） |
+| 7 | **焦点跟页面走**：`keyPressed` 开头 `renameFocus && page != REPLAY → 清` | 需实机（E2） |
+| 8 | **存档头部改流式读**：`readHeader` 用 `JsonReader` 走 token、`samples` 整段 `skipValue()`；容错口径不变（坏文件抛 IOException、坏类型当缺省） | t35 |
+
+**审查自身的两处纠正**（诚实记录，也写进了 CODE-REVIEW 与 ARCHITECTURE）：
+- **"拖窗口会反复 full-parse 存档"不成立**：vanilla `Screen#resize` 只走
+  `rebuildWidgets()`，**不会**重跑 `init()`（读 sources jar 核实）。真正的浪费只是
+  "每次打开面板全量解析一次"，所以只修流式读、**不加**按时间的节流（不想为一条错的推断
+  改掉"打开就刷新"的行为）。
+- **P1-5 光"拆开两种 null"会改坏刚验过的行为**：MEK 在**所有格子都空**时
+  `items` 键根本不写（`saveTo` 里 `if (!list.isEmpty())`），于是"列表不在"也可能是
+  "机器还在、全空"。改用**方块实体类型比对**才能既保住"空格子 = 0"（N14）
+  又让"设备被换掉"变成 `no_data`。
+
+**另一条值得记的**：修 #1 时`TestChart` 里有 **4 条旧断言变红** —— 它们的期望值正是
+**被 bug 吞掉的那笔流量**（`IO 上升 64 / 断档 2 处 / 变更 2 次 / mean 27`）。
+断言把 bug 固化了：改对了反而红。已按新语义改正（158 / 1 处 / 4 次 / 37），
+并把"为什么"写在断言旁边。
+
+**离线**：build / TestChart **376 条** / BenchRender / verify-jar 全过。
+复现脚本 `dev-check/ProbeFlow.java` 已并入 t34 后删除。
+文档：ARCHITECTURE 新增 **CP25**（六条硬边界）+ **C24-10**（换设备判定）；
+CODE-REVIEW 标注 8 条已修；VERIFY 重建为第十六轮⑤（A–F 组）。

@@ -84,6 +84,14 @@ public class TestChart {
         t30NbtSlotLayout();
         t31SlotMatchById();
         t33SlotResolve();
+        t34FlowStats();
+        try {
+            t35ArchiveHeader();
+        } catch (Exception e) {
+            failed++;
+            System.out.println("  FAIL t35 抛异常: " + e);
+        }
+        t36NumberGuards();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -736,21 +744,27 @@ public class TestChart {
         eq("断档段：变更 2 次", 2, bev.count());
 
         // IO 线：流量值本身就是变化量
+        // ★ 第十六轮⑤ 修正 ★ 旧断言把 bug 固化了（期望值正是"被吞掉的那一笔"）：
+        //   ① `flow` 上每个点的值都成立 —— 生产者只在"相邻两格都观测到"时才产生流量点，
+        //      `breakBefore` 只是**渲染**用的断线标记（画图别跨缺口连线），
+        //      统计不该拿它当"值不可信"；
+        //   ② 缺口数 = 真的少了几笔 Δ（段起点之后每一条断线算一次）。
         List<SeriesPoint> flow = List.of(
-                new SeriesPoint(2, 64, true),    // 段起点，剔除
+                new SeriesPoint(2, 64, true),    // 段起点：值是真的，只是画图要从这儿断开
                 new SeriesPoint(3, 64, false),   // +64
                 new SeriesPoint(4, 0, false),
                 new SeriesPoint(5, -10, false),  // -10
-                new SeriesPoint(8, 30, true));   // 中途断档，剔除
+                new SeriesPoint(8, 30, true));   // 中途断档后又接上：这一笔 Δ 同样成立
         CurveMath.TotalChange ft = CurveMath.flowTotal(flow);
-        eq("IO 上升 +64", 64L, ft.rise());
+        eq("IO 上升 +158（64+64+30 全算）", 158L, ft.rise());
         eq("IO 下降 -10", -10L, ft.fall());
-        eq("IO 断档 2 处", 2, ft.gaps());
+        eq("IO 净 +148", 148L, ft.net());
+        eq("IO 缺口 1 处（只有 t8 前那次断）", 1, ft.gaps());
 
         CurveMath.Events fev = CurveMath.flowEvents(flow);
-        eq("IO 变更 2 次（+64 / -10）", 2, fev.count());
-        eq("IO 变化量 mean 27", 27.0, fev.dMean(), 1e-9);
-        eq("IO 周期 mean 2t（t3 → t5）", 2.0, fev.pMean(), 1e-9);
+        eq("IO 变更 4 次（64 / 64 / -10 / 30）", 4, fev.count());
+        eq("IO 变化量 mean 37（(64+64-10+30)/4）", 37.0, fev.dMean(), 1e-9);
+        eq("IO 周期 mean 2t（t2→3→5→8：间隔 1/2/3）", 2.0, fev.pMean(), 1e-9);
     }
 
 
@@ -1109,6 +1123,140 @@ public class TestChart {
                 new SlotAlign.Cell(5, 5, Y)), two);
         eq("位移不统一 → null", null, uneven.shift());
         eq("但非空格照样定得下来", Integer.valueOf(1), uneven.byOrdinal().get(5));
+    }
+
+    // 34) IO 统计口径（第十六轮⑤）
+    //     **修的就是全项目审查里最重的那条**：段首那一笔真实流量被当"不可信"吞掉、
+    //     还谎报一次断档（存量 10→14→12 时 IO 线报 上升=0 断档=1）。
+    private static void t34FlowStats() {
+        // 连续三格：都观测到了 ⇒ 两笔真实 Δ（+4 / −2），一个缺口都不该有
+        List<Sample> cont = new ArrayList<>();
+        cont.add(new Sample(100, "iron", 10));
+        cont.add(new Sample(101, "iron", 14));
+        cont.add(new Sample(102, "iron", 12));
+        Series s = ChartData.build(1, cont, 16).series().get(0);
+
+        eq("样本点的断点标记（首点=段起点）", java.util.List.of(true, false, false),
+                java.util.List.of(s.points().get(0).breakBefore(), s.points().get(1).breakBefore(),
+                        s.points().get(2).breakBefore()));
+        // 流量点：第一个带"渲染用"的断线标记（画图别跨缺口连线），但它的值是真实的
+        eq("流量点数", 2, s.flow().size());
+        yes("首流量点带渲染断线标记", s.flow().get(0).breakBefore());
+
+        CurveMath.TotalChange ft = CurveMath.flowTotal(s.flow());
+        eq("IO 上升 = 4（不再被吞）", 4L, ft.rise());
+        eq("IO 下降 = -2", -2L, ft.fall());
+        eq("IO 缺口 = 0（不再谎报）", 0, ft.gaps());
+        eq("IO 净变化 = +2", 2L, ft.net());
+        eq("IO 变更事件 = 2", 2, CurveMath.flowEvents(s.flow()).count());
+        // 对照：存量线的口径本来就是对的（同一批数据）
+        CurveMath.TotalChange st = CurveMath.totalChange(s.points());
+        eq("存量上升 = 4", 4L, st.rise());
+        eq("存量缺口 = 0", 0, st.gaps());
+
+        // 中间断了一次：104 那一格没观测到 ⇒ Δ(104) 真的缺了（IO 缺口 1 处），
+        // 而 105 那一笔 Δ 是真实的（20→18），必须照算
+        List<Sample> brk = new ArrayList<>(cont);
+        brk.add(Sample.noData(103));
+        brk.add(new Sample(104, "iron", 20));
+        brk.add(new Sample(105, "iron", 18));
+        Series s2 = ChartData.build(2, brk, 16).series().get(0);
+        eq("断档后：流量点数", 3, s2.flow().size());
+        CurveMath.TotalChange ft2 = CurveMath.flowTotal(s2.flow());
+        eq("断档后 IO 上升 = 4", 4L, ft2.rise());
+        eq("断档后 IO 下降 = -4（-2 与 -2）", -4L, ft2.fall());
+        eq("断档后 IO 缺口 = 1（只有真的缺了的那一笔）", 1, ft2.gaps());
+        eq("断档后 IO 事件 = 3", 3, CurveMath.flowEvents(s2.flow()).count());
+        CurveMath.TotalChange st2 = CurveMath.totalChange(s2.points());
+        eq("同一条断档，存量缺口也是 1", 1, st2.gaps());
+
+        // 只有首点带断线标记（窗口边界那种）→ 不算缺口
+        List<SeriesPoint> only = java.util.List.of(new SeriesPoint(500, 7, true));
+        eq("只有首点 → 缺口 0", 0, CurveMath.flowTotal(only).gaps());
+        eq("只有首点 → 值照样计入", 7L, CurveMath.flowTotal(only).rise());
+    }
+
+    // 35) 存档头部流式读取（第十六轮⑤）：取到的小结必须与写进去的一致，
+    //     坏文件要抛 IOException（调用方跳过它），不认识的键要忽略
+    private static void t35ArchiveHeader() throws Exception {
+        java.nio.file.Path dir = java.nio.file.Files.createTempDirectory("logiscope-t35");
+        try {
+            List<Sample> samples = new ArrayList<>();
+            for (int i = 0; i < 2000; i++) {
+                samples.add(new Sample(1000 + i, i % 7 == 0 ? Sample.EMPTY_ITEM : "minecraft:iron_ingot", i % 64));
+            }
+            samples.add(Sample.noData(9000));
+            samples.add(Sample.gap(9001));
+            ArchiveData data = new ArchiveData("t35", "2026-09-19 20:00:00", "TestWorld",
+                    "barrel", "槽 0,1 · overworld 10,64,10", 1000, 9001,
+                    java.util.List.of(1500L, 2500L, 3500L), samples);
+            java.nio.file.Path file = dir.resolve("recording.json");
+            java.nio.file.Files.writeString(file, ArchiveFormat.toJson(data),
+                    java.nio.charset.StandardCharsets.UTF_8);
+
+            ArchiveFormat.Header h = ArchiveFormat.readHeader(file);
+            eq("头部 created", "2026-09-19 20:00:00", h.created());
+            eq("头部 world", "TestWorld", h.world());
+            eq("头部 探针名", "barrel", h.probeName());
+            eq("头部 探针描述", "槽 0,1 · overworld 10,64,10", h.probeDesc());
+            eq("头部 first", 1000L, h.firstTick());
+            eq("头部 last", 9001L, h.lastTick());
+            eq("头部 标注数", 3, h.markerCount());
+            eq("头部 样本数（= 写进去的条数）", 2002, h.sampleCount());
+
+            // 不认识的键 / 缺字段 → 忽略与默认值，不因此丢掉整个存档
+            java.nio.file.Path odd = dir.resolve("odd.json");
+            java.nio.file.Files.writeString(odd,
+                    "{\"format\":9,\"kind\":\"logiscope-archive\",\"future\":{\"a\":[1,2,3]},"
+                            + "\"probe\":\"oops\",\"range\":5,\"samples\":[{\"t\":1,\"n\":1},{\"t\":2,\"n\":2}]}",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            ArchiveFormat.Header h2 = ArchiveFormat.readHeader(odd);
+            eq("坏类型 → 默认 world", "unknown", h2.world());
+            eq("坏类型 → 探针名空", "", h2.probeName());
+            eq("坏类型 → samples 照样数得出来", 2, h2.sampleCount());
+            eq("坏类型 → markers 当 0", 0, h2.markerCount());
+
+            // 不是 JSON → IOException（列表页会跳过并记日志，不炸）
+            java.nio.file.Path bad = dir.resolve("bad.json");
+            java.nio.file.Files.writeString(bad, "not json at all",
+                    java.nio.charset.StandardCharsets.UTF_8);
+            boolean thrown = false;
+            try {
+                ArchiveFormat.readHeader(bad);
+            } catch (java.io.IOException e) {
+                thrown = true;
+            }
+            yes("坏存档抛 IOException", thrown);
+        } finally {
+            try {
+                java.nio.file.Files.deleteIfExists(dir.resolve("recording.json"));
+                java.nio.file.Files.deleteIfExists(dir.resolve("odd.json"));
+                java.nio.file.Files.deleteIfExists(dir.resolve("bad.json"));
+                java.nio.file.Files.delete(dir);
+            } catch (Exception ignored) {
+                // 临时目录清不掉也无所谓
+            }
+        }
+    }
+
+    // 36) 别把"装不下的数"变成错值（第十六轮⑤）：NaN / Infinity 不当数字，
+    //     超 int 的 slot 号不当 slot 号
+    private static void t36NumberGuards() {
+        eq("NaN 不是数字", null, Snbt.parseNumber("NaN"));
+        eq("Infinity 不是数字", null, Snbt.parseNumber("Infinity"));
+        eq("-Infinity 不是数字", null, Snbt.parseNumber("-Infinity"));
+        eq("普通数照旧", 1.5, Snbt.parseNumber("1.5"));
+        eq("带后缀照旧", 1.0, Snbt.parseNumber("1b"));
+
+        // slot 写成 NaN / 超出 int → 这个列表不算槽位列表（宁可识别不出来，也不给错号）
+        eq("slot=NaN 不认", null, NbtSlotLayout.detect(
+                Snbt.parse("{items:[{id:\"minecraft:stone\",count:1,slot:NaN}]}")));
+        eq("slot 超 int 不认", null, NbtSlotLayout.detect(
+                Snbt.parse("{items:[{id:\"minecraft:stone\",count:1,slot:99999999999}]}")));
+        // 正常的小数值仍然认（有些模组写 1.0）
+        NbtSlotLayout.Layout ok = NbtSlotLayout.detect(
+                Snbt.parse("{items:[{id:\"minecraft:stone\",count:1,slot:3.0}]}"));
+        yes("正常 slot 照样认", ok != null && ok.entries().size() == 1 && ok.entries().get(0).slot() == 3);
     }
 
     // ---- 断言 ----

@@ -5,6 +5,7 @@ import com.jessetech.logiscope.bind.DataCommand;
 import com.jessetech.logiscope.bind.KeyBindings;
 import com.jessetech.logiscope.bind.TextInputGuard;
 import com.jessetech.logiscope.collect.ProbeManager;
+import com.jessetech.logiscope.collect.ProbeSlots;
 import net.neoforged.api.distmarker.Dist;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.fml.ModContainer;
@@ -97,9 +98,18 @@ public final class LogiScopeMod {
         // ★ 进世界 = 清空全部探针 ★ 探针绑定"这个世界里的这台设备"，
         // 跨世界留着只会变成"坐标同名但设备不是同一台"的僵尸（用户实测 A 存档的
         // 探针出现在 B 存档）。顺手把 NBT 显示的残留文本也清掉。
+        //
+        // ★ 还有两处"看着没事、其实只在同一个世界里成立"的静态缓存 ★（第十六轮⑤）：
+        //   · ContainerAnchor.active/activeContainerId —— 容器 id 只在 0~99 循环，
+        //     新世界的第一个容器撞上同一个 id 时它会**直接复用旧世界的锚点**
+        //     （于是"当前开着的容器"被判成别的世界的方块）；
+        //   · ProbeSlots 的 queriedPos/dim —— 新世界坐标相同时会复用旧世界的槽位清单。
+        //   两个 reset 方法早就写好了，只是一直没人调。
         NeoForge.EVENT_BUS.<ClientPlayerNetworkEvent.LoggingIn>addListener(e -> {
             LogiScopeMod.probes().clearAll();
             DataCommand.reset();
+            ContainerAnchor.clearActive();
+            ProbeSlots.reset();
         });
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
