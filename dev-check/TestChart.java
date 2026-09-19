@@ -32,6 +32,7 @@ import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -82,7 +83,7 @@ public class TestChart {
         t29RenderGeometry();
         t30NbtSlotLayout();
         t31SlotMatchById();
-        t32SlotPickRule();
+        t33SlotResolve();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1019,30 +1020,95 @@ public class TestChart {
     }
 
 
-    // 32) 按格定位规则（第十六轮③）：能一击命中就命中，分不出才全纳入
-    private static void t32SlotPickRule() {
+    // 33) 选格 → slot 号的判据链（第十六轮④）
+    //     **修的就是实测那条**：MEK 上点 2 个原料格 + 2 个输出格 → 只跟到 1 个原料格 + 全部输出格。
+    private static void t33SlotResolve() {
+        final String X = "minecraft:cobblestone";
+        final String Y = "minecraft:iron_ingot";
+
+        // 场景 = Mekanism 终极熔炼工厂（9 进 9 出），菜单机器格顺序：
+        //   0,1 = **空着的**虚拟升级槽；2..10 = 数据 slot 0..8（输入）；11..19 = slot 9..17（输出）；20 = 能量槽
+        // 数据（`items:[{id,count,slot}]`，空槽不写）里：输入 slot 0..3 是 X，输出 slot 9..12 是 Y
+        List<NbtSlotLayout.Entry> entries = new ArrayList<>();
+        for (int s = 0; s <= 3; s++) {
+            entries.add(new NbtSlotLayout.Entry(s, X, 1));
+        }
+        for (int s = 9; s <= 12; s++) {
+            entries.add(new NbtSlotLayout.Entry(s, Y, 64));
+        }
+        // 菜单里的非空格（按菜单顺序）—— 两个空着的虚拟槽不进这个序列（这正是能对齐的关键）
+        List<SlotAlign.Cell> cells = new ArrayList<>();
+        for (int ord = 2; ord <= 5; ord++) {
+            cells.add(new SlotAlign.Cell(ord, ord, X));
+        }
+        for (int ord = 11; ord <= 14; ord++) {
+            cells.add(new SlotAlign.Cell(ord, ord, Y));
+        }
+
+        SlotAlign.Result r = SlotAlign.align(cells, entries);
+        eq("配对数 = 8", 8, r.pairs());
+        eq("没有分不出的格", 0, r.unresolved());
+        eq("统一位移 = 2", Integer.valueOf(2), r.shift());
+
+        // ★ 回归点 1：两个原料格 → **两个不同的 slot**（旧规则两个都撞上 slot 0，塌成一格）★
+        eq("第 1 个原料格 → slot 0", Integer.valueOf(0), r.byOrdinal().get(2));
+        eq("第 2 个原料格 → slot 1", Integer.valueOf(1), r.byOrdinal().get(3));
+        // ★ 回归点 2：两个输出格 → 各自的 slot（旧规则会把全部同物品格子都纳入）★
+        eq("第 1 个输出格 → slot 9", Integer.valueOf(9), r.byOrdinal().get(11));
+        eq("第 2 个输出格 → slot 10", Integer.valueOf(10), r.byOrdinal().get(12));
+        eq("反向表可用（回填勾选）", Integer.valueOf(14), r.bySlot().get(12));
+
+        // ★ 回归点 3：Mekanism 每格都报容器下标 0 —— 判定为"不可靠"，那条判据直接不用 ★
+        no("下标全是 0 → 不可靠", SlotAlign.containerIndexReliable(List.of(0, 0, 0, 0)));
+        yes("下标互不相同 → 可靠（NeoForge 那类）", SlotAlign.containerIndexReliable(List.of(0, 1, 2, 9)));
+        yes("下标为负的忽略（无 GUI 容器）", SlotAlign.containerIndexReliable(List.of(-1, -1)));
+
+        // 空格子：数据里没有元素，只能靠统一位移外推
+        Integer emptySlot = SlotAlign.resolve(new SlotAlign.Pick(6, 0, "minecraft:air", true),
+                entries, r, false);
+        eq("空格子靠位移推到 slot 4", Integer.valueOf(4), emptySlot);
+        // 位移推不出来时，空格子**不猜**（旧行为是靠容器下标 0 —— 那是错的）
+        eq("位移缺失 + 下标不可靠 → 拒绝", null,
+                SlotAlign.resolve(new SlotAlign.Pick(6, 0, "minecraft:air", true), entries,
+                        SlotAlign.Result.EMPTY, false));
+
+        // 非空格：对齐失败时，容器下标只在"内容对得上"时才算数
+        eq("对齐失败 + 下标可用 + 内容对得上 → 用下标", Integer.valueOf(1),
+                SlotAlign.resolve(new SlotAlign.Pick(9, 1, X, false), entries,
+                        SlotAlign.Result.EMPTY, true));
+        eq("对齐失败 + 下标撞上别的物品 → 不认", null,
+                SlotAlign.resolve(new SlotAlign.Pick(9, 9, X, false), entries,
+                        SlotAlign.Result.EMPTY, true));
+
+        // ---- 分不出来就不猜（旧规则是"全纳入"）----
+        List<NbtSlotLayout.Entry> three = List.of(
+                new NbtSlotLayout.Entry(0, X, 1),
+                new NbtSlotLayout.Entry(5, X, 1),
+                new NbtSlotLayout.Entry(7, X, 1));
+        SlotAlign.Result amb = SlotAlign.align(List.of(new SlotAlign.Cell(0, 0, X)), three);
+        eq("同名 3 格只勾 1 格 → 分不出", 1, amb.unresolved());
+        eq("分不出时不给 slot", null,
+                SlotAlign.resolve(new SlotAlign.Pick(0, -1, X, false), three, amb, false));
+
+        // ---- 快照对不齐（物品刚被换掉）：坏的那格拒绝，好的那格照样对得上 ----
+        List<NbtSlotLayout.Entry> onlyX = List.of(new NbtSlotLayout.Entry(0, X, 1));
+        List<SlotAlign.Cell> stale = List.of(
+                new SlotAlign.Cell(0, 0, X),
+                new SlotAlign.Cell(1, 1, "minecraft:diamond"));
+        SlotAlign.Result sr = SlotAlign.align(stale, onlyX);
+        eq("好的那格仍然对得上", Integer.valueOf(0), sr.byOrdinal().get(0));
+        eq("对不上的那格被拒绝", 1, sr.unresolved());
+        eq("样本不足（只有 1 个配对）→ 不给位移", null, sr.shift());
+
+        // ---- 位移不统一（多余槽夹在中间）→ 不给位移，空格子不猜 ----
         List<NbtSlotLayout.Entry> two = List.of(
-                new NbtSlotLayout.Entry(0, "minecraft:cobblestone", 2),
-                new NbtSlotLayout.Entry(9, "minecraft:cobblestone", 8));
-
-        // 1) 容器下标恰好等于某个 slot → 就选它（"点哪一格监测哪一格"）
-        List<NbtSlotLayout.Entry> a = NbtSlotLayout.resolvePick(two, 9);
-        eq("下标命中 → 一个", 1, a.size());
-        eq("命中的 slot", 9, a.get(0).slot());
-
-        // 2) 下标对不上、但只有一个候选 → 就是它
-        List<NbtSlotLayout.Entry> one = List.of(new NbtSlotLayout.Entry(3, "minecraft:stone", 1));
-        eq("唯一候选 → 一个", 1, NbtSlotLayout.resolvePick(one, 7).size());
-        eq("唯一候选的 slot", 3, NbtSlotLayout.resolvePick(one, 7).get(0).slot());
-
-        // 3) 下标对不上且多个候选 → 全都要（宁可多纳入，不漏格）
-        List<NbtSlotLayout.Entry> all = NbtSlotLayout.resolvePick(two, 5);
-        eq("分不清 → 全纳入", 2, all.size());
-
-        // 4) 下标为负（没有容器下标可用）→ 同样按"唯一/全要"处理
-        eq("无下标 + 唯一候选", 1, NbtSlotLayout.resolvePick(one, -1).size());
-        eq("无下标 + 多候选", 2, NbtSlotLayout.resolvePick(two, -1).size());
-        eq("空候选", 0, NbtSlotLayout.resolvePick(List.of(), 3).size());
+                new NbtSlotLayout.Entry(0, X, 1),
+                new NbtSlotLayout.Entry(1, Y, 1));
+        SlotAlign.Result uneven = SlotAlign.align(List.of(
+                new SlotAlign.Cell(2, 2, X),
+                new SlotAlign.Cell(5, 5, Y)), two);
+        eq("位移不统一 → null", null, uneven.shift());
+        eq("但非空格照样定得下来", Integer.valueOf(1), uneven.byOrdinal().get(5));
     }
 
     // ---- 断言 ----

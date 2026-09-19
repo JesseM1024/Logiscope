@@ -192,16 +192,11 @@ public final class ProbeInstance {
      */
     public boolean addDataTarget(DataTarget t) {
         synchronized (sampleLock) {
-            for (DataTarget d : dataTargets) {
-                // 普通路径目标按路径去重；**槽位锚点按 (列表路径, slot 号) 去重** ——
-                // 同一物品可能有好几格（各自一个锚点，靠按名称合并求和），
-                // 但同一个 slot 只该有一条。
-                boolean dup = d.isSlotAnchor() && t.isSlotAnchor()
-                        ? d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath())
-                        : !d.isSlotAnchor() && !t.isSlotAnchor() && d.valuePath().equals(t.valuePath());
-                if (dup) {
-                    return false;
-                }
+            // 普通路径目标按路径去重；**槽位锚点按 (列表路径, slot 号) 去重** ——
+            // 同一物品可能有好几格（各自一个锚点，靠按名称合并求和），
+            // 但同一个 slot 只该有一条。规则见 isDuplicate（与覆写路径共用一份）。
+            if (isDuplicate(dataTargets, t)) {
+                return false;
             }
             List<DataTarget> n = new ArrayList<>(dataTargets);
             n.add(t);
@@ -212,6 +207,56 @@ public final class ProbeInstance {
             }
             return true;
         }
+    }
+
+    /**
+     * **用"这一刻选中的格子"替换掉全部 NBT 槽位锚点**（第十六轮④，覆写语义）。
+     *
+     * ★ 与 {@link #addDataTarget} 的差别就是这个函数的全部意义 ★
+     * 第十六轮②定的是"追加/更新"，用户实机推翻：**回选格页再点「完成」应当是覆写** ——
+     * 界面上看到勾了几格，探针就该只测那几格；否则用户永远删不掉自己不想要的格子
+     * （只能一格一格去目标表里 ×）。
+     *
+     * 只换锚点：**DATA 页加的路径目标（纯数据，如 FE / 流体）原样保留** ——
+     * 它们与"机器格"是两条独立的追踪线，不该被选格动作连坐。
+     *
+     * @param anchors 新的锚点集合（调用方已去重）
+     * @return 替换后该探针的目标总数
+     */
+    public int replaceSlotAnchors(List<DataTarget> anchors) {
+        synchronized (sampleLock) {
+            List<DataTarget> n = new ArrayList<>();
+            for (DataTarget d : dataTargets) {
+                if (!d.isSlotAnchor()) {
+                    n.add(d);          // 纯数据目标：留下
+                }
+            }
+            for (DataTarget a : anchors) {
+                if (isDuplicate(n, a)) {
+                    continue;
+                }
+                n.add(a);
+            }
+            dataTargets = List.copyOf(n);
+            // 刚有了目标却还停在 ARMED（既没选格也没目标）→ 顺手进入可采样状态
+            if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
+                enterFollowing(false);
+            }
+            return dataTargets.size();
+        }
+    }
+
+    /** 目标去重规则：锚点按 (列表路径, slot 号) 去重；普通路径目标按路径去重 */
+    private static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
+        for (DataTarget d : list) {
+            boolean dup = d.isSlotAnchor() && t.isSlotAnchor()
+                    ? d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath())
+                    : !d.isSlotAnchor() && !t.isSlotAnchor() && d.valuePath().equals(t.valuePath());
+            if (dup) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 删除一个数据追踪目标（DATA 页目标列表行尾的 ×）。@return 是否真的删了 */
