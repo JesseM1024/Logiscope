@@ -2,6 +2,7 @@
 
 
 
+
   "key.categories.logiscope": "LogiScope",
   "logiscope.key.open_scope": "Toggle LogiScope panel",
   "logiscope.title": "LogiScope",
@@ -124,5 +125,15 @@
   "logiscope.data.targets": "Tracking targets",
   "logiscope.data.targets_hint": "back to picker, press Done to start",
   "logiscope.flash.data_added": "tracking added: %s",
-  "logiscope.flash.data_dup": "already tracking: %s"
+  "logiscope.flash.data_dup": "already tracking: %s",
+  "logiscope.info.data_count": "data x%s",
+  "logiscope.calc.title": "Calc · %s · %s · %s",
+  "logiscope.calc.rise": "rise %s",
+  "logiscope.calc.fall": "fall %s",
+  "logiscope.calc.net": "total Δ%s",
+  "logiscope.calc.gaps": "%s gaps not counted",
+  "logiscope.calc.events": "%s change events",
+  "logiscope.calc.delta": "delta mean %s var %s",
+  "logiscope.calc.period": "period mean %s t var %s t",
+  "logiscope.data.auto": "(auto)"
 }

@@ -2,6 +2,7 @@
 
 
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -124,5 +125,15 @@
   "logiscope.data.targets": "追踪目标",
   "logiscope.data.targets_hint": "回选格点「完成」后与容器格一起开始",
   "logiscope.flash.data_added": "已添加追踪：%s",
-  "logiscope.flash.data_dup": "该路径已在追踪中：%s"
+  "logiscope.flash.data_dup": "该路径已在追踪中：%s",
+  "logiscope.info.data_count": "数据 x%s",
+  "logiscope.calc.title": "计算 · %s · %s · %s",
+  "logiscope.calc.rise": "上升 %s",
+  "logiscope.calc.fall": "下降 %s",
+  "logiscope.calc.net": "合计 Δ%s",
+  "logiscope.calc.gaps": "断档 %s 处未计入",
+  "logiscope.calc.events": "变更 %s 次",
+  "logiscope.calc.delta": "变化量 mean %s var %s",
+  "logiscope.calc.period": "周期 mean %s t var %s t",
+  "logiscope.data.auto": "(自动)"
 }

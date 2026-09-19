@@ -1155,8 +1155,33 @@ public final class ScopeScreen extends Screen {
         List<Long> markers = page == Page.REPLAY
                 ? replayMarkers
                 : currentProbe() != null ? currentProbe().markers().toList() : List.of();
-        return new ChartRenderer.View(start, end, hiddenItems, ioShown, sel, selecting, selectionStats,
-                markers, mouseX, mouseY);
+        // ★ 第十二轮④：选区基础信息只列**启用的线**（与十字线读数的 readable 同一规则）：
+        // 5 条线里 3 条 quantity/IO 全关，选区统计就不写这 3 条——写了只会把小框挤爆，
+        // 还让人误以为"这条线在图上"。图例开关随时可变，所以过滤放在每帧的 View 组装处。
+        return new ChartRenderer.View(start, end, hiddenItems, ioShown, sel, selecting,
+                visibleSelectionStats(), markers, mouseX, mouseY);
+    }
+
+    /**
+     * 选区统计的可见过滤：只保留**启用的线**（第十二轮④）。
+     * 规则与 {@code ChartRenderer#readable} 同源：存量线或 IO 线至少一个开着；
+     * (empty) 没有 IO，只看存量。放在 View 组装处而不是统计缓存里，
+     * 是因为图例开关随时可变，而统计只在框选完成时重算。
+     */
+    private List<ChartData.SeriesRange> visibleSelectionStats() {
+        if (selectionStats.isEmpty()) {
+            return selectionStats;
+        }
+        List<ChartData.SeriesRange> out = new ArrayList<>();
+        for (ChartData.SeriesRange r : selectionStats) {
+            boolean readable = ChartData.EMPTY_ITEM.equals(r.itemId())
+                    ? !hiddenItems.contains(r.itemId())
+                    : !hiddenItems.contains(r.itemId()) || ioShown.contains(r.itemId());
+            if (readable) {
+                out.add(r);
+            }
+        }
+        return out;
     }
 
     /**
@@ -1738,9 +1763,10 @@ public final class ScopeScreen extends Screen {
         aItem = item;
         aIo = analyzeIo;
         aOp = analyzeOp;
-        analyzeTitle = "计算 · " + ChartRenderer.label(chartData.indexOf(item), item)
-                + " · " + (analyzeIo ? tr("logiscope.calc.io") : tr("logiscope.calc.quantity"))
-                + " · " + tr(opKey(analyzeOp));
+        analyzeTitle = tr("logiscope.calc.title",
+                ChartRenderer.label(chartData.indexOf(item), item),
+                analyzeIo ? tr("logiscope.calc.io") : tr("logiscope.calc.quantity"),
+                tr(opKey(analyzeOp)));
         analyzeLines = computeAnalyzeLines(chartData.byItem(item), lo, hi);
     }
 
@@ -1769,19 +1795,19 @@ public final class ScopeScreen extends Screen {
                 }
                 case OP_TOTAL -> {
                     CurveMath.TotalChange t = CurveMath.totalChange(pts);
-                    out.add("上升 " + signedNum(t.rise()));
-                    out.add("下降 " + signedNum(t.fall()));
-                    out.add("合计 Δ" + signedNum(t.net()));
+                    out.add(tr("logiscope.calc.rise", signedNum(t.rise())));
+                    out.add(tr("logiscope.calc.fall", signedNum(t.fall())));
+                    out.add(tr("logiscope.calc.net", signedNum(t.net())));
                     if (t.gaps() > 0) {
-                        out.add("断档 " + t.gaps() + " 处未计入");
+                        out.add(tr("logiscope.calc.gaps", t.gaps()));
                     }
                 }
                 case OP_EVENTS -> {
                     CurveMath.Events ev = CurveMath.changeEvents(pts);
-                    out.add("变更 " + ev.count() + " 次");
+                    out.add(tr("logiscope.calc.events", ev.count()));
                     if (ev.count() > 0) {
-                        out.add("变化量 mean " + signedNum(ev.dMean()) + " var " + fmtNum(ev.dVar()));
-                        out.add("周期 mean " + fmtNum(ev.pMean()) + "t var " + fmtNum(ev.pVar()) + "t");
+                        out.add(tr("logiscope.calc.delta", signedNum(ev.dMean()), fmtNum(ev.dVar())));
+                        out.add(tr("logiscope.calc.period", fmtNum(ev.pMean()), fmtNum(ev.pVar())));
                     }
                 }
                 default -> {
@@ -1827,19 +1853,19 @@ public final class ScopeScreen extends Screen {
             }
             case OP_TOTAL -> {
                 CurveMath.TotalChange t = CurveMath.flowTotal(flow);
-                out.add("上升 " + signedNum(t.rise()));
-                out.add("下降 " + signedNum(t.fall()));
-                out.add("合计 Δ" + signedNum(t.net()));
+                out.add(tr("logiscope.calc.rise", signedNum(t.rise())));
+                out.add(tr("logiscope.calc.fall", signedNum(t.fall())));
+                out.add(tr("logiscope.calc.net", signedNum(t.net())));
                 if (t.gaps() > 0) {
-                    out.add("断档 " + t.gaps() + " 处未计入");
+                    out.add(tr("logiscope.calc.gaps", t.gaps()));
                 }
             }
             case OP_EVENTS -> {
                 CurveMath.Events ev = CurveMath.flowEvents(flow);
-                out.add("变更 " + ev.count() + " 次");
+                out.add(tr("logiscope.calc.events", ev.count()));
                 if (ev.count() > 0) {
-                    out.add("变化量 mean " + signedNum(ev.dMean()) + " var " + fmtNum(ev.dVar()));
-                    out.add("周期 mean " + fmtNum(ev.pMean()) + "t var " + fmtNum(ev.pVar()) + "t");
+                    out.add(tr("logiscope.calc.delta", signedNum(ev.dMean()), fmtNum(ev.dVar())));
+                    out.add(tr("logiscope.calc.period", fmtNum(ev.pMean()), fmtNum(ev.pVar())));
                 }
             }
             default -> {
@@ -3321,7 +3347,7 @@ public final class ScopeScreen extends Screen {
                 g.fill(L.x() + 4, ry - 1, L.x() + L.w() - 4, ry + ROW_H - 1, 0x40FFFFFF);
             }
             String name = dt.hasNamePath() ? "◂" + dt.namePath()
-                    : (dt.fallbackName().equals(dt.valuePath()) ? "(自动)" : dt.fallbackName());
+                    : (dt.fallbackName().equals(dt.valuePath()) ? tr("logiscope.data.auto") : dt.fallbackName());
             String text = dt.valuePath() + "  →  " + name;
             int textW = L.w() - 8 - DEL_W - 6;
             g.drawString(this.font, cut(text, Math.max(20, textW)), L.x() + 8, ry, 0xFFE0E0EC, false);
@@ -3500,5 +3526,10 @@ public final class ScopeScreen extends Screen {
 
     private static String tr(String key) {
         return Component.translatable(key).getString();
+    }
+
+    /** 带参数的翻译（%s 占位）。注意：数字格式化交给调用方，这里只做文本替换 */
+    private static String tr(String key, Object... args) {
+        return Component.translatable(key, args).getString();
     }
 }
