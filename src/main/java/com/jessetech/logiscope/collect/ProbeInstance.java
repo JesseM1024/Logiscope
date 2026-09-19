@@ -193,7 +193,13 @@ public final class ProbeInstance {
     public boolean addDataTarget(DataTarget t) {
         synchronized (sampleLock) {
             for (DataTarget d : dataTargets) {
-                if (d.valuePath().equals(t.valuePath())) {
+                // 普通路径目标按路径去重；**槽位锚点按 (列表路径, slot 号) 去重** ——
+                // 同一物品可能有好几格（各自一个锚点，靠按名称合并求和），
+                // 但同一个 slot 只该有一条。
+                boolean dup = d.isSlotAnchor() && t.isSlotAnchor()
+                        ? d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath())
+                        : !d.isSlotAnchor() && !t.isSlotAnchor() && d.valuePath().equals(t.valuePath());
+                if (dup) {
                     return false;
                 }
             }

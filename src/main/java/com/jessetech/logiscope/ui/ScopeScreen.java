@@ -569,8 +569,9 @@ public final class ScopeScreen extends Screen {
                 // "这个容器是不是把 slot 号写在 NBT 里"。是的话，选格就按 slot 走。
                 DataCommand.tick();
                 if (LogiScopeMod.probes().currentTick() >= nbtSlotNextRequest) {
+                    // 选格期间抓得勤一点（10 tick = 半秒）：按「完成」时要的是"那一刻"的列表
                     DataCommand.request(p.target().dimension(), p.target().pos());
-                    nbtSlotNextRequest = LogiScopeMod.probes().currentTick() + 20;
+                    nbtSlotNextRequest = LogiScopeMod.probes().currentTick() + 10;
                 }
                 parseNbtSlotLayout();
             }
@@ -2650,15 +2651,18 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * NBT 槽位模式下的「完成」：把选中的格子解析成 NBT slot 号，作为**数据目标**挂上去。
+     * NBT 槽位模式下的「完成」：把**这一刻**的待测 slot 列表提取出来，作为数据目标挂上去。
      *
-     * 规则（用户原话的落地）：
-     *   · 点到的格子有物品 → 用"物品 id + 数量"在 NBT 列表里反查 slot 号，**唯一命中**才采用；
-     *   · 空格子（NBT 里没有对应元素，拿不到 slot 号）→ **不选它**；
-     *   · 同物品同数量命中多个（分不清哪一格）→ 也不选（宁可少选，不猜）。
+     * 规则（第十六轮②按实测反馈修订）：
+     *   · **按物品 id 匹配**，不按"物品 id + 数量" —— 数量在运行中的机器上每秒都在变，
+     *     用数量匹配会因为"读快照的时刻不同"而漏格（实测：输入输出都点了，输出格却没进来）；
+     *   · **同一种物品命中多格 → 每一格各建一个锚点**：它们名字相同，采样时按名称合并
+     *     **自动相加**（"同种物品命中多格需要加起来"）；
+     *   · 只有"NBT 里根本找不到这个物品"的格子（空格子 / 物品刚被抽走）才**不选**；
+     *   · **追加语义**：再次回掉落格页选新格子并「完成」，是在已有列表上**追加/更新**
+     *     （同一 slot 去重），不会把之前选好的丢掉。
      *
-     * 选完 probes 的目标里**不含任何 SlotRef**（所以之后完全不碰菜单），
-     * 只有数据目标 —— 这条探针就是"纯数据探针"，走服务端直读。
+     * 目标里**不含任何 SlotRef**，所以这条探针是"纯数据探针"，采样完全不碰菜单。
      */
     private void commitNbtSlotAnchors(ProbeInstance p) {
         Snbt.Node tree = Snbt.parse(DataCommand.text());
@@ -2668,17 +2672,22 @@ public final class ScopeScreen extends Screen {
             if (!selMenuSlots.contains(v.menuSlotIndex())) {
                 continue;
             }
-            List<NbtSlotLayout.Entry> hits =
-                    NbtSlotLayout.byContent(tree, nbtSlotListPath, v.itemId(), v.count());
-            if (hits.size() != 1) {
-                skipped++;
+            String want = v.itemId();
+            if (want == null || want.isBlank()) {
+                skipped++;   // 空格子：NBT 里没有元素 ⇒ 拿不到 slot 号（用户规则：取消监测）
                 continue;
             }
-            NbtSlotLayout.Entry hit = hits.get(0);
-            String name = hit.itemId() != null && !hit.itemId().isBlank() ? hit.itemId() : v.itemId();
-            p.addDataTarget(DataTarget.slotAnchor(nbtSlotListPath, name,
-                    p.target().deviceName(), p.target().dimension(), p.target().pos(), hit.slot()));
-            added++;
+            List<NbtSlotLayout.Entry> hits = NbtSlotLayout.byItem(tree, nbtSlotListPath, want);
+            if (hits.isEmpty()) {
+                skipped++;   // 这一刻 NBT 里没有这个物品（可能是空格 / 刚被抽走）
+                continue;
+            }
+            for (NbtSlotLayout.Entry hit : hits) {
+                String name = hit.itemId() != null && !hit.itemId().isBlank() ? hit.itemId() : want;
+                p.addDataTarget(DataTarget.slotAnchor(nbtSlotListPath, name,
+                        p.target().deviceName(), p.target().dimension(), p.target().pos(), hit.slot()));
+                added++;
+            }
         }
         if (added == 0 && p.dataTargets().isEmpty()) {
             say(tr("logiscope.flash.slot_anchor_none"));
@@ -2686,7 +2695,9 @@ public final class ScopeScreen extends Screen {
         }
 
         ProbeTarget old = p.target();
-        // 槽位列表留空：这类容器的物品读数**只走 NBT**，不走菜单/能力下标
+        // 槽位列表留空：这类容器的物品读数**只走 NBT**，不走菜单/能力下标。
+        // ★ configure 只清样本，不碰 dataTargets ★ —— 所以"回选格页再选几格"
+        // 是**追加**（用户要求：更新 slot 列表，而不是重建）。
         p.configure(new ProbeTarget(List.of(), old.deviceName(), old.dimension(), old.pos()), null);
         LogiScopeMod.probes().setActive(p.id());
 
@@ -2700,11 +2711,12 @@ public final class ScopeScreen extends Screen {
         builtVersion = Long.MIN_VALUE;
         cellMode = false;
         page = Page.CHART;
+        String msg = tr("logiscope.flash.slot_anchor_added").replace("%s",
+                String.valueOf(p.dataTargets().size()));
         if (skipped > 0) {
-            say(tr("logiscope.flash.slot_anchor_skipped").replace("%s", String.valueOf(skipped)));
-        } else {
-            say(tr("logiscope.flash.slot_anchor_added").replace("%s", String.valueOf(added)));
+            msg += "  ·  " + tr("logiscope.flash.slot_anchor_skipped").replace("%s", String.valueOf(skipped));
         }
+        say(msg);
     }
 
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
