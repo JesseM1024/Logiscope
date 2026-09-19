@@ -4,6 +4,7 @@
 
 
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -148,5 +149,12 @@
   "logiscope.tip.slots": "已选格子 %s 个（滚轮可翻）",
   "logiscope.tip.data_targets": "追踪的 NBT 键 %s 个（滚轮可翻）",
   "logiscope.tip.hidden_series": "条线被收起（滚轮可翻）",
-  "logiscope.tip.slot": "槽 %s"
+  "logiscope.tip.slot": "槽 %s",
+  "logiscope.slots.summary": "槽 %s",
+  "logiscope.slots.none": "（未选格）",
+  "logiscope.anchor.runtime": "运行时身份",
+  "logiscope.anchor.open_menu": "已打开的容器（无坐标）",
+  "logiscope.data.name_mark": "[名称]",
+  "logiscope.tip.probe_title": "探针详情 · 数据 %s · 槽 %s",
+  "logiscope.tip.line_data": "数据"
 }

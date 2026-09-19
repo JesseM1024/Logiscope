@@ -790,14 +790,30 @@ public final class ProbeInstance {
     @Nullable
     private List<ContainerAccess.SlotView> readMenuSlots() {
         List<ProbeTarget.SlotRef> refs = target.slots();
+        boolean verified = probe.mappingStatus(target) == WorldProbe.MappingStatus.VERIFIED;
         List<ContainerAccess.SlotView> out = new ArrayList<>(refs.size());
         for (ProbeTarget.SlotRef ref : refs) {
-            if (ref.menuSlotIndex() < 0) {
-                // 这一格只有坐标路径（无 GUI 容器建的探针）—— 菜单里读不到它
-                return null;
+            ContainerAccess.SlotView v = null;
+            if (verified && ref.menuSlotIndex() >= 0) {
+                // 验证过的映射：菜单下标可信（MEK 那类"序号重复"的机器只能靠它）
+                v = ContainerAccess.read(ref.menuSlotIndex());
+            } else {
+                // ★ 未验证时**按身份读**（容器内下标反查），不按菜单位置 ★
+                // 原因：模组的菜单布局并不稳定 —— 同一台机器两次打开，升级槽 / 能量槽
+                // 的增删会改变槽位顺序，按"上次记下的菜单位置"读就会读到**另一格**。
+                // 用户实测的现象正是这个：GUI 开着读到 2 个圆石（读到的是别的格），
+                // 关掉 GUI 走坐标路径读到 8 个（真实的那一格）—— 同一个探针两条路径
+                // 指向不同物理槽位，图上于是"大量 switch + 断线"。
+                v = ContainerAccess.findByContainerIndex(ref.containerSlotIndex());
             }
-            ContainerAccess.SlotView v = ContainerAccess.read(ref.menuSlotIndex());
             if (v == null) {
+                // 兜底：另一条路再试一次（宁可读到一个标称位置，也不要整条暂停）
+                v = ref.menuSlotIndex() >= 0
+                        ? ContainerAccess.read(ref.menuSlotIndex())
+                        : ContainerAccess.findByContainerIndex(ref.containerSlotIndex());
+            }
+            if (v == null) {
+                // 两条路都读不到 = 换成了另一类菜单，交给上层暂停
                 return null;
             }
             out.add(v);

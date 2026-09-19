@@ -3277,6 +3277,33 @@ public final class ScopeScreen extends Screen {
     // 悬浮详情（第十三轮⑤）：+N / data xN / 槽列表 —— 鼠标悬浮出完整列表
     // ==================================================================
 
+    /** 探针详情标题：与面板上的 "槽 … · 数据 xN" 呼应 */
+    private String probeTipTitle(ProbeInstance p) {
+        return String.format(tr("logiscope.tip.probe_title"),
+                p.dataTargets().size(), p.target().slots().size());
+    }
+
+    /**
+     * 探针的**展开详情**：先列追踪的 NBT 键，再列每个已选格子（含当前内容）。
+     * 三个地方都用它（根页探针行 / 选格页第一行 / 图表页第一行），
+     * 免得"同一个东西三处显示不一样"。
+     */
+    private List<String> probeTipLines(ProbeInstance p) {
+        List<String> lines = new ArrayList<>();
+        for (DataTarget dt : p.dataTargets()) {
+            lines.add(tr("logiscope.tip.line_data") + "  " + dt.valuePath()
+                    + (dt.hasNamePath() ? "  ← " + dt.namePath() : ""));
+        }
+        for (ProbeTarget.SlotRef ref : p.target().slots()) {
+            String item = ref.itemId() == null || ref.itemId().isBlank()
+                    ? tr("logiscope.slot.empty")
+                    : ChartRenderer.label(-1, ref.itemId()) + " x" + ref.count();
+            lines.add(tr("logiscope.tip.slot").replace("%s", String.valueOf(ref.menuSlotIndex()))
+                    + "  ·  " + item);
+        }
+        return lines;
+    }
+
     /** 本帧请求一条悬浮详情（后调用者覆盖先调用者；调用方自己判鼠标是否在上面） */
     private void wantTip(int key, String title, List<String> lines) {
         if (lines.isEmpty()) {
@@ -3293,7 +3320,7 @@ public final class ScopeScreen extends Screen {
      * 选格页第一行的 {@code 槽 …}（完整格子列表）。
      */
     private void updateHoverTips(Layout L, int mouseX, int mouseY) {
-        // 图例 +N：列出被收起的那些线
+        // --- 1) 图例 +N：列出被收起的那些线 ---
         for (Chip c : L.legend()) {
             if (!c.id().equals("legend_more") || !c.hit(mouseX, mouseY)) {
                 continue;
@@ -3315,38 +3342,34 @@ public final class ScopeScreen extends Screen {
             return;
         }
 
-        // 探针行 / 存档行：探针行上悬浮显示它追踪的 NBT 键
-        if (page == Page.ROOT && L.listRows() > 0) {
-            int row = (mouseY - L.listTop()) / ROW_H;
-            int idx = scrollRow + row;
-            List<ProbeInstance> probes = LogiScopeMod.probes().all();
-            if (row >= 0 && mouseY >= L.listTop() && idx < probes.size()) {
-                ProbeInstance pr = probes.get(idx);
-                if (pr.isDataProbe()) {
-                    List<String> lines = new ArrayList<>();
-                    for (DataTarget dt : pr.dataTargets()) {
-                        lines.add(dt.valuePath() + (dt.hasNamePath() ? "  ← " + dt.namePath() : ""));
-                    }
-                    wantTip(2, tr("logiscope.tip.data_targets").replace("%s", String.valueOf(lines.size())), lines);
-                    return;
-                }
+        // --- 2) 信息区第一行（各页都是"探针描述"）→ 探针详情 ---
+        // 描述里那句 "槽 0,1,2+15 · … · 数据 x2" 就是这里展开的
+        if (mouseY >= L.infoTop() && mouseY < L.infoTop() + L.infoRows() * ROW_H
+                && (mouseY - L.infoTop()) / ROW_H == 0) {
+            ProbeInstance p = switch (page) {
+                case PICKER -> pickerProbe();
+                case DATA -> dataSrcProbe();
+                case CHART -> currentProbe();
+                default -> null;      // 根页第一行是"探针 N/16"，回放页第一行是存档名
+            };
+            if (p != null) {
+                wantTip(2, probeTipTitle(p), probeTipLines(p));
+                return;
             }
         }
 
-        // 选格页第一行（描述里带 槽 0,1,2+24）：列出全部已选格子
-        if (page == Page.PICKER) {
-            ProbeInstance src = pickerProbe();
-            int rowY = L.infoTop();
-            if (src != null && mouseY >= rowY && mouseY < rowY + ROW_H && selectionCount() > 0) {
-                List<String> lines = new ArrayList<>();
-                for (ProbeTarget.SlotRef ref : src.target().slots()) {
-                    String item = ref.itemId() == null || ref.itemId().isBlank()
-                            ? tr("logiscope.slot.empty")
-                            : ChartRenderer.label(-1, ref.itemId()) + " x" + ref.count();
-                    lines.add(tr("logiscope.tip.slot").replace("%s", String.valueOf(ref.menuSlotIndex()))
-                            + "  ·  " + item);
+        // --- 3) 根页探针列表行 → 同一个探针详情 ---
+        if (page == Page.ROOT && L.listRows() > 0 && mouseY >= L.listTop()
+                && mouseY < L.listTop() + L.listRows() * ROW_H) {
+            int row = (mouseY - L.listTop()) / ROW_H;
+            int idx = scrollRow + row;
+            List<ProbeInstance> probes = LogiScopeMod.probes().all();
+            if (idx >= 0 && idx < probes.size()) {
+                ProbeInstance pr = probes.get(idx);
+                List<String> lines = probeTipLines(pr);
+                if (!lines.isEmpty()) {
+                    wantTip(3, probeTipTitle(pr), lines);
                 }
-                wantTip(3, tr("logiscope.tip.slots").replace("%s", String.valueOf(lines.size())), lines);
             }
         }
     }
@@ -3599,7 +3622,8 @@ public final class ScopeScreen extends Screen {
                 String value = e.node().raw();
                 int vw = this.font.width(value);
                 int avail = L.w() - 8 - vw - 8;
-                g.drawString(this.font, cut(e.path() + (named ? "  [名称]" : ""), Math.max(20, avail)),
+                g.drawString(this.font, cut(e.path() + (named ? "  " + tr("logiscope.data.name_mark") : ""),
+                        Math.max(20, avail)),
                         L.x() + 8, ry, pathColor, false);
                 g.drawString(this.font, value, L.x() + L.w() - 6 - vw, ry, 0xFF9099A8, false);
             }
