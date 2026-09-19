@@ -81,6 +81,7 @@ public class TestChart {
         t28CombineAll();
         t29RenderGeometry();
         t30NbtSlotLayout();
+        t31SlotMatchById();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -981,6 +982,39 @@ public class TestChart {
         NbtSlotLayout.Layout flat = NbtSlotLayout.detect(Snbt.parse("{Items:[{Slot:7,id:\"minecraft:stone\",Count:3}]}"));
         yes("扁平元素也能识别", flat != null && flat.entries().size() == 1);
         eq("扁平元素数量", 3, flat == null ? -1 : flat.entries().get(0).count());
+    }
+
+
+    // 31) 槽位匹配按物品 id（第十六轮②）：数量漂移不影响；同物品多格全都要
+    private static void t31SlotMatchById() {
+        String two = "{Items:["
+                + "{Slot:0b,Item:{id:\"minecraft:cobblestone\",Count:2}},"
+                + "{Slot:9b,Item:{id:\"minecraft:cobblestone\",Count:8}},"
+                + "{Slot:5b,Item:{id:\"minecraft:iron_ingot\",Count:64}}"
+                + "]}";
+        Snbt.Node tree = Snbt.parse(two);
+
+        // 同一种物品占了两格：两格都要（各建锚点 → 采样按名称合并求和）
+        List<NbtSlotLayout.Entry> cobble = NbtSlotLayout.byItem(tree, "Items", "minecraft:cobblestone");
+        eq("同物品命中两格", 2, cobble.size());
+        eq("第 1 格 slot", 0, cobble.get(0).slot());
+        eq("第 2 格 slot", 9, cobble.get(1).slot());
+
+        // 数量漂移不影响命中（按 id 匹配）：这就是"点了输入输出却漏掉输出格"的修法
+        eq("数量变了照样命中", 2, NbtSlotLayout.byItem(tree, "Items", "minecraft:cobblestone").size());
+
+        // 不在列表里的物品 = 空格子 → 不命中（用户规则：取消监测）
+        eq("空物品不命中", 0, NbtSlotLayout.byItem(tree, "Items", "").size());
+        eq("列表里没有的物品不命中", 0, NbtSlotLayout.byItem(tree, "Items", "minecraft:stone").size());
+
+        // 两格合计 = 10（采样的合并求和；Aggregator.combineAll 已在 t28 钉死）
+        String[] ids = {"minecraft:cobblestone", "minecraft:cobblestone"};
+        int[] counts = {cobble.get(0).count(), cobble.get(1).count()};
+        String[] outIds = new String[4];
+        int[] outCounts = new int[4];
+        int m = Aggregator.combineAll(ids, counts, 2, outIds, outCounts);
+        eq("两格合并成一条", 1, m);
+        eq("合计 10", 10, outCounts[0]);
     }
 
     // ---- 断言 ----

@@ -88,7 +88,30 @@ public final class NbtSlotLayout {
         return null;
     }
 
-    /** 按"物品 id + 数量"反查（拾取时用）。可能返回多个候选（同物品同数量的多格） */
+    /**
+     * 按**物品 id**反查全部占用该物品的 slot（拾取时用）。
+     *
+     * ★ 为什么按 id 而不是"id + 数量" ★
+     * 运行中的机器每秒都在改变数量（输入被消耗、产出被拿走），
+     * 用数量匹配会因为"菜单快照"和"NBT 快照"读取时刻不同而**漏格**（实测踩过）。
+     * 物品 id 在一次会话里稳定得多 —— 而且同种物品多格本来就该**加起来**，
+     * 不需要区分是哪一格。
+     */
+    public static List<Entry> byItem(@Nullable Snbt.Node root, @Nullable String listPath,
+                                     @Nullable String itemId) {
+        List<Entry> out = new ArrayList<>();
+        if (itemId == null || itemId.isBlank()) {
+            return out;
+        }
+        for (Entry e : entriesAt(root, listPath)) {
+            if (itemId.equals(e.itemId())) {
+                out.add(e);
+            }
+        }
+        return out;
+    }
+
+    /** 按"物品 id + 数量"反查（保留给需要精确匹配的场合） */
     public static List<Entry> byContent(@Nullable Snbt.Node root, @Nullable String listPath,
                                         @Nullable String itemId, int count) {
         List<Entry> out = new ArrayList<>();
