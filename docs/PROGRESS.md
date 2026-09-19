@@ -676,3 +676,7 @@ NeoForge 的 `SlotItemHandler` 是 handler 下标（对），对 Mekanism 的 `I
 留着它就是留一个已知会误判的判据（"把错的统一"的教训）。TestChart 322 → **336** 条（t33）。
 文档：ARCHITECTURE CP24 重写 C24-2/C24-2b，新增 **C24-2c / C24-8 / C24-9**；
 VERIFY 重建为 第十六轮④（N1–N14 + 回归 R1–R4）；历轮 Y 组归档进 VERIFY-HISTORY。
+
+**结论**：第十六轮④ 全部用例（N1–N14 + 回归 R1–R4）**实测通过**（2026-09-19）。
+当前版本 `952b8fb` 即"已验证可用"的基线；VERIFY.md 随之重建为"未测项 + 上一轮结论摘要"，
+本轮用例归档进 VERIFY-HISTORY 第四节。
