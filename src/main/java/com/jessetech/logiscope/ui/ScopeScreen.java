@@ -3136,7 +3136,16 @@ public final class ScopeScreen extends Screen {
         return LogiScopeMod.probes().find(dataSrcProbeId);
     }
 
-    /** 命令原文变了就重新解析成"路径 = 值"（解析失败 → 空表，界面会说明） */
+    /**
+     * 命令原文变了就重新解析成"路径 = 值"（解析失败 → 空表，界面会说明）。
+     *
+     * ★ 第十二轮①修：重解析**不动滚动位置** ★
+     * NBT 里的数值（能量 / 流体量）几乎每秒都在变 → 原文每秒都"变了"；
+     * 原先这里顺手把两个滚动位置归零，等于"每秒弹回顶部"，
+     * 用户根本没机会点到列表下方的值。滚动只在**进页**时归零（enterDataPage），
+     * 之后完全交给用户；选中（dataPath / dataNamePath）按**路径**匹配，
+     * 跨刷新天然稳定，不依赖列表对象不变。
+     */
     private void reparseData() {
         String text = DataCommand.text();
         if (text == null || text.equals(dataParsedFrom)) {
@@ -3145,8 +3154,6 @@ public final class ScopeScreen extends Screen {
         dataParsedFrom = text;
         Snbt.Node root = Snbt.parse(text);
         dataEntries = root == null ? List.of() : Snbt.flatten(root);
-        dataScroll = 0;
-        dataTextScroll = 0;
     }
 
     /** 命令原文按当前宽度折行（缓存：宽度或原文变了才重算） */
