@@ -52,12 +52,8 @@ public final class DataProbe {
      */
     @Nullable
     private CompoundTag readRoot(ServerLevel level, BlockPos pos) {
-        // 第十三轮①修：先问"这台机器现在跑不跑"——
-        // 只判 isLoaded 会读到**冻结值**（边界区块里的方块实体不 tick），
-        // 曲线会显示成"设备稳定运行"，其实已经出范围了。见 ChunkTicking 的注释。
-        if (!ChunkTicking.ticking(level, pos)) {
-            return null;
-        }
+        // 第十四轮的"方块 tick 判据"已回退（用户判定不需要）：仍按原样读；
+        // 区块真卸载时 getBlockEntity 拿不到方块实体 → 返回 null。
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
             return null;
