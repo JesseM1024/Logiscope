@@ -282,6 +282,7 @@ public final class ChartRenderer {
         }
 
         List<Series> all = data.series();
+        boolean anySeries = !all.isEmpty();
         boolean anyVisible = false;
         boolean anyFlow = false;
         vScanLo = Integer.MAX_VALUE;
@@ -311,9 +312,17 @@ public final class ChartRenderer {
         if (vLo == Integer.MAX_VALUE) {
             // 窗口里没有采样点（暂停中、刚接上探头、或最近一段全是 no_data）。
             // 时间轴还是要画，否则玩家看到一块纯黑，分不清"没数据"和"面板坏了"。
+            //
+            // ★ 三种"没线"要分开说（第十六轮⑤）★：
+            //   · 有线但全被图例关掉 → "all series hidden by the legend"（怪用户的操作，没毛病）；
+            //   · 有线但这段窗口没样本 → "no data in window"；
+            //   · **一条线都没有**（从没记录到 / 每个样本都读不到 —— 例如数值超出
+            //     可表示范围）→ 不能再说"被图例隐藏"，那是把"没有数据"栽赃给用户的操作。
             drawTimeAxis(g, font);
-            centered(g, font,
-                    anyVisible ? tr("logiscope.chart.no_data_in_window") : tr("logiscope.chart.all_hidden"),
+            String msg = anyVisible ? tr("logiscope.chart.no_data_in_window")
+                    : anySeries ? tr("logiscope.chart.all_hidden")
+                    : tr("logiscope.chart.no_lines");
+            centered(g, font, msg,
                     plotX + plotW / 2, plotY + plotH / 2 - 4, COLOR_LABEL);
             // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
             // 第五轮 N8 就是这么全部失败的（用户以为框选坏了，其实是没数据 + 没反馈）

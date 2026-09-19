@@ -97,3 +97,54 @@
 3. **C1/C2/C3** —— 三条老账，跑一遍补测就能清掉（其实现在就能顺手验）。
 4. **E3 / E4** —— 用得越久越想要，属"体验型"；E4 与 D5 的替代方案同源，可合并考虑。
 5. A2 收尾（打里程碑 / 把 G7 标 `[x]`）——纯文档动作，随手做掉。
+
+---
+
+## G. 第十六轮⑤实测新提的需求（2026-09-19，用户 B1 复测时提出）
+
+### G1. 样本值"自适应数值类型"　`[ ]`　（**优先级：高于本稿其余全部候选**）
+
+**起因**：追踪创造能量立方的 `2^63` 值 → 图上一条线都没有、只剩 `no-data` 在涨。
+这是第十六轮⑤"装不下就诚实留空"的**预期**结果（修复前 `(int)` 截断会画出一根 **-1** 的假线），
+但它暴露了一个真正的缺口：**样本存储是 `int`（±2.1e9）**，能量类读数（FE/J/2^63）
+与浮点量都装不下。
+
+**设计（已想好，照做即可）** —— 新纯类 `analysis/Val`：
+
+```java
+/** 采样值：**能精确用整数表示就用整数**（long），小数 / 超长整数用 double —— 自适应 */
+public record Val(boolean integral, long i, double d) {
+    public static @Nullable Val of(long v);        // 永不为 null
+    public static @Nullable Val of(double v);      // 非有限 → null（= 读不到，别造怪数）
+    public double asDouble();                      // 画图 / 统计用
+    public boolean isIntegral();
+    public Val plus(Val o);                        // 同为整数且不溢出 → 整数和；否则 double
+    public Val minus(Val o);                       // IO（净流量）= 两个 Val 之差
+    public int compareTo(Val o);
+    public boolean isZero();
+    public String fmt();                           // 读数：整数精确打印；小数用短格式
+}
+```
+
+**落地面（约 10 个文件、60~80 处，机械但量不小 —— 所以单独一轮）**：
+| 层 | 改什么 |
+|---|---|
+| `store/Sample` | `int count` → `Val value`；**保留** `Sample(tick, id, long)` 便利构造（旧测试/调用点不破）；存档格式见下 |
+| `analysis/SeriesPoint` / `Series` / `ChartData` | `int count` → `Val`；Builder 的 min/max/lastCount 同步；**聚合求和走 `Val.plus`**（溢出回退 double 并标 integral=false） |
+| `analysis/Aggregator` | `int[]` → `Val[]`（复用数组，别每 tick 分配） |
+| `analysis/CurveMath` | `Extremes`/`Stats` 走 `asDouble()`；`TotalChange`/`Events` 已是 long/double，Δ 用 `Val.minus` |
+| `analysis/WaveColumns` / `RectRuns` | **渲染一律走 `asDouble()`，列聚合保持 `double[]`** —— 热路径零分配不破坏（`Val` 是不可变 record，逐列新建就是每帧 700 次分配，禁止） |
+| `ui/ChartRenderer` | `vScanLo/Hi`、`yOf`、轴步长/基线改 double 算；**轴标签与十字线读数在"全整数"时仍打印精确整数**（从 Val 的整数形式取，别用 double 转字符串） |
+| `ui/ScopeScreen` | 读数、IO、选区统计同步；`signedNum(int)` → Val |
+| `archive/ArchiveFormat` | 整数写 `"n": <long>`、小数写 `"d": <double>`（**向后兼容**：旧文件的 `n` 用 `getAsLong` 读）；`format` 仍为 1（只增字段） |
+| `collect/DataProbe` / `NbtSlotLayout.Entry` | 产出侧改 Val（slot 数量是 int，包一层即可） |
+
+**必须一起定的口径**：
+- **long 求和溢出** → 回退 double 并把结果标成非整数（宁可丢精度，不回绕）；
+- **double 非有限**（NaN/∞）→ 当"读不到"（留空），延续第十六轮⑤；
+- **读数格式**：整数 → 精确整数（用户要求不变）；小数 → 短格式；
+- **已知限制**：> ±9.2e18 的 double 仍留空（写进 VERIFY/PROGRESS）；
+- **内存**：`Sample` 从 4 字节值变 16 字节 —— 10 万样本 ≈ +1.2 MB，可接受（写进权衡）。
+
+**验收**：离线断言（Val 的加减/比较/溢出回退/格式化；存档 round-trip 两种形状）；
+实机：创造能量立方出图、普通 FE 出图、流体 mB/t（小数）出图、读数格式符合上表。

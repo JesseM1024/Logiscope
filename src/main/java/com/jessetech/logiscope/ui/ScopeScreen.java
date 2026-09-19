@@ -4097,10 +4097,38 @@ public final class ScopeScreen extends Screen {
             dataPath = "";
             dataName = "";
             dataNamePath = null;
-            say(tr("logiscope.flash.data_added").replace("%s", path));
+            String msg = tr("logiscope.flash.data_added").replace("%s", path);
+            // ★ 值装不下就当场说清楚 ★（第十六轮⑤）
+            // 样本存储是 int（±21 亿）。追一个 2^63 的值（创造能量立方这类）时，
+            // 图上会一条线都没有、只有 no-data 在涨 —— 与其让用户对着空图猜原因，
+            // 不如在添加的那一刻把数值和上限都摆出来（只提醒、不拦着：值可能以后落回范围内）。
+            String warn = outOfRangeHint(path);
+            if (warn != null) {
+                msg += "  ·  " + warn;
+            }
+            say(msg);
         } else {
             say(tr("logiscope.flash.data_dup").replace("%s", path));
         }
+    }
+
+    /**
+     * 这个路径**现在**的值是否已经超出样本存储的可表示范围；超了就返回一句提醒，没超返回 null。
+     * 只看添加那一刻的实时值（数据页每秒都在刷新 NBT 原文，`dataEntries` 就是它摊平的结果）。
+     */
+    @Nullable
+    private String outOfRangeHint(String path) {
+        for (Snbt.Entry e : dataEntries) {
+            if (!e.path().equals(path) || !e.numeric()) {
+                continue;
+            }
+            double v = e.node().number();
+            if (Double.isFinite(v) && v >= Integer.MIN_VALUE && v <= Integer.MAX_VALUE) {
+                return null;
+            }
+            return tr("logiscope.flash.data_out_of_range").replace("%s", e.node().raw());
+        }
+        return null;
     }
 
     // ==================================================================
