@@ -19,6 +19,5 @@ out/
 Thumbs.db
 
 # 一次性排查产物：临时补丁脚本与构建/断言日志（不入库）
-_p*.py
-_patch*.py
+_*.py
 *-log.txt
