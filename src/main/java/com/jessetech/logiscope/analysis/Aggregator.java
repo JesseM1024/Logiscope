@@ -96,6 +96,37 @@ public final class Aggregator {
         return m;
     }
 
+    /**
+     * 数据目标的合并（第十二轮③）：与 {@link #combine} 同为"同名求和"，但**保留 0 与负数**。
+     *
+     * 为什么不能复用 {@code combine}：那是物品语义——数量 ≤ 0 的格子是"空"，
+     * 直接跳过；而 NBT 里取的数（能量、流体量）**0 是真实读数**，某些量还可能为负。
+     * 把 0 丢掉 = 编造"这一刻没观测到"，违反本工具的数据保真底线。
+     *
+     * 调用约定：入参里**没有**需要跳过的条目（读不到的目标在调用侧已剔除），
+     * 所以本方法不产生 air 占位、不跳过任何条目。
+     *
+     * @return 产出的条目数（同名合并后）
+     */
+    public static int combineAll(String[] ids, int[] counts, int n,
+                                 String[] outIds, int[] outCounts) {
+        int len = Math.min(n, Math.min(ids.length, counts.length));
+        int cap = Math.min(outIds.length, outCounts.length);
+        int m = 0;
+        for (int i = 0; i < len; i++) {
+            String id = ids[i];
+            int at = indexOf(outIds, m, id);
+            if (at >= 0) {
+                outCounts[at] += counts[i];
+            } else if (m < cap) {
+                outIds[m] = id;
+                outCounts[m] = counts[i];
+                m++;
+            }
+        }
+        return m;
+    }
+
     private static int indexOf(String[] a, int len, String v) {
         for (int i = 0; i < len; i++) {
             if (a[i].equals(v)) {
