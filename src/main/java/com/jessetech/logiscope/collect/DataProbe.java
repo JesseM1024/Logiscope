@@ -2,10 +2,13 @@ package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.Snbt;
+import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.bind.DataTarget;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.DoubleTag;
+import net.minecraft.nbt.FloatTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NumericTag;
 import net.minecraft.nbt.StringTag;
@@ -32,11 +35,14 @@ import java.util.List;
  */
 public final class DataProbe {
 
-    /** 按路径取数值。null = 没有方块实体 / 路径不存在 / 那个值不是数字 */
+    /**
+     * 按路径取数值（**自适应**：NBT 的 byte/short/int/long 走精确 long，
+     * float/double 走 double）。null = 没有方块实体 / 路径不存在 / 非数字。
+     */
     @Nullable
-    public Double readNumber(ServerLevel level, DataTarget target) {
+    public Val readNumber(ServerLevel level, DataTarget target) {
         Tag tag = navigate(readRoot(level, target.pos()), Snbt.parsePath(target.valuePath()));
-        return asDouble(tag);
+        return asVal(tag);
     }
 
     /**
@@ -134,12 +140,19 @@ public final class DataProbe {
         return cur;
     }
 
-    /** 数值标签 → double（byte/short/int/long/float/double 都算数字） */
+    /**
+     * 数值标签 → 自适应值。★ 整数标签走 long（精确）★：
+     * 2^63 的能量读数经 double 会丢精度（2^53 以上），所以必须按标签类型分流，
+     * 这正是"追踪创造能量立方"那条实测需求的根。
+     */
     @Nullable
-    public static Double asDouble(@Nullable Tag tag) {
-        if (tag instanceof NumericTag n) {
-            return n.getAsDouble();
+    public static Val asVal(@Nullable Tag tag) {
+        if (!(tag instanceof NumericTag n)) {
+            return null;
         }
-        return null;
+        if (tag instanceof FloatTag || tag instanceof DoubleTag) {
+            return Val.of(n.getAsDouble());
+        }
+        return Val.of(n.getAsLong());
     }
 }

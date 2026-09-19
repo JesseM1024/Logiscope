@@ -105,8 +105,8 @@ public class BenchRender {
         List<SeriesPoint> b = shapeNoisy();
         List<SeriesPoint> out = new ArrayList<>(a.size());
         for (int i = 0; i < a.size() && i < b.size(); i++) {
-            out.add(new SeriesPoint(a.get(i).tick(),
-                    i % 2 == 0 ? a.get(i).count() : b.get(i).count() / 1000, a.get(i).breakBefore()));
+            long v = i % 2 == 0 ? a.get(i).value().i() : b.get(i).value().i() / 1000;
+            out.add(new SeriesPoint(a.get(i).tick(), v, a.get(i).breakBefore()));
         }
         return out;
     }
@@ -151,7 +151,7 @@ public class BenchRender {
     private static int[] runOnce(WaveColumns cols, RectRuns out, List<SeriesPoint> pts,
                                  int lo, int span) {
         cols.emit(pts, 0, WINDOW_TICKS, PLOT_W, 0,
-                v -> clampY(v, lo, span), v -> clampY((int) Math.round(v), lo, span), out);
+                v -> clampY((int) Math.round(v), lo, span), out);
         return new int[]{out.size(), out.pushes(), cols.lastColumns()};
     }
 
@@ -164,8 +164,8 @@ public class BenchRender {
         int lo = Integer.MAX_VALUE;
         int hi = Integer.MIN_VALUE;
         for (SeriesPoint p : pts) {
-            lo = Math.min(lo, p.count());
-            hi = Math.max(hi, p.count());
+            lo = Math.min(lo, (int) p.value().asDouble());
+            hi = Math.max(hi, (int) p.value().asDouble());
         }
         return new int[]{lo, hi};
     }

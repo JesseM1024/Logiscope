@@ -740,3 +740,33 @@ CODE-REVIEW 标注 8 条已修；VERIFY 重建为第十六轮⑤（A–F 组）�
 （新纯类 `analysis/Val`：整数用 long 保持"读数精确"，小数/超长用 double；渲染走 `asDouble()`
 保住热路径零分配；存档向后兼容）。判定：**不是"顺手"能改的**（10 个文件、60~80 处，
 且压着热路径与存档格式），按用户"不好一起搞就下一轮"的意见排下一轮第一位。
+
+### ① 提示排版（用户指定，第十六轮⑥）
+
+面板上方的临时提示：内容宽度**定死为面板宽度**、自动换行、**最后一行贴着面板顶**。
+- 折行是**逐字符**的（中文没有空格，按词折会失败）；行内若已有空格则优先在最近的空格断。
+- 顶上放不下（面板贴屏幕顶）→ 整块挪到面板下方，首行贴面板底（与旧"挪下去"一致，只是从一行变整块）。
+- 折行结果按文本缓存：提示每帧都要画，逐字符算宽度不能每帧来一遍。
+
+### ② 自适应数值类型 Val（G1 落地，契约 CP26）
+
+新纯类 `analysis/Val`：**能精确用整数表示就用 long（integral），否则用 double**；
+两份并存（`i`/`d` 互为影子），画图/统计一律走 `asDouble()`（零分配），读数走整数形式（精确）。
+贯通：`Sample` → `Aggregator` → `SeriesPoint`/`Series`/`ChartData` → `CurveMath` →
+`WaveColumns`/`ChartRenderer` → `ArchiveFormat` → `DataProbe`/`ProbeInstance` → `ScopeScreen`。
+
+**四个坑（都已断言钉住）**：
+- **读取按 NBT 标签类型分流**：byte/short/int/long 走 `Val.of(long)` —— 2^63 才能精确画；
+  float/double 走 `Val.of(double)`；非有限 → null（读不到，不造 0）。
+- **渲染只走 `asDouble()`**：`WaveColumns` 列缓冲改 `double[]`、`emit` 的双 yOf 合并成一个
+  double 版 —— 热路径零分配不变（Val 逐列新建对象就是每帧几百次分配，禁止）。
+- **求和溢出回退不能走 `of(double)`**：它的规范化会把 2^63 折回 `Long.MAX_VALUE`，
+  把溢出悄悄抹掉；必须直接构造非整数形式。
+- **存档向后兼容**：整数 `n` / 小数 `d` 双字段；旧文件只有 `n`（`getAsLong` 读）。
+
+**顺带的行为改进**：平均值不再截断（旧 `(int)(sum/n)` 把 15.67 砍成 15）；
+CSV 里整数原样（64 而不是 64.0）、小数用 double 字面量；
+顺带删掉 ChartRenderer 的三段死代码（`colOf`/`vline`/`vlineF`，审查 P3 已记录）。
+
+**离线**：build / TestChart 376 → **398 条**（t37：形式与规范化、NaN/∞ 拒绝、溢出回退、
+2^63 全链路、小数系列、存档往返）/ BenchRender（降幅不变）/ verify-jar 全过。

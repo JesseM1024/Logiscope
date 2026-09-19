@@ -7,6 +7,7 @@ import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
+import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.SlotAlign;
@@ -450,6 +451,9 @@ public final class ScopeScreen extends Screen {
 
     private String flash = "";
     private long flashUntil;
+    /** 提示折行后的行（按 {@link #flash} 缓存：文本没变就不重算） */
+    private List<String> flashLines = List.of();
+    private String flashWrappedFrom = null;
 
     @Nullable
     private final Screen parent;
@@ -1502,8 +1506,9 @@ public final class ScopeScreen extends Screen {
             if (ioShown.contains(t.itemId())) {
                 Series s = chartData.byItem(t.itemId());
                 if (s != null && s.hasFlow()) {
-                    int f = s.lastFlow();
-                    sb.append(" [").append(f > 0 ? "+" + f : String.valueOf(f)).append("/t]");
+                    Val f = s.lastFlow();
+                    String txt = ChartRenderer.fmtExact(f);
+                    sb.append(" [").append(f.compareTo(Val.ZERO) > 0 ? "+" + txt : txt).append("/t]");
                 }
             }
             shown++;
@@ -2043,6 +2048,15 @@ public final class ScopeScreen extends Screen {
         return v > 0 ? "+" + fmtNum(v) : fmtNum(v);
     }
 
+    /** 自适应数值的读数：整数精确打印，小数走短格式 */
+    private static String fmtNum(Val v) {
+        return v.isIntegral() ? Long.toString(v.i()) : fmtNum(v.d());
+    }
+
+    private static String signedNum(Val v) {
+        return v.compareTo(Val.ZERO) > 0 ? "+" + fmtNum(v) : fmtNum(v);
+    }
+
     private void renderChip(GuiGraphics g, Chip c, int mouseX, int mouseY, boolean hover, int accent) {
         int bg = !c.enabled() ? 0xFF1A1A22 : (hover ? 0xFF41415A : 0xFF2A2A38);
         int border = !c.enabled() ? 0xFF2A2A34 : (hover ? 0xFF8A8AC8 : 0xFF4A4A5E);
@@ -2077,18 +2091,68 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** 面板上/下方的一句临时提示（"已清空"这类操作反馈） */
+    /**
+     * 面板上/下方的一句临时提示（"已清空"这类操作反馈）。
+     *
+     * ★ 排版规则（第十六轮⑥，用户指定）★
+     * 内容宽度**定死为面板宽度**、自动换行、**最后一行贴着面板顶** ——
+     * 旧实现是"单行 + 按文字宽度居中"，提示一长（本轮的"超出可绘制范围"就是长句）
+     * 就横着冒出面板。现在整块宽度 = panelW、逐字符折行（中文没有空格，按词折会失败），
+     * 块的最后一行贴在面板顶上；顶上放不下（面板贴着屏幕顶）就把整块挪到面板下方，
+     * 首行贴着面板底 —— 与旧逻辑的"挪下去"一致，只是从一行变成了整块。
+     * 折行结果按文本缓存：提示每帧都要画，逐字符算宽度不能每帧来一遍。
+     */
     private void renderFlash(GuiGraphics g, int panelTop) {
         if (flash.isEmpty() || System.currentTimeMillis() > flashUntil) {
             return;
         }
-        int w = this.font.width(flash);
-        int boxW = w + 8;
-        int x = panelX + (panelW - boxW) / 2;
-        // 面板贴着屏幕顶时（默认位置就是右上角），把提示挪到面板下方，别画到屏幕外
-        int boxY = panelTop - 13 >= 0 ? panelTop - 13 : panelTop + panelH + 2;
-        g.fill(x, boxY, x + boxW, boxY + 12, 0xE0202030);
-        g.drawString(this.font, flash, x + 4, boxY + 2, 0xFFE6E6F0, false);
+        if (!flash.equals(flashWrappedFrom)) {
+            flashLines = wrapText(flash, panelW - 8);
+            flashWrappedFrom = flash;
+        }
+        int lineH = this.font.lineHeight;
+        int blockH = flashLines.size() * lineH + 4;
+        boolean above = panelTop - blockH >= 0;
+        int x = panelX;
+        int y0 = above ? panelTop - blockH : panelTop + panelH + 2;
+        g.fill(x, y0, x + panelW, y0 + blockH, 0xE0202030);
+        for (int i = 0; i < flashLines.size(); i++) {
+            g.drawString(this.font, flashLines.get(i), x + 4, y0 + 2 + i * lineH, 0xFFE6E6F0, false);
+        }
+    }
+
+    /**
+     * 按像素宽度折行：优先在最近的空格处断（英文），整段没有空格（中文）就按字符断。
+     * 提示文本很短，O(n²) 的宽度计算无所谓；但调用频率必须压到"文本变了才算一次"。
+     */
+    private List<String> wrapText(String text, int maxW) {
+        List<String> out = new ArrayList<>();
+        String cur = "";
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if (c == '\n') {
+                out.add(cur);
+                cur = "";
+                continue;
+            }
+            String next = cur + c;
+            if (this.font.width(next) > maxW && !cur.isEmpty()) {
+                int sp = cur.lastIndexOf(' ');
+                if (sp > 0) {
+                    out.add(cur.substring(0, sp));
+                    cur = cur.substring(sp + 1) + c;
+                } else {
+                    out.add(cur);
+                    cur = String.valueOf(c);
+                }
+            } else {
+                cur = next;
+            }
+        }
+        if (!cur.isEmpty() || out.isEmpty()) {
+            out.add(cur);
+        }
+        return out;
     }
 
     private void say(String text) {

@@ -39,6 +39,7 @@ import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.Series;
+import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.ArchiveFormat;
@@ -92,6 +93,7 @@ public class TestChart {
             System.out.println("  FAIL t35 抛异常: " + e);
         }
         t36NumberGuards();
+        t37Val();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -122,7 +124,7 @@ public class TestChart {
         eq("首 tick", 10L, d.firstTick());
         eq("末 tick", 14L, d.lastTick());
         eq("铁线的范围", "1..9", d.series().get(0).min() + ".." + d.series().get(0).max());
-        eq("最后读到的铁数量", 9, d.series().get(0).lastCount());
+        eq("最后读到的铁数量", 9, d.series().get(0).lastCount().asDouble(), 1e-9);
     }
 
     // 2) 换物品那一点必须断开（从 64 个铁变成 1 个铜，差值 -63 没有物理意义）
@@ -215,7 +217,7 @@ public class TestChart {
         eq("两条线：铁 + 空", 2, d.series().size());
         Series air = d.byItem(Sample.EMPTY_ITEM);
         yes("空格子那条线存在", air != null);
-        eq("空格子数量恒为 0", 0, air.max());
+        eq("空格子数量恒为 0", 0, air.max().asDouble(), 1e-9);
         yes("被识别为空格子线", air.isEmptyItem());
         eq("空格子线有 2 个点", 2, air.points().size());
     }
@@ -234,9 +236,9 @@ public class TestChart {
         eq("区间内只有铁", 1, r.size());
         ChartData.SeriesRange iron = r.get(0);
         eq("区间内采样点数", 5, iron.samples());
-        eq("区间首值", 20, iron.first());
-        eq("区间末值", 60, iron.last());
-        eq("净变化", 40, iron.delta());
+        eq("区间首值", 20, iron.first().asDouble(), 1e-9);
+        eq("区间末值", 60, iron.last().asDouble(), 1e-9);
+        eq("净变化", 40, iron.delta().asDouble(), 1e-9);
         eq("区间极值", "20..60", iron.min() + ".." + iron.max());
 
         List<ChartData.SeriesRange> all = d.ranges(0, 1000);
@@ -249,15 +251,15 @@ public class TestChart {
                 new Sample(1, "minecraft:iron_ingot", 3),
                 new Sample(2, "minecraft:iron_ingot", 71));
         ChartData d = ChartData.build(1L, s);
-        eq("全局最小", 3, d.minValue());
-        eq("全局最大", 71, d.maxValue());
+        eq("全局最小", 3, d.minValue().asDouble(), 1e-9);
+        eq("全局最大", 71, d.maxValue().asDouble(), 1e-9);
         yes("有数据", d.hasData());
 
         List<Sample> only = List.of(Sample.noData(1), Sample.noData(2));
         ChartData n = ChartData.build(2L, only);
         no("全 no_data 时 hasData 为假", n.hasData());
-        eq("全 no_data 时 min 归零而不是 MAX_VALUE", 0, n.minValue());
-        eq("全 no_data 时 max 归零", 0, n.maxValue());
+        eq("全 no_data 时 min 归零而不是 MAX_VALUE", 0, n.minValue().asDouble(), 1e-9);
+        eq("全 no_data 时 max 归零", 0, n.maxValue().asDouble(), 1e-9);
         eq("时间轴仍在推进", 2L, n.lastTick());
 
         ChartData e = ChartData.build(3L, List.of());
@@ -271,19 +273,19 @@ public class TestChart {
     private static void t8AggregateSameItem() {
         List<Aggregator.Totals> r = Aggregator.combine(
                 List.of("minecraft:iron_ingot", "minecraft:iron_ingot", "minecraft:iron_ingot"),
-                List.of(64, 16, 1));
+                List.of(Val.of(64), Val.of(16), Val.of(1)));
         eq("同物品：只出一条", 1, r.size());
         eq("同物品：类目不变", "minecraft:iron_ingot", r.get(0).itemId());
-        eq("同物品：数量相加", 81, r.get(0).count());
+        eq("同物品：数量相加", 81, r.get(0).count().asDouble(), 1e-9);
         no("不是空", r.get(0).empty());
 
         // 空槽位（count=0）不参与判定，但也不影响总数
         List<Aggregator.Totals> r2 = Aggregator.combine(
                 List.of("minecraft:iron_ingot", Sample.EMPTY_ITEM),
-                List.of(32, 0));
+                List.of(Val.of(32), Val.of(0)));
         eq("带一个空格子：仍是一条", 1, r2.size());
         eq("带一个空格子：仍是铁", "minecraft:iron_ingot", r2.get(0).itemId());
-        eq("带一个空格子：数量不变", 32, r2.get(0).count());
+        eq("带一个空格子：数量不变", 32, r2.get(0).count().asDouble(), 1e-9);
     }
 
     // 9) ★ 本轮语义修正的核心 ★
@@ -292,20 +294,20 @@ public class TestChart {
     private static void t9AggregateDifferentItemsStaySeparate() {
         List<Aggregator.Totals> r = Aggregator.combine(
                 List.of("minecraft:iron_ingot", "minecraft:copper_ingot"),
-                List.of(64, 1));
+                List.of(Val.of(64), Val.of(1)));
         eq("两种物品 → 两条", 2, r.size());
         eq("第一条是铁", "minecraft:iron_ingot", r.get(0).itemId());
-        eq("铁 64", 64, r.get(0).count());
+        eq("铁 64", 64, r.get(0).count().asDouble(), 1e-9);
         eq("第二条是铜", "minecraft:copper_ingot", r.get(1).itemId());
-        eq("铜 1", 1, r.get(1).count());
+        eq("铜 1", 1, r.get(1).count().asDouble(), 1e-9);
 
         // 同种物品分散在不相邻的格子里，也要合并到同一条
         List<Aggregator.Totals> r2 = Aggregator.combine(
                 List.of("minecraft:iron_ingot", "minecraft:copper_ingot", "minecraft:iron_ingot"),
-                List.of(10, 5, 20));
+                List.of(Val.of(10), Val.of(5), Val.of(20)));
         eq("分散的铁合并成一条：共两条", 2, r2.size());
-        eq("铁 = 10 + 20", 30, r2.get(0).count());
-        eq("铜 = 5", 5, r2.get(1).count());
+        eq("铁 = 10 + 20", 30, r2.get(0).count().asDouble(), 1e-9);
+        eq("铜 = 5", 5, r2.get(1).count().asDouble(), 1e-9);
         eq("顺序 = 首次出现顺序", "minecraft:iron_ingot", r2.get(0).itemId());
 
         // 不能出现任何"混合"这种合成 id
@@ -317,10 +319,10 @@ public class TestChart {
     // 10) 退化情形：全空 / 零长度 / 输出缓冲复用
     private static void t10AggregateDegenerate() {
         List<Aggregator.Totals> allEmpty = Aggregator.combine(
-                List.of(Sample.EMPTY_ITEM, Sample.EMPTY_ITEM), List.of(0, 0));
+                List.of(Sample.EMPTY_ITEM, Sample.EMPTY_ITEM), List.of(Val.of(0), Val.of(0)));
         eq("全空 → 仍出一条（那条灰蓝的空槽线）", 1, allEmpty.size());
         eq("全空 → air", Sample.EMPTY_ITEM, allEmpty.get(0).itemId());
-        eq("全空 → 0", 0, allEmpty.get(0).count());
+        eq("全空 → 0", 0, allEmpty.get(0).count().asDouble(), 1e-9);
         yes("全空 empty() 为真", allEmpty.get(0).empty());
 
         List<Aggregator.Totals> none = Aggregator.combine(List.of(), List.of());
@@ -329,21 +331,21 @@ public class TestChart {
 
         // 数组版本与 List 版本必须完全一致（采集层每 tick 走的是数组版本）
         String[] ids = {"minecraft:iron_ingot", "minecraft:gold_ingot"};
-        int[] counts = {5, 7};
+        Val[] counts = {Val.of(5), Val.of(7)};
         String[] outIds = new String[4];
-        int[] outCounts = new int[4];
+        Val[] outCounts = new Val[4];
         int m = Aggregator.combine(ids, counts, 2, outIds, outCounts);
-        List<Aggregator.Totals> lst = Aggregator.combine(List.of(ids[0], ids[1]), List.of(5, 7));
+        List<Aggregator.Totals> lst = Aggregator.combine(List.of(ids[0], ids[1]), List.of(Val.of(5), Val.of(7)));
         eq("数组版条目数", lst.size(), m);
         eq("数组版类目一致", lst.get(0).itemId(), outIds[0]);
-        eq("数组版数量一致", lst.get(0).count(), outCounts[0]);
+        eq("数组版数量一致", lst.get(0).count().asDouble(), outCounts[0].asDouble(), 1e-9);
         eq("数组版第二条类目一致", lst.get(1).itemId(), outIds[1]);
 
         // 输出缓冲是复用的：连续调两次不能残留上一次的内容
-        int m2 = Aggregator.combine(new String[]{"minecraft:stone"}, new int[]{3}, 1, outIds, outCounts);
+        int m2 = Aggregator.combine(new String[]{"minecraft:stone"}, new Val[]{Val.of(3)}, 1, outIds, outCounts);
         eq("复用缓冲：第二次只有一条", 1, m2);
         eq("复用缓冲：内容正确", "minecraft:stone", outIds[0]);
-        eq("复用缓冲：数量正确", 3, outCounts[0]);
+        eq("复用缓冲：数量正确", 3, outCounts[0].asDouble(), 1e-9);
     }
 
     // ---- 第十轮：一个 tick 多条样本时的断点规则（per-series） ----
@@ -426,12 +428,12 @@ public class TestChart {
         Analyzer.Summary sum = Analyzer.summarize(s);
         eq("有数据的 tick 数", 3, sum.dataTicks());
         eq("no-data 的 tick 数", 1, sum.noDataTicks());
-        eq("总存量最小值（7）", 7, sum.min());
-        eq("总存量最大值（25）", 25, sum.max());
-        eq("平均 (15+25+7)/3 = 15", 15, sum.average());
-        eq("首 tick 总存量", 15, sum.first());
-        eq("末 tick 总存量", 7, sum.last());
-        eq("净变化", -8, sum.netChange());
+        eq("总存量最小值（7）", 7, sum.min().asDouble(), 1e-9);
+        eq("总存量最大值（25）", 25, sum.max().asDouble(), 1e-9);
+        eq("平均 (15+25+7)/3 = 15.67（不再截断）", 47.0 / 3, sum.average().asDouble(), 1e-9);
+        eq("首 tick 总存量", 15, sum.first().asDouble(), 1e-9);
+        eq("末 tick 总存量", 7, sum.last().asDouble(), 1e-9);
+        eq("净变化", -8, sum.netChange().asDouble(), 1e-9);
         eq("出现最多的物品", "minecraft:iron_ingot", sum.dominantItem());
     }
 
@@ -474,10 +476,10 @@ public class TestChart {
         Analyzer.Summary sum = Analyzer.summarize(s);
         eq("有数据的 tick 只有 2 个", 2, sum.dataTicks());
         eq("no-data 只数真读失败的（gap 不算）", 1, sum.noDataTicks());
-        eq("min 只看数据", 10, sum.min());
-        eq("max 只看数据", 30, sum.max());
-        eq("avg = (10+30)/2", 20, sum.average());
-        eq("净变化 = 30 - 10", 20, sum.netChange());
+        eq("min 只看数据", 10, sum.min().asDouble(), 1e-9);
+        eq("max 只看数据", 30, sum.max().asDouble(), 1e-9);
+        eq("avg = (10+30)/2", 20, sum.average().asDouble(), 1e-9);
+        eq("净变化 = 30 - 10", 20, sum.netChange().asDouble(), 1e-9);
     }
 
     // 17) 多格聚合下某一种物品被抽空 → 它那条线断（但别的线不受影响）
@@ -536,7 +538,7 @@ public class TestChart {
         small.add(new Sample(3, "minecraft:iron_ingot", 3));
         small.add(new Sample(4, "minecraft:iron_ingot", 4));
         eq("覆盖后只剩最新一条", 1, small.latestTick().size());
-        eq("覆盖后是新值", 4, small.latestTick().get(0).count());
+        eq("覆盖后是新值", 4, small.latestTick().get(0).value().asDouble(), 1e-9);
     }
 
     // ---- 第十轮第五次修复：单 tick IO（净流量） ----
@@ -550,12 +552,12 @@ public class TestChart {
                 new Sample(3, "minecraft:iron_ingot", 12));
         Series a = ChartData.build(1L, up).byItem("minecraft:iron_ingot");
         eq("首格没有流量（没有上一格）", 2, a.flow().size());
-        eq("第二格 +4", 4, a.flow().get(0).count());
-        eq("第三格 -2（流出）", -2, a.flow().get(1).count());
+        eq("第二格 +4", 4, a.flow().get(0).value().asDouble(), 1e-9);
+        eq("第三格 -2（流出）", -2, a.flow().get(1).value().asDouble(), 1e-9);
         yes("流量的第一个点是段起点", a.flow().get(0).breakBefore());
         no("后面接着", a.flow().get(1).breakBefore());
         eq("流量范围（含负数）", "-2..4", a.flowMin() + ".." + a.flowMax());
-        eq("最近一次流量", -2, a.lastFlow());
+        eq("最近一次流量", -2, a.lastFlow().asDouble(), 1e-9);
 
         // 中间少观测一格（1 → 2 → 4）：存量线连着，但那一格的流量归不出来
         List<Sample> sparse = List.of(
@@ -566,8 +568,8 @@ public class TestChart {
         Series b = ChartData.build(2L, sparse).byItem("minecraft:iron_ingot");
         eq("存量线不断（4 个点）", 4, b.points().size());
         eq("流量只有 2 个点（跨格那两格没有流量）", 2, b.flow().size());
-        eq("第一段流量 +1", 1, b.flow().get(0).count());
-        eq("第二段流量 +1（tick 5）", 1, b.flow().get(1).count());
+        eq("第一段流量 +1", 1, b.flow().get(0).value().asDouble(), 1e-9);
+        eq("第二段流量 +1（tick 5）", 1, b.flow().get(1).value().asDouble(), 1e-9);
         yes("跨格之后的新段起点", b.flow().get(1).breakBefore());
 
         // no_data / gap 之后同样没有流量
@@ -578,7 +580,7 @@ public class TestChart {
                 new Sample(4, "minecraft:iron_ingot", 20));
         Series c = ChartData.build(3L, broken).byItem("minecraft:iron_ingot");
         eq("断档后不产生流量", 1, c.flow().size());
-        eq("断档前那格 +2", 2, c.flow().get(0).count());
+        eq("断档前那格 +2", 2, c.flow().get(0).value().asDouble(), 1e-9);
     }
 
     // 20) 已删除：框选区间的流入 / 流出合计。UI 不再显示 in/out（Δ 已经表达同一件事），
@@ -599,7 +601,7 @@ public class TestChart {
         eq("画的是首次出现的那种", "minecraft:iron_ingot", cap1.series().get(0).itemId());
         eq("未显示的种类数", 2, cap1.droppedKinds());
         eq("数据照样全记（3 tick 里 5 条样本）", 5, cap1.dataCount());
-        eq("全局最大值仍然包含未显示的种类", 100, cap1.maxValue());
+        eq("全局最大值仍然包含未显示的种类", 100, cap1.maxValue().asDouble(), 1e-9);
 
         ChartData capAll = ChartData.build(2L, s, 256);
         eq("上限够大时三种都画", 3, capAll.series().size());
@@ -620,7 +622,7 @@ public class TestChart {
         st.resize(2);
         eq("缩小后容量", 2, st.capacity());
         eq("缩小后保留 2 条", 2, st.size());
-        eq("保留的是最新的两条", "3..4", st.toList().get(0).count() + ".." + st.toList().get(1).count());
+        eq("保留的是最新的两条", "3..4", st.toList().get(0).value().i() + ".." + st.toList().get(1).value().i());
         yes("版本号变了（界面会重算）", st.version() != v0);
 
         st.resize(6);
@@ -628,11 +630,11 @@ public class TestChart {
         eq("放大后条数不变", 2, st.size());
         st.add(new Sample(5, "minecraft:iron_ingot", 5));
         eq("继续可写", 3, st.size());
-        eq("最新一条", 5, st.latestTick().get(0).count());
+        eq("最新一条", 5, st.latestTick().get(0).value().asDouble(), 1e-9);
 
         st.resize(2);
         eq("再缩小仍然只留最新", 2, st.size());
-        eq("最新还是那两条", "4..5", st.toList().get(0).count() + ".." + st.toList().get(1).count());
+        eq("最新还是那两条", "4..5", st.toList().get(0).value().i() + ".." + st.toList().get(1).value().i());
     }
 
     // 23) 波形标记（G4）：升序 / 同 tick 去重 / 删除
@@ -688,7 +690,7 @@ public class TestChart {
             eq("samples 往返 4 条", 4, back.samples().size());
             eq("数据样本往返", "100,minecraft:iron_ingot,64",
                     back.samples().get(0).tick() + "," + back.samples().get(0).itemId()
-                            + "," + back.samples().get(0).count());
+                            + "," + back.samples().get(0).value().i());
             yes("no_data 往返保种类", back.samples().get(1).isNoData());
             yes("gap 往返保种类", back.samples().get(3).isGap());
         }
@@ -716,9 +718,9 @@ public class TestChart {
         eq("var 0.56", 0.56, st.var(), 1e-9);
 
         CurveMath.TotalChange t = CurveMath.totalChange(q);
-        eq("上升 +2", 2L, t.rise());
-        eq("下降 0", 0L, t.fall());
-        eq("合计 Δ+2 == 首尾差", 2L, t.net());
+        eq("上升 +2", 2, t.rise().asDouble(), 1e-9);
+        eq("下降 0", 0, t.fall().asDouble(), 1e-9);
+        eq("合计 Δ+2 == 首尾差", 2, t.net().asDouble(), 1e-9);
         eq("无断档", 0, t.gaps());
 
         CurveMath.Events ev = CurveMath.changeEvents(q);
@@ -735,9 +737,9 @@ public class TestChart {
                 new SeriesPoint(5, 20, true),    // 断档
                 new SeriesPoint(6, 18, false));
         CurveMath.TotalChange bt = CurveMath.totalChange(broken);
-        eq("断档段：上升 +2（t1→t2）", 2L, bt.rise());
-        eq("断档段：下降 -2（t5→t6）", -2L, bt.fall());
-        eq("断档段：跨档的 +8 不计入", 0L, bt.net() - (bt.rise() + bt.fall()));
+        eq("断档段：上升 +2（t1→t2）", 2, bt.rise().asDouble(), 1e-9);
+        eq("断档段：下降 -2（t5→t6）", -2, bt.fall().asDouble(), 1e-9);
+        eq("断档段：跨档的 +8 不计入", 0, bt.net().asDouble() - (bt.rise().asDouble() + bt.fall().asDouble()), 1e-9);
         eq("断档 1 处", 1, bt.gaps());
 
         CurveMath.Events bev = CurveMath.changeEvents(broken);
@@ -756,9 +758,9 @@ public class TestChart {
                 new SeriesPoint(5, -10, false),  // -10
                 new SeriesPoint(8, 30, true));   // 中途断档后又接上：这一笔 Δ 同样成立
         CurveMath.TotalChange ft = CurveMath.flowTotal(flow);
-        eq("IO 上升 +158（64+64+30 全算）", 158L, ft.rise());
-        eq("IO 下降 -10", -10L, ft.fall());
-        eq("IO 净 +148", 148L, ft.net());
+        eq("IO 上升 +158（64+64+30 全算）", 158, ft.rise().asDouble(), 1e-9);
+        eq("IO 下降 -10", -10, ft.fall().asDouble(), 1e-9);
+        eq("IO 净 +148", 148, ft.net().asDouble(), 1e-9);
         eq("IO 缺口 1 处（只有 t8 前那次断）", 1, ft.gaps());
 
         CurveMath.Events fev = CurveMath.flowEvents(flow);
@@ -862,27 +864,27 @@ public class TestChart {
     private static void t28CombineAll() {
         // 两个罐同一物品：5000 + 3000 必须合并成一条 8000（否则图表震荡）
         String[] ids = {"mekanism:ethene", "mekanism:ethene"};
-        int[] counts = {5000, 3000};
+        Val[] counts = {Val.of(5000), Val.of(3000)};
         String[] outIds = new String[4];
-        int[] outCounts = new int[4];
+        Val[] outCounts = new Val[4];
         int m = Aggregator.combineAll(ids, counts, 2, outIds, outCounts);
         eq("同名合并成 1 条", 1, m);
-        eq("求和 8000", 8000, outCounts[0]);
+        eq("求和 8000", 8000, outCounts[0].asDouble(), 1e-9);
 
         // 0 与负数是真实读数，必须保留（combine 会把它们当"空格子"丢掉）
         String[] ids2 = {"energy", "energy", "tank"};
-        int[] counts2 = {0, 0, -5};
+        Val[] counts2 = {Val.of(0), Val.of(0), Val.of(-5)};
         int m2 = Aggregator.combineAll(ids2, counts2, 3, outIds, outCounts);
         eq("零值保留（合并为 0）+ 负值独立成条", 2, m2);
-        eq("energy 合计 0", 0, outCounts[0]);
-        eq("tank -5", -5, outCounts[1]);
+        eq("energy 合计 0", 0, outCounts[0].asDouble(), 1e-9);
+        eq("tank -5", -5, outCounts[1].asDouble(), 1e-9);
 
         // 与 combine 的行为差异：同样输入，combine 会丢掉 ≤0
         String[] outIds3 = new String[4];
-        int[] outCounts3 = new int[4];
+        Val[] outCounts3 = new Val[4];
         int m3 = Aggregator.combine(ids2, counts2, 3, outIds3, outCounts3);
         eq("对照：combine 全跳过 → air 占位", 1, m3);
-        eq("对照：combine 产出 air x0", 0, outCounts3[0]);
+        eq("对照：combine 产出 air x0", 0, outCounts3[0].asDouble(), 1e-9);
     }
 
 
@@ -916,7 +918,7 @@ public class TestChart {
         }
         WaveColumns wc = new WaveColumns();
         RectRuns out = new RectRuns();
-        wc.emit(flat, 0, 1200, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), out);
+        wc.emit(flat, 0, 1200, 700, 0, v -> (int) Math.round(100 - v), out);
         eq("常数序列：700 列合并成 1 个矩形", 1, out.size());
         eq("常数序列：合并前是 1399（700 列 + 699 连接）", 1399, out.pushes());
         eq("列数", 700, wc.lastColumns());
@@ -927,7 +929,7 @@ public class TestChart {
             two.add(new SeriesPoint(t, t < 600 ? 500 : 600, t == 0));
         }
         RectRuns o2 = new RectRuns();
-        wc.emit(two, 0, 1200, 700, 0, v -> 100 - (v - 500), v -> (int) Math.round(100 - (v - 500)), o2);
+        wc.emit(two, 0, 1200, 700, 0, v -> (int) Math.round(100 - (v - 500)), o2);
         eq("两段台阶 → 3 个矩形（两段底 + 一条跳变）", 3, o2.size());
 
         // ---- 断档不连线：breakBefore 处线是断的 ----
@@ -937,7 +939,7 @@ public class TestChart {
                 new SeriesPoint(2, 20, true),    // 断档
                 new SeriesPoint(3, 20, false));
         RectRuns o3 = new RectRuns();
-        wc.emit(broken, 0, 3, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), o3);
+        wc.emit(broken, 0, 3, 700, 0, v -> (int) Math.round(100 - v), o3);
         eq("断档处不产生连接矩形（2 段各 1 条）", 2, o3.size());
 
         // ---- 同一列里的尖峰：取 min-max，竖条覆盖整段（不能被平均掉）----
@@ -946,7 +948,7 @@ public class TestChart {
         spike.add(new SeriesPoint(0, 64, false));    // 同一列（同 tick）的两个值
         spike.add(new SeriesPoint(1, 0, false));
         RectRuns o4 = new RectRuns();
-        wc.emit(spike, 0, 1, 700, 0, v -> 100 - v, v -> (int) Math.round(100 - v), o4);
+        wc.emit(spike, 0, 1, 700, 0, v -> (int) Math.round(100 - v), o4);
         boolean covered = false;
         for (int i = 0; i < o4.size(); i++) {
             if (o4.y0(i) <= 36 && o4.y1(i) >= 101) {
@@ -1025,12 +1027,12 @@ public class TestChart {
 
         // 两格合计 = 10（采样的合并求和；Aggregator.combineAll 已在 t28 钉死）
         String[] ids = {"minecraft:cobblestone", "minecraft:cobblestone"};
-        int[] counts = {cobble.get(0).count(), cobble.get(1).count()};
+        Val[] counts = {Val.of(cobble.get(0).count()), Val.of(cobble.get(1).count())};
         String[] outIds = new String[4];
-        int[] outCounts = new int[4];
+        Val[] outCounts = new Val[4];
         int m = Aggregator.combineAll(ids, counts, 2, outIds, outCounts);
         eq("两格合并成一条", 1, m);
-        eq("合计 10", 10, outCounts[0]);
+        eq("合计 10", 10, outCounts[0].asDouble(), 1e-9);
     }
 
 
@@ -1144,14 +1146,14 @@ public class TestChart {
         yes("首流量点带渲染断线标记", s.flow().get(0).breakBefore());
 
         CurveMath.TotalChange ft = CurveMath.flowTotal(s.flow());
-        eq("IO 上升 = 4（不再被吞）", 4L, ft.rise());
-        eq("IO 下降 = -2", -2L, ft.fall());
+        eq("IO 上升 = 4（不再被吞）", 4, ft.rise().asDouble(), 1e-9);
+        eq("IO 下降 = -2", -2, ft.fall().asDouble(), 1e-9);
         eq("IO 缺口 = 0（不再谎报）", 0, ft.gaps());
-        eq("IO 净变化 = +2", 2L, ft.net());
+        eq("IO 净变化 = +2", 2, ft.net().asDouble(), 1e-9);
         eq("IO 变更事件 = 2", 2, CurveMath.flowEvents(s.flow()).count());
         // 对照：存量线的口径本来就是对的（同一批数据）
         CurveMath.TotalChange st = CurveMath.totalChange(s.points());
-        eq("存量上升 = 4", 4L, st.rise());
+        eq("存量上升 = 4", 4, st.rise().asDouble(), 1e-9);
         eq("存量缺口 = 0", 0, st.gaps());
 
         // 中间断了一次：104 那一格没观测到 ⇒ Δ(104) 真的缺了（IO 缺口 1 处），
@@ -1163,8 +1165,8 @@ public class TestChart {
         Series s2 = ChartData.build(2, brk, 16).series().get(0);
         eq("断档后：流量点数", 3, s2.flow().size());
         CurveMath.TotalChange ft2 = CurveMath.flowTotal(s2.flow());
-        eq("断档后 IO 上升 = 4", 4L, ft2.rise());
-        eq("断档后 IO 下降 = -4（-2 与 -2）", -4L, ft2.fall());
+        eq("断档后 IO 上升 = 4", 4, ft2.rise().asDouble(), 1e-9);
+        eq("断档后 IO 下降 = -4（-2 与 -2）", -4, ft2.fall().asDouble(), 1e-9);
         eq("断档后 IO 缺口 = 1（只有真的缺了的那一笔）", 1, ft2.gaps());
         eq("断档后 IO 事件 = 3", 3, CurveMath.flowEvents(s2.flow()).count());
         CurveMath.TotalChange st2 = CurveMath.totalChange(s2.points());
@@ -1173,7 +1175,7 @@ public class TestChart {
         // 只有首点带断线标记（窗口边界那种）→ 不算缺口
         List<SeriesPoint> only = java.util.List.of(new SeriesPoint(500, 7, true));
         eq("只有首点 → 缺口 0", 0, CurveMath.flowTotal(only).gaps());
-        eq("只有首点 → 值照样计入", 7L, CurveMath.flowTotal(only).rise());
+        eq("只有首点 → 值照样计入", 7, CurveMath.flowTotal(only).rise().asDouble(), 1e-9);
     }
 
     // 35) 存档头部流式读取（第十六轮⑤）：取到的小结必须与写进去的一致，
@@ -1257,6 +1259,64 @@ public class TestChart {
         NbtSlotLayout.Layout ok = NbtSlotLayout.detect(
                 Snbt.parse("{items:[{id:\"minecraft:stone\",count:1,slot:3.0}]}"));
         yes("正常 slot 照样认", ok != null && ok.entries().size() == 1 && ok.entries().get(0).slot() == 3);
+    }
+
+    // 37) 自适应数值 Val（第十六轮⑥ G1）
+    //     起因 = 用户实测：追创造能量立方的 2^63 → 旧实现 (int) 截断画出 -1 的假线。
+    private static void t37Val() {
+        // 形式与规范化
+        Val a = Val.of(42L);
+        yes("整数是整数形式", a.isIntegral());
+        Val b = Val.of(1.5);
+        no("小数不是整数形式", b.isIntegral());
+        Val c = Val.of(3.0);            // 数学上是整数的 double → 规范化成整数形式
+        yes("3.0 规范化成整数形式", c.isIntegral());
+        eq("3.0 的读数 = 3", 3, c.asDouble(), 1e-9);
+        eq("NaN 拒绝（= 读不到）", null, Val.of(Double.NaN));
+        eq("Infinity 拒绝", null, Val.of(Double.POSITIVE_INFINITY));
+
+        // 运算：同为整数 → 精确；有小数 → double
+        eq("整数加法", 15, Val.of(10).plus(Val.of(5)).asDouble(), 1e-9);
+        eq("整数减法", -2, Val.of(12).minus(Val.of(14)).asDouble(), 1e-9);
+        no("小数相加不再是整数形式", Val.of(1.5).plus(Val.of(1.0)).isIntegral());
+        eq("小数相加的值", 2.5, Val.of(1.5).plus(Val.of(1.0)).asDouble(), 1e-9);
+
+        // ★ 溢出回退：Long.MAX_VALUE + 1 绝不能回绕成负数 ★
+        Val big = Val.of(Long.MAX_VALUE).plus(Val.of(1L));
+        no("long 求和溢出 → 回退 double 形式", big.isIntegral());
+        eq("回退后的值 = 9.223372036854776E18", 9.223372036854776E18, big.asDouble(), 0);
+
+        // ★ 全链路回归：2^63 的能量读数在曲线上保持精确 ★
+        List<Sample> energy = List.of(
+                new Sample(100, "energy", Val.of(9223372036854775806L)),
+                new Sample(101, "energy", Val.of(9223372036854775807L)));
+        Series se = ChartData.build(7L, energy).series().get(0);
+        eq("2^63-1 的存量点保持精确", 9223372036854775806L, se.points().get(0).value().i());
+        eq("跨 2^63 的流量 = +1（整数精确）", 1, se.flow().get(0).value().asDouble(), 1e-9);
+        CurveMath.TotalChange t = CurveMath.totalChange(se.points());
+        eq("2^63 的变化合计 = +1（不回绕）", 1, t.rise().asDouble(), 1e-9);
+
+        // 小数系列：流量与统计都走 double
+        List<Sample> fluid = List.of(
+                new Sample(100, "minecraft:water", Val.of(1.5)),
+                new Sample(101, "minecraft:water", Val.of(2.5)));
+        Series sf = ChartData.build(8L, fluid).series().get(0);
+        eq("小数存量保持小数", 1.5, sf.points().get(0).value().asDouble(), 1e-9);
+        eq("小数流量 = +1.0", 1.0, sf.flow().get(0).value().asDouble(), 1e-9);
+        CurveMath.Stats st = CurveMath.stats(sf.points());
+        eq("小数的均值", 2.0, st.mean(), 1e-9);
+
+        // 存档往返：整数写 n / 小数写 d（向后兼容：旧文件只有 n）
+        List<Sample> both = List.of(
+                new Sample(100, "minecraft:iron_ingot", Val.of(64L)),
+                new Sample(101, "minecraft:water", Val.of(5.5)));
+        ArchiveData d = new ArchiveData("t37", "2026-09-19 21:00:00", "W", "p", "d", 100, 101,
+                List.of(), new ArrayList<>(both));
+        List<Sample> back = ArchiveFormat.fromJson(ArchiveFormat.toJson(d)).samples();
+        yes("整数往返后仍是整数形式", back.get(0).value().isIntegral());
+        eq("整数往返值不变", 64, back.get(0).value().asDouble(), 1e-9);
+        no("小数往返后仍是小数形式", back.get(1).value().isIntegral());
+        eq("小数往返值不变", 5.5, back.get(1).value().asDouble(), 1e-9);
     }
 
     // ---- 断言 ----

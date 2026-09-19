@@ -28,22 +28,24 @@ import java.util.List;
  * @param itemId   物品 ID（`minecraft:air` 表示格子是空的，它也是一条正经的线：数量恒为 0）
  * @param points   存量的点，按 tick 升序（保证有序是所有二分查找的前提）
  * @param flow     流量的点，按 tick 升序；**只在相邻两格之间**产生（段起点、跨格、断档后都没有）
+ * 值是**自适应数值**（{@link Val}）：整数 long 精确 / 小数 double。
+ *
  * @param min      存量线的最小值
  * @param max      存量线的最大值
  * @param flowMin  流量线的最小值（没流量时为 0）
  * @param flowMax  流量线的最大值（没流量时为 0）
  */
 public record Series(String itemId, List<SeriesPoint> points, List<SeriesPoint> flow,
-                     int min, int max, int flowMin, int flowMax) {
+                     Val min, Val max, Val flowMin, Val flowMax) {
 
     /** 最近一次读到的数量（图例上用） */
-    public int lastCount() {
-        return points.isEmpty() ? 0 : points.get(points.size() - 1).count();
+    public Val lastCount() {
+        return points.isEmpty() ? Val.ZERO : points.get(points.size() - 1).value();
     }
 
     /** 最近一次的净流量；没有流量数据时返回 0 */
-    public int lastFlow() {
-        return flow.isEmpty() ? 0 : flow.get(flow.size() - 1).count();
+    public Val lastFlow() {
+        return flow.isEmpty() ? Val.ZERO : flow.get(flow.size() - 1).value();
     }
 
     /** 这条线是不是"格子空着" */

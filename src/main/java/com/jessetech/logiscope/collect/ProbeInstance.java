@@ -2,6 +2,7 @@ package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.Aggregator;
+import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.DataTarget;
@@ -145,9 +146,9 @@ public final class ProbeInstance {
     //   buf* 是**输入**（各格原本的物品与数量）
     //   agg* 是**输出**（按物品分别求和之后的条目：每个出现的物品一条）
     private String[] bufIds = new String[8];
-    private int[] bufCounts = new int[8];
+    private Val[] bufVals = new Val[8];
     private String[] aggIds = new String[8];
-    private int[] aggCounts = new int[8];
+    private Val[] aggVals = new Val[8];
 
     ProbeInstance(int id, ProbeManager manager) {
         this.id = id;
@@ -670,9 +671,9 @@ public final class ProbeInstance {
                 int want = dts.size();
                 if (bufIds.length < want) {
                     bufIds = new String[want];
-                    bufCounts = new int[want];
+                    bufVals = new Val[want];
                     aggIds = new String[want];
-                    aggCounts = new int[want];
+                    aggVals = new Val[want];
                 }
                 int got = 0;
                 for (DataTarget dt : dts) {
@@ -687,32 +688,26 @@ public final class ProbeInstance {
                                 ? e.itemId()
                                 : dt.fallbackName();
                         bufIds[got] = name;
-                        bufCounts[got] = e.count();
+                        bufVals[got] = Val.of(e.count());
                         got++;
                         continue;
                     }
-                    Double v = dataProbe.readNumber(level, dt);
+                    // ★ 值是自适应的（第十六轮⑥）★：NBT 整数走 long（2^63 也能精确画），
+                    // 小数走 double；非有限（NaN/∞）在 Val.of 里返回 null → 留空。
+                    Val v = dataProbe.readNumber(level, dt);
                     if (v == null) {
                         continue;   // 方块实体没了 / 路径不存在 / 非数字 —— 这个目标留空
                     }
-                    // ★ 别把"装不下"悄悄变成错值 ★（第十六轮⑤）
-                    // 存储层是 int（`Sample.count`）。能量类设备的读数常在 2^31 以上，
-                    // 直接 `(int) Math.round(v)` 会**回绕成负数**；NaN 会变成 0
-                    // （被当成"真实的 0"记进曲线）。装不下就按"读不到"处理：留空。
-                    long rounded = Math.round(v);
-                    if (!Double.isFinite(v) || rounded < Integer.MIN_VALUE || rounded > Integer.MAX_VALUE) {
-                        continue;
-                    }
                     bufIds[got] = resolveDataName(level, dt);
-                    bufCounts[got] = (int) rounded;
+                    bufVals[got] = v;
                     got++;
                 }
                 if (got == 0) {
                     store.add(Sample.noData(gameTime));
                 } else {
-                    int k = Aggregator.combineAll(bufIds, bufCounts, got, aggIds, aggCounts);
+                    int k = Aggregator.combineAll(bufIds, bufVals, got, aggIds, aggVals);
                     for (int i = 0; i < k; i++) {
-                        store.add(new Sample(gameTime, aggIds[i], aggCounts[i]));
+                        store.add(new Sample(gameTime, aggIds[i], aggVals[i]));
                     }
                 }
             }
@@ -910,16 +905,16 @@ public final class ProbeInstance {
         int n = views.size();
         if (bufIds.length < n) {
             bufIds = new String[n];
-            bufCounts = new int[n];
+            bufVals = new Val[n];
             aggIds = new String[n];
-            aggCounts = new int[n];
+            aggVals = new Val[n];
         }
         for (int i = 0; i < n; i++) {
             ContainerAccess.SlotView v = views.get(i);
             bufIds[i] = v.itemId();
-            bufCounts[i] = v.count();
+            bufVals[i] = Val.of(v.count());
         }
-        return Aggregator.combine(bufIds, bufCounts, n, aggIds, aggCounts);
+        return Aggregator.combine(bufIds, bufVals, n, aggIds, aggVals);
     }
 
     /**
@@ -933,7 +928,7 @@ public final class ProbeInstance {
     private void writeTick(long gameTime, List<ContainerAccess.SlotView> views) {
         int m = aggregateInto(views);
         for (int i = 0; i < m; i++) {
-            store.add(new Sample(gameTime, aggIds[i], aggCounts[i]));
+            store.add(new Sample(gameTime, aggIds[i], aggVals[i]));
         }
     }
 
@@ -954,7 +949,7 @@ public final class ProbeInstance {
         }
         List<Aggregator.Totals> out = new ArrayList<>(latest.size());
         for (Sample s : latest) {
-            out.add(new Aggregator.Totals(s.itemId(), s.count()));
+            out.add(new Aggregator.Totals(s.itemId(), s.value()));
         }
         return out;
     }

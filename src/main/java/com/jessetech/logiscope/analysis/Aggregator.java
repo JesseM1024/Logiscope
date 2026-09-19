@@ -1,5 +1,7 @@
 package com.jessetech.logiscope.analysis;
 
+import com.jessetech.logiscope.store.Sample;
+
 import java.util.ArrayList;
 import java.util.List;
 
@@ -47,15 +49,15 @@ public final class Aggregator {
      * @param itemId 物品 id（{@link #EMPTY_ITEM} 表示"全空"这一档）
      * @param count  所有装着该物品的格子的数量之和
      */
-    public record Totals(String itemId, int count) {
+    public record Totals(String itemId, Val count) {
 
         /** 数量为 0 / 全空 —— 是"读到值是 0"，不是"没读到"（后者是 no_data） */
         public boolean empty() {
-            return count <= 0 || EMPTY_ITEM.equals(itemId);
+            return count.compareTo(Val.ZERO) <= 0 || EMPTY_ITEM.equals(itemId);
         }
     }
 
-    public static final Totals EMPTY_TOTAL = new Totals(EMPTY_ITEM, 0);
+    public static final Totals EMPTY_TOTAL = new Totals(EMPTY_ITEM, Val.ZERO);
 
     /**
      * 数组版本（采集层每 tick 调用，零分配：输出写进调用方复用的数组）。
@@ -67,20 +69,20 @@ public final class Aggregator {
      * @param outCounts 输出缓冲（长度需 ≥ n）
      * @return 产出的条目数。**全空时返回 1**（一条 {@code air × 0}，让"被抽空了"仍然看得见）
      */
-    public static int combine(String[] itemIds, int[] counts, int n,
-                              String[] outIds, int[] outCounts) {
+    public static int combine(String[] itemIds, Val[] counts, int n,
+                              String[] outIds, Val[] outCounts) {
         int len = Math.min(n, Math.min(itemIds.length, counts.length));
         int cap = Math.min(outIds.length, outCounts.length);
         int m = 0;
         for (int i = 0; i < len; i++) {
-            int c = counts[i];
-            if (c <= 0) {
+            Val c = counts[i];
+            if (c.compareTo(Val.ZERO) <= 0) {
                 continue;
             }
             String id = itemIds[i];
             int at = indexOf(outIds, m, id);
             if (at >= 0) {
-                outCounts[at] += c;
+                outCounts[at] = outCounts[at].plus(c);
             } else if (m < cap) {
                 outIds[m] = id;
                 outCounts[m] = c;
@@ -90,7 +92,7 @@ public final class Aggregator {
         }
         if (m == 0 && cap > 0) {
             outIds[0] = EMPTY_ITEM;
-            outCounts[0] = 0;
+            outCounts[0] = Val.ZERO;
             return 1;
         }
         return m;
@@ -108,8 +110,8 @@ public final class Aggregator {
      *
      * @return 产出的条目数（同名合并后）
      */
-    public static int combineAll(String[] ids, int[] counts, int n,
-                                 String[] outIds, int[] outCounts) {
+    public static int combineAll(String[] ids, Val[] counts, int n,
+                                 String[] outIds, Val[] outCounts) {
         int len = Math.min(n, Math.min(ids.length, counts.length));
         int cap = Math.min(outIds.length, outCounts.length);
         int m = 0;
@@ -117,7 +119,7 @@ public final class Aggregator {
             String id = ids[i];
             int at = indexOf(outIds, m, id);
             if (at >= 0) {
-                outCounts[at] += counts[i];
+                outCounts[at] = outCounts[at].plus(counts[i]);
             } else if (m < cap) {
                 outIds[m] = id;
                 outCounts[m] = counts[i];
@@ -137,16 +139,16 @@ public final class Aggregator {
     }
 
     /** List 版本，给界面 / 断言用；与数组版本语义完全一致 */
-    public static List<Totals> combine(List<String> itemIds, List<Integer> counts) {
+    public static List<Totals> combine(List<String> itemIds, List<Val> counts) {
         int n = Math.min(itemIds.size(), counts.size());
         String[] ids = new String[n];
-        int[] cs = new int[n];
+        Val[] cs = new Val[n];
         for (int i = 0; i < n; i++) {
             ids[i] = itemIds.get(i);
             cs[i] = counts.get(i);
         }
         String[] outIds = new String[Math.max(1, n)];
-        int[] outCounts = new int[Math.max(1, n)];
+        Val[] outCounts = new Val[Math.max(1, n)];
         int m = combine(ids, cs, n, outIds, outCounts);
         List<Totals> out = new ArrayList<>(m);
         for (int i = 0; i < m; i++) {

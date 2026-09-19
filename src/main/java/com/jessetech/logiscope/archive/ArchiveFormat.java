@@ -6,6 +6,7 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
+import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.store.Sample;
 import org.jetbrains.annotations.Nullable;
 
@@ -33,7 +34,8 @@ import java.util.List;
  *   "range": { "first": 1600, "last": 3271 },
  *   "markers": [2000, 2600],          ← G4 标注，随记录一起走
  *   "samples": [
- *     {"t": 1600, "i": "minecraft:iron_ingot", "n": 64},
+ *     {"t": 1600, "i": "minecraft:iron_ingot", "n": 64},        ← 整数值（n = long）
+ *     {"t": 1601, "i": "minecraft:water", "d": 5.5},            ← 小数值（第十六轮⑥）
  *     {"t": 1605, "m": "no_data"},    ← 标记样本单独一个键，绝不写成 0
  *     {"t": 1610, "m": "gap"}
  *   ]
@@ -92,9 +94,12 @@ public final class ArchiveFormat {
                 o.addProperty("m", "no_data");
             } else if (s.isGap()) {
                 o.addProperty("m", "gap");
+            } else if (s.value().isIntegral()) {
+                o.addProperty("i", s.itemId());
+                o.addProperty("n", s.value().i());
             } else {
                 o.addProperty("i", s.itemId());
-                o.addProperty("n", s.count());
+                o.addProperty("d", s.value().d());
             }
             samples.add(o);
         }
@@ -131,8 +136,9 @@ public final class ArchiveFormat {
                     samples.add("gap".equals(m) ? Sample.gap(t) : Sample.noData(t));
                 } else {
                     String item = o.has("i") ? o.get("i").getAsString() : Sample.EMPTY_ITEM;
-                    int n = o.has("n") ? o.get("n").getAsInt() : 0;
-                    samples.add(new Sample(t, item, n));
+                    Val v = o.has("d") ? Val.of(o.get("d").getAsDouble())
+                            : Val.of(o.has("n") ? o.get("n").getAsLong() : 0L);
+                    samples.add(new Sample(t, item, v));
                 }
             }
         }
@@ -293,7 +299,8 @@ public final class ArchiveFormat {
             if (s.isMarker()) {
                 out.add(s.tick() + "," + s.itemId() + ",");
             } else {
-                out.add(s.tick() + "," + s.itemId() + "," + s.count());
+                // toString()：整数 → 精确整数；小数 → double 字面量（外部工具可读）
+                out.add(s.tick() + "," + s.itemId() + "," + s.value());
             }
         }
         for (long m : d.markers()) {

@@ -69,30 +69,34 @@ public final class Analyzer {
      */
     public static List<Delta> deltas(List<Sample> samples) {
         List<Delta> out = new ArrayList<>();
-        // itemId → {该物品上一次出现的 tick, 数量}。多格监控时每个物品各记各的
-        Map<String, long[]> last = new HashMap<>();
+        // itemId → 该物品上一次出现（tick + 值）。多格监控时每个物品各记各的
+        Map<String, Last> last = new HashMap<>();
         for (Sample cur : samples) {
             if (cur.isMarker()) {
                 last.clear();
                 continue;
             }
-            long[] p = last.get(cur.itemId());
-            if (p != null && (cur.tick() - p[0]) <= MAX_DELTA_GAP) {
-                out.add(new Delta(cur.tick(), cur.count() - (int) p[1], false));
+            Last p = last.get(cur.itemId());
+            if (p != null && (cur.tick() - p.tick()) <= MAX_DELTA_GAP) {
+                out.add(new Delta(cur.tick(), cur.value().minus(p.value()), false));
             } else {
                 // 这个物品上一次出现不在上一个 tick（首见 / 中间断了）→ 差值无意义
-                out.add(new Delta(cur.tick(), 0, true));
+                out.add(new Delta(cur.tick(), Val.ZERO, true));
             }
-            last.put(cur.itemId(), new long[]{cur.tick(), cur.count()});
+            last.put(cur.itemId(), new Last(cur.tick(), cur.value()));
         }
         return out;
     }
 
+    /** deltas 的"上一次出现"记录 */
+    private record Last(long tick, Val value) {
+    }
+
     /** 统计摘要，给界面上的数字面板用（跳过 no_data；同 tick 的条目先合计） */
     public static Summary summarize(List<Sample> samples) {
-        int min = Integer.MAX_VALUE;
-        int max = Integer.MIN_VALUE;
-        long sum = 0;
+        Val min = null;
+        Val max = null;
+        Val sum = Val.ZERO;
         int dataTicks = 0;
         int noDataTicks = 0;
         int rises = 0;
@@ -102,9 +106,9 @@ public final class Analyzer {
         int dominantHits = 0;
         Map<String, Integer> hits = new HashMap<>();
 
-        int firstTotal = 0;
-        int lastTotal = 0;
-        int prevTotal = 0;
+        Val firstTotal = Val.ZERO;
+        Val lastTotal = Val.ZERO;
+        Val prevTotal = Val.ZERO;
         boolean hasPrevTotal = false;
 
         int i = 0;
@@ -124,13 +128,13 @@ public final class Analyzer {
 
             // ---- 把同一个 tick 的所有条目合计成"这个 tick 的总存量" ----
             long t = s.tick();
-            int total = 0;
+            Val total = Val.ZERO;
             while (i < n) {
                 Sample c = samples.get(i);
                 if (c.isMarker() || c.tick() != t) {
                     break;
                 }
-                total += c.count();
+                total = total.plus(c.value());
                 int h = hits.merge(c.itemId(), 1, Integer::sum);
                 if (h > dominantHits) {
                     dominantHits = h;
@@ -144,14 +148,18 @@ public final class Analyzer {
             }
             lastTotal = total;
             dataTicks++;
-            min = Math.min(min, total);
-            max = Math.max(max, total);
-            sum += total;
+            if (min == null || total.compareTo(min) < 0) {
+                min = total;
+            }
+            if (max == null || total.compareTo(max) > 0) {
+                max = total;
+            }
+            sum = sum.plus(total);
 
             if (hasPrevTotal) {
-                if (total > prevTotal) {
+                if (total.compareTo(prevTotal) > 0) {
                     rises++;
-                } else if (total < prevTotal) {
+                } else if (total.compareTo(prevTotal) < 0) {
                     falls++;
                 }
             }
@@ -160,17 +168,18 @@ public final class Analyzer {
         }
 
         if (dataTicks == 0) {
-            return new Summary("-", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, noDataTicks);
+            return new Summary("-", Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO,
+                    0, 0, 0, 0, noDataTicks);
         }
 
         return new Summary(
                 dominant,
                 min,
                 max,
-                (int) (sum / dataTicks),
+                Val.of(sum.asDouble() / dataTicks),
                 firstTotal,
                 lastTotal,
-                lastTotal - firstTotal,
+                lastTotal.minus(firstTotal),
                 ChartData.countItemSetSwitches(samples),
                 rises,
                 falls,
@@ -178,8 +187,8 @@ public final class Analyzer {
                 noDataTicks);
     }
 
-    /** 单点变化量 */
-    public record Delta(long tick, int delta, boolean typeChanged) {
+    /** 单点变化量（自适应数值：整数差保持精确，小数差是 double） */
+    public record Delta(long tick, Val delta, boolean typeChanged) {
     }
 
     /**
@@ -196,12 +205,12 @@ public final class Analyzer {
      */
     public record Summary(
             String dominantItem,
-            int min,
-            int max,
-            int average,
-            int first,
-            int last,
-            int netChange,
+            Val min,
+            Val max,
+            Val average,
+            Val first,
+            Val last,
+            Val netChange,
             int typeChanges,
             int rises,
             int falls,
@@ -218,6 +227,7 @@ public final class Analyzer {
         }
 
         public static final Summary EMPTY =
-                new Summary("-", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
+                new Summary("-", Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO, Val.ZERO,
+                        0, 0, 0, 0, 0);
     }
 }
