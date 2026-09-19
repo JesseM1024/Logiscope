@@ -24,6 +24,7 @@ import com.jessetech.logiscope.collect.ProbeInstance;
 import com.jessetech.logiscope.collect.ProbeManager;
 import com.jessetech.logiscope.collect.ProbeSlots;
 import com.jessetech.logiscope.store.Sample;
+import net.minecraft.Util;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -40,6 +41,7 @@ import net.neoforged.neoforge.client.ClientHooks;
 import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -176,6 +178,11 @@ public final class ScopeScreen extends Screen {
     private static final int COLOR_ANALYZE = 0xFFE070D8;
     /** NBT 原文悬浮高亮：黄（用户反馈淡紫在深底上难认；黄与深底对比最强） */
     private static final int COLOR_HILIGHT = 0x80FFD24A;
+    /** QoL（第十六轮⑦）：「主界面」按钮淡绿 / 「回选格」淡蓝 —— 也用作顶栏光效的页色 */
+    private static final int COLOR_MAINSCREEN = 0xFF90EE90;
+    private static final int COLOR_BACKSLOT = 0xFF8FB8E8;
+    private static final int COLOR_CHART_GLOW = 0xFFFFE08A;
+    private static final int COLOR_CALC_GLOW = 0xFFC0A0F0;
     /** DATA 页自动重发 `data get block` 的节拍（客户端 tick）—— 1 秒一次就是"实时"了 */
     private static final long DataRefreshTicks = 20;
 
@@ -421,6 +428,9 @@ public final class ScopeScreen extends Screen {
     private int scrollArchives;
     /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
     private List<Archives.Info> archiveList = List.of();
+    /** 「打开存储文件夹」chip 的命中矩形（渲染时记录，见 renderOpenFolderChip） */
+    @Nullable
+    private int[] openFolderRect;
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -950,13 +960,13 @@ public final class ScopeScreen extends Screen {
                         cellMode ? tr("logiscope.btn.cell_mode_on") : tr("logiscope.btn.cell_mode"),
                         menu));
                 out.add(new Item("clear_cells", tr("logiscope.btn.clear_cells"), selectionCount() > 0));
-                ProbeInstance doneProbe = pickerProbe();
-                out.add(new Item("done", tr("logiscope.btn.done"),
-                        selectionCount() > 0 || (doneProbe != null && doneProbe.isDataProbe())));
-                // NBT 取数探针的入口：需要"这台设备有坐标"（没坐标读不到方块实体）
+                // （第十六轮⑦：probe data 挪到 done 左侧）
                 ProbeInstance pp = pickerProbe();
                 out.add(new Item("probe_data", tr("logiscope.btn.probe_data"),
                         pp != null && pp.target().hasPersistentId()));
+                ProbeInstance doneProbe = pickerProbe();
+                out.add(new Item("done", tr("logiscope.btn.done"),
+                        selectionCount() > 0 || (doneProbe != null && doneProbe.isDataProbe())));
                 out.add(new Item("to_root", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -964,17 +974,19 @@ public final class ScopeScreen extends Screen {
                 ProbeInstance p = currentProbe();
                 boolean running = p != null && (p.state() == ProbeInstance.State.RECORDING
                         || p.state() == ProbeInstance.State.FOLLOWING);
-                out.add(new Item("pick", tr("logiscope.btn.pick_cells"), true));
-                out.add(new Item("list", tr("logiscope.btn.to_list"), true));
+                // 第十六轮⑦按用户指定顺序：pause → resume → clear → stop & archive
+                //   → keep tracking… → back to slot（淡蓝）→ main screen（淡绿）
                 out.add(new Item("pause", tr("logiscope.btn.pause"), running));
                 out.add(new Item("resume", tr("logiscope.btn.resume"),
                         p != null && p.state() == ProbeInstance.State.PAUSED));
                 out.add(new Item("clear", tr("logiscope.btn.clear"),
                         p != null && p.store().size() > 0));
-                out.add(new Item("follow", followLabel(), true));
                 // G5：导出当前记录 → 存档并停止 → 直接进入回放页
                 out.add(new Item("archive", tr("logiscope.btn.archive"),
                         p != null && p.store().size() > 0));
+                out.add(new Item("follow", followLabel(), true));
+                out.add(new Item("pick", tr("logiscope.btn.pick_cells"), true));
+                out.add(new Item("list", tr("logiscope.btn.to_list"), true));
             }
             case REPLAY -> {
                 out.add(new Item("rename", tr("logiscope.btn.rename"), replayArchive != null));
@@ -1139,6 +1151,16 @@ public final class ScopeScreen extends Screen {
         if ("cell_mode".equals(id)) {
             return cellMode ? 0xFF3FE0A0 : 0;
         }
+        if ("nbt_mode".equals(id)) {
+            // 第十六轮⑦：NBT tracking ON 时按钮文字转黄色
+            return nbtSlotMode ? 0xFFFFD24A : 0;
+        }
+        if ("to_root".equals(id) || "list".equals(id) || "replay_back".equals(id)) {
+            return COLOR_MAINSCREEN;   // 「主界面」淡绿
+        }
+        if ("pick".equals(id)) {
+            return COLOR_BACKSLOT;     // 「回选格」淡蓝
+        }
         return 0;
     }
 
@@ -1196,6 +1218,7 @@ public final class ScopeScreen extends Screen {
         g.fill(x - 1, y - 1, x + L.w() + 1, y + L.h() + 1, 0xFF5A5A68);
         g.fill(x, y, x + L.w(), y + L.h(), 0xF2101017);
 
+        renderTopGlow(g, L);
         renderTitle(g, L, mouseX, mouseY);
         renderInfo(g, L);
 
@@ -1405,11 +1428,11 @@ public final class ScopeScreen extends Screen {
                     case NONE -> tr("logiscope.src.none");
                 };
                 String line = badge + " · " + tr("logiscope.info.selected") + " " + selectionCount();
-                if (nbtSlotDetected) {
-                    // 检测到这类容器（slot 号写在 NBT 里）：提示可以按 slot 追踪
-                    line += "  ·  " + (nbtSlotMode ? tr("logiscope.btn.nbt_mode_on")
-                            : tr("logiscope.picker.nbt_slot"))
-                            .replace("%s", nbtSlotListPath) + " (" + nbtSlotEntries.size() + ")";
+                if (nbtSlotMode) {
+                    // 第十六轮⑦：删掉"NBT slot-list, track by slot"那句（按钮本身已表达状态），
+                    // 只在追踪开着时显示 ON + 元素数
+                    line += "  ·  " + tr("logiscope.btn.nbt_mode_on")
+                            + " (" + nbtSlotEntries.size() + ")";
                 }
                 g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0x9BE1CB, false);
             }
@@ -1552,6 +1575,7 @@ public final class ScopeScreen extends Screen {
         if (list.isEmpty()) {
             g.drawString(this.font, tr("logiscope.hint.no_archives"), x + PAD + 4, y + ROW_H,
                     0x8A8AA0, false);
+            renderOpenFolderChip(g, L, mouseX, mouseY);
             return;
         }
         scrollArchives = Math.max(0, Math.min(scrollArchives, Math.max(0, list.size() - L.archRows())));
@@ -1589,6 +1613,43 @@ public final class ScopeScreen extends Screen {
             String more = (scrollArchives + L.archRows()) + " / " + list.size()
                     + "  " + tr("logiscope.hint.scroll");
             g.drawString(this.font, more, x + PAD, y + ROW_H + L.archRows() * ROW_H, 0xFF707070, false);
+        }
+        renderOpenFolderChip(g, L, mouseX, mouseY);
+    }
+
+    /**
+     * 存档列表下方的「打开存储文件夹」chip（第十六轮⑦）。
+     * 命中矩形渲染时记进 {@link #openFolderRect}（渲染与点击共用同一份几何）。
+     */
+    private void renderOpenFolderChip(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        openFolderRect = null;
+        if (page != Page.ROOT || L.archRows() <= 0) {
+            return;
+        }
+        List<Archives.Info> list = archiveList;
+        int by = L.archTop() + ROW_H + L.archRows() * ROW_H;
+        if (!list.isEmpty() && list.size() > L.archRows()) {
+            by += ROW_H;   // 让开 "N / M  可滚动" 那一行
+        }
+        by += 3;
+        if (by + CHIP_H > L.y() + L.h()) {
+            return;   // 面板太矮：不画也不可点（宁缺毋错位）
+        }
+        String label = tr("logiscope.btn.open_folder");
+        int w = this.font.width(label) + 14;
+        Chip c = new Chip("open_folder", label, L.x() + PAD, by, w, CHIP_H, true, 0);
+        renderChip(g, c, mouseX, mouseY, c.hit(mouseX, mouseY), 0);
+        openFolderRect = new int[]{c.x(), c.y(), c.w(), c.h()};
+    }
+
+    /** 用系统文件管理器打开存档目录 {@code .minecraft/logiscope/}（第十六轮⑦） */
+    private void openStorageFolder() {
+        try {
+            Files.createDirectories(Archives.rootDir());
+            Util.getPlatform().openFile(Archives.rootDir().toFile());
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.warn("open logiscope folder failed", e);
+            say(tr("logiscope.flash.open_folder_fail"));
         }
     }
 
@@ -2122,6 +2183,38 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
+     * 面板顶边的 2px 光效条（第十六轮⑦，用户指定）：
+     * 根页淡绿 / 选格页（含数据页）淡蓝 / 图表页淡黄 / 计算页淡紫。
+     * 实现 = 静态底条 + 一个从左到右移动的亮斑（15 段梯形 alpha），每帧约 16 次 fill ——
+     * 与面板背景同量级，渲染压力可忽略（用户口径：压力大才降级成呼吸光效，实测不需要）。
+     */
+    private void renderTopGlow(GuiGraphics g, Layout L) {
+        int base = switch (page) {
+            case ROOT -> COLOR_MAINSCREEN;
+            case PICKER, DATA -> COLOR_BACKSLOT;
+            case CHART -> COLOR_CHART_GLOW;
+            case REPLAY -> COLOR_CALC_GLOW;
+        };
+        int rgb = base & 0xFFFFFF;
+        g.fill(L.x(), L.y(), L.x() + L.w(), L.y() + 2, rgb | 0x30000000);
+        long period = 2800L;
+        int span = L.w() + 120;
+        int center = (int) ((System.currentTimeMillis() % period) * span / period) - 60;
+        int half = 45;
+        for (int dx = -42; dx < 42; dx += 6) {
+            int a = (int) (0xB4 * (1.0 - Math.abs(dx) / (double) half));
+            if (a <= 0) {
+                continue;
+            }
+            int x0 = Math.max(L.x(), L.x() + center + dx);
+            int x1 = Math.min(L.x() + L.w(), L.x() + center + dx + 6);
+            if (x1 > x0) {
+                g.fill(x0, L.y(), x1, L.y() + 2, rgb | (a << 24));
+            }
+        }
+    }
+
+    /**
      * 按像素宽度折行：优先在最近的空格处断（英文），整段没有空格（中文）就按字符断。
      * 提示文本很短，O(n²) 的宽度计算无所谓；但调用频率必须压到"文本变了才算一次"。
      */
@@ -2342,6 +2435,19 @@ public final class ScopeScreen extends Screen {
             return true;
         }
 
+        // QoL（第十六轮⑦）：计算页右键图例 = 按下该图例的「分析」。
+        // 左键仍是弹「数量 / IO / 分析」菜单；右键直达，省一次弹窗点击。
+        if (button == 1 && page == Page.REPLAY) {
+            for (Chip c : L.legend()) {
+                if (c.enabled() && c.hit(mouseX, mouseY) && c.id().startsWith(SERIES_PREFIX)) {
+                    String itemId = c.id().substring(SERIES_PREFIX.length());
+                    replaySelectedItem = itemId.equals(replaySelectedItem) ? null : itemId;
+                    legendPopup = null;
+                    return true;
+                }
+            }
+        }
+
         if (button != 0) {
             return true;
         }
@@ -2451,6 +2557,11 @@ public final class ScopeScreen extends Screen {
         }
 
         // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
+        if (page == Page.ROOT && openFolderRect != null
+                && isIn(mx, my, openFolderRect[0], openFolderRect[1], openFolderRect[2], openFolderRect[3])) {
+            openStorageFolder();
+            return true;
+        }
         if (page == Page.ROOT) {
             // 存档行（下半部分）先判：它几何上在探针列表之外
             if (L.archRows() > 0 && !archiveList.isEmpty()) {
