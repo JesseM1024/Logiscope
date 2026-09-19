@@ -2,6 +2,7 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.collect.ContainerAccess;
 import net.minecraft.client.Minecraft;
+import net.minecraft.network.chat.Component;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -100,7 +101,8 @@ public final class ProbeContext {
                 return new Candidate(a.dimension(), a.pos(), true, blockName(mc.level, a.pos()));
             }
             // 界面开着但推不出坐标：拿不到持久身份，关界面只能暂停（已知边界，见 CP9）
-            return new Candidate(null, null, true, "已打开的容器（无坐标）");
+            return new Candidate(null, null, true,
+                    Component.translatable("logiscope.anchor.open_menu").getString());
         }
         BlockHitResult hit = crosshairBlock(mc);
         if (hit == null) {
