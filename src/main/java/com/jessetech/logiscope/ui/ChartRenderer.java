@@ -5,6 +5,7 @@ import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.SeriesPoint;
+import com.jessetech.logiscope.analysis.Val;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
@@ -132,13 +133,13 @@ public final class ChartRenderer {
     private int plotH;
     private int plotR;
     private int plotB;
-    private int yLo;
-    private int ySpan;
+    private double yLo;
+    private double ySpan;
     private int usable;
 
     /** 本帧可见数据的最小 / 最大值（存量与 IO 一起扫，见 render） */
-    private int vScanLo;
-    private int vScanHi;
+    private double vScanLo;
+    private double vScanHi;
 
     // ------------------------------------------------------------------
     // 对外的小数据结构
@@ -285,8 +286,8 @@ public final class ChartRenderer {
         boolean anySeries = !all.isEmpty();
         boolean anyVisible = false;
         boolean anyFlow = false;
-        vScanLo = Integer.MAX_VALUE;
-        vScanHi = Integer.MIN_VALUE;
+        vScanLo = Double.POSITIVE_INFINITY;
+        vScanHi = Double.NEGATIVE_INFINITY;
 
         // 纵轴自动缩放会把**所有可见的线**一起算进去：存量线与 IO 线都算。
         // 两者量级差得远时（存量 1.79E6、IO ±64），把存量线在图例里关掉，
@@ -306,10 +307,10 @@ public final class ChartRenderer {
                 scanWindow(s.flow());
             }
         }
-        int vLo = vScanLo;
-        int vHi = vScanHi;
+        double vLo = vScanLo;
+        double vHi = vScanHi;
 
-        if (vLo == Integer.MAX_VALUE) {
+        if (vLo == Double.POSITIVE_INFINITY) {
             // 窗口里没有采样点（暂停中、刚接上探头、或最近一段全是 no_data）。
             // 时间轴还是要画，否则玩家看到一块纯黑，分不清"没数据"和"面板坏了"。
             //
@@ -336,7 +337,7 @@ public final class ChartRenderer {
         // 吸附（而不是直接用 min/max）有两个好处：
         //   · 刻度落在整数上，读得出来
         //   · 窗口滚动时范围只会偶尔跳一次，不会每一帧都在抖
-        int step = niceStep((int) Math.ceil((vHi - vLo) / 4.0));
+        double step = niceStep(Math.ceil((vHi - vLo) / 4.0));
         // 存量永远 ≥ 0，所以底边贴 0 更好看；但 **IO 线可以是负的**，
         // 那时就不能把下界钳到 0（负值会被切到图外）。
         boolean clampZero = vLo >= 0;
@@ -346,21 +347,21 @@ public final class ChartRenderer {
         // 解不出更多有效数字时（轴的宽度就 46px），就把步长顶上去 ——
         // 宁可刻度稀疏，也不要一排看不懂的数字。
         for (int guard = 0; guard < 12; guard++) {
-            int lo = baseLow(vLo, step, clampZero);
-            if (lo + (long) step > vHi) {
+            double lo = baseLow(vLo, step, clampZero);
+            if (lo + step > vHi) {
                 break;   // 窗口里只有一条刻度线，无所谓重复
             }
             if (!fmtAxis(lo).equals(fmtAxis(lo + step))) {
                 break;
             }
-            int next = nextNiceStep(step);
+            double next = nextNiceStep(step);
             if (next <= step) {
                 break;
             }
             step = next;
         }
         yLo = baseLow(vLo, step, clampZero);
-        int yHi = ceilDiv(vHi, step) * step;
+        double yHi = Math.ceil(vHi / step) * step;
         if (yHi <= yLo) {
             yHi = yLo + step;
         }
@@ -373,7 +374,7 @@ public final class ChartRenderer {
         // ---- 数据线 ----
         if (anyFlow) {
             // 0 基线：流量线没有它就是一道看不出进出的波浪
-            int y0 = yOf(0);
+            int y0 = yOf(0.0);
             g.fill(plotX + 1, y0, plotR - 1, y0 + 1, COLOR_FLOW_ZERO);
         }
         for (int i = 0; i < all.size(); i++) {
@@ -410,16 +411,19 @@ public final class ChartRenderer {
     // 坐标轴
     // ------------------------------------------------------------------
 
-    private void drawYAxis(GuiGraphics g, Font font, int lo, int hi, int step) {
-        int lines = (hi - lo) / step;
+    private void drawYAxis(GuiGraphics g, Font font, double lo, double hi, double step) {
+        int lines = (int) ((hi - lo) / step);
         if (lines > 10) {
             step = (hi - lo) / 5;
         }
-        for (int v = lo; v <= hi; v += step) {
+        // 用"第 k 格"累加而不是 v += step：避免浮点漂移让最后一格差半像素
+        int n = (int) Math.round((hi - lo) / step);
+        for (int k = 0; k <= n; k++) {
+            double v = lo + k * step;
             int yy = yOf(v);
             g.fill(plotX + 1, yy, plotR - 1, yy + 1, COLOR_GRID);
             // 只有**纵轴**用科学计数法（用户要求）：它要容纳 8 位数量级的刻度，
-            // 而读数（十字线、框选统计、面板数字）一律给精确整数（见 fmtExact）。
+            // 而读数（十字线、框选统计、面板数字）一律给精确值（见 fmtExact）。
             String lb = fmtAxis(v);
             g.drawString(font, lb, plotX - 3 - font.width(lb), yy - 3, COLOR_LABEL, false);
         }
@@ -465,7 +469,7 @@ public final class ChartRenderer {
      * 全部搬进纯类 {@link WaveColumns}（离线可断言、可压测，见 TestChart t29 / BenchRender）。
      */
     private void drawSeries(GuiGraphics g, List<SeriesPoint> pts, int color) {
-        int columns = cols.emit(pts, start, end, plotW, plotX, this::yOf, this::yOfF, rects);
+        int columns = cols.emit(pts, start, end, plotW, plotX, this::yOf, rects);
         if (columns == 0) {
             return;
         }
@@ -717,8 +721,9 @@ public final class ChartRenderer {
         if (tick - p.tick() > tolerance) {
             return "-";
         }
-        // 十字线读数 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
-        return fmtExact(p.count());
+        // 十字线读数 = 读数，用**精确值**（用户要求：只有纵轴用科学计数法）。
+        // 整数（含 2^63 的能量读数）保持精确整数；小数用短格式。
+        return fmtExact(p.value());
     }
 
     /** 十字线上的 IO 读数（带正负号）；离得太远（其实是断档）就报 "-" */
@@ -732,7 +737,8 @@ public final class ChartRenderer {
         if (tick - p.tick() > tolerance) {
             return "-";
         }
-        return p.count() > 0 ? "+" + p.count() : String.valueOf(p.count());
+        return p.value().compareTo(Val.ZERO) > 0
+                ? "+" + fmtExact(p.value()) : fmtExact(p.value());
     }
 
     // ------------------------------------------------------------------
@@ -750,48 +756,26 @@ public final class ChartRenderer {
             if (p.tick() > end) {
                 break;
             }
-            if (p.count() < vScanLo) {
-                vScanLo = p.count();
+            double v = p.value().asDouble();
+            if (v < vScanLo) {
+                vScanLo = v;
             }
-            if (p.count() > vScanHi) {
-                vScanHi = p.count();
+            if (v > vScanHi) {
+                vScanHi = v;
             }
         }
-    }
-
-    private int colOf(long tick) {
-        long span = Math.max(1L, end - start);
-        return (int) ((tick - start) * (long) (plotW - 1) / span);
     }
 
     private int xOf(long tick) {
         return xOfTick(chartX, chartW, start, end, tick);
     }
 
-    private int yOf(int v) {
-        return clampY(plotB - 2 - (int) Math.round((v - yLo) * (double) usable / ySpan));
-    }
-
-    private int yOfF(double v) {
+    private int yOf(double v) {
         return clampY(plotB - 2 - (int) Math.round((v - yLo) * usable / ySpan));
     }
 
     private int clampY(int y) {
         return Math.max(plotY, Math.min(plotB - 1, y));
-    }
-
-    private void vline(GuiGraphics g, int x, int vA, int vB, int color) {
-        if (x < plotX || x >= plotR) {
-            return;
-        }
-        g.fill(x, yOf(Math.max(vA, vB)), x + 1, yOf(Math.min(vA, vB)) + 1, color);
-    }
-
-    private void vlineF(GuiGraphics g, int x, double vA, double vB, int color) {
-        if (x < plotX || x >= plotR) {
-            return;
-        }
-        g.fill(x, yOfF(Math.max(vA, vB)), x + 1, yOfF(Math.min(vA, vB)) + 1, color);
     }
 
     /** 第一个 tick >= 目标 的点下标（点按 tick 升序，所以可以二分） */
@@ -809,14 +793,11 @@ public final class ChartRenderer {
         return lo;
     }
 
-    private static int niceStep(int raw) {
-        int r = Math.max(1, raw);
-        int exp = 1;
-        while (exp * 10 <= r) {
-            exp *= 10;
-        }
-        for (int m : new int[]{1, 2, 5, 10}) {
-            int cand = exp * m;
+    private static double niceStep(double raw) {
+        double r = Math.max(1, raw);
+        double exp = Math.pow(10, Math.floor(Math.log10(r)));
+        for (double m : new double[]{1, 2, 5, 10}) {
+            double cand = exp * m;
             if (cand >= r) {
                 return cand;
             }
@@ -828,13 +809,10 @@ public final class ChartRenderer {
      * 比 {@code step} 大的下一个"整齐"步长（1/2/5/10 × 10^k）。
      * 用在"相邻刻度标签重复"时把步长顶上去（见 {@code render}）。
      */
-    private static int nextNiceStep(int step) {
-        int exp = 1;
-        while (exp * 10 <= step) {
-            exp *= 10;
-        }
-        for (int m : new int[]{1, 2, 5, 10, 20}) {
-            int cand = exp * m;
+    private static double nextNiceStep(double step) {
+        double exp = Math.pow(10, Math.floor(Math.log10(step)));
+        for (double m : new double[]{1, 2, 5, 10, 20}) {
+            double cand = exp * m;
             if (cand > step) {
                 return cand;
             }
@@ -852,13 +830,9 @@ public final class ChartRenderer {
     }
 
     /** 纵轴下界：吸附到刻度；数据全非负时顺手把底边贴到 0 */
-    private static int baseLow(int vLo, int step, boolean clampZero) {
-        int base = Math.floorDiv(vLo, step) * step;
+    private static double baseLow(double vLo, double step, boolean clampZero) {
+        double base = Math.floor(vLo / step) * step;
         return clampZero ? Math.max(0, base) : base;
-    }
-
-    private static int ceilDiv(int a, int b) {
-        return (a + b - 1) / b;
     }
 
     private static long ceilTo(long value, long step) {
@@ -904,12 +878,33 @@ public final class ChartRenderer {
      * ★ 只给纵轴用 ★ 读数（十字线 / 框选统计 / 面板数字）一律用 {@link #fmtExact}，
      * 因为那几处要的是**准确整数**，不是"看得出来大概多少"。
      */
-    public static String fmtAxis(int v) {
+    public static String fmtAxis(double v) {
+        // 整数值（含 2^63 的能量读数）走精确的 long 路径，保持原有观感
+        if (v == Math.rint(v) && Math.abs(v) < 9.0e15) {
+            return fmtAxis((long) v);
+        }
         if (v == 0) {
             return "0";
         }
         String sign = v < 0 ? "-" : "";
-        long a = Math.abs((long) v);
+        String sci = String.format(Locale.ROOT, "%.3E", v);
+        int e = sci.indexOf('E');
+        String mant = sci.substring(0, e);
+        if (mant.indexOf('.') >= 0) {
+            mant = mant.replaceAll("0+$", "");
+            if (mant.endsWith(".")) {
+                mant = mant.substring(0, mant.length() - 1);
+            }
+        }
+        return sign + mant + "E" + sci.substring(e + 1);
+    }
+
+    public static String fmtAxis(long v) {
+        if (v == 0) {
+            return "0";
+        }
+        String sign = v < 0 ? "-" : "";
+        long a = Math.abs(v);
         if (a < 10000) {
             return String.valueOf(v);
         }
@@ -945,8 +940,37 @@ public final class ChartRenderer {
      * 框选统计、十字线读数要的是**准确整数数值** ——
      * 一个物流示波器报出 `1.79E6` 是没有意义的，用户要知道到底是几个。
      */
-    public static String fmtExact(int v) {
-        return String.valueOf(v);
+    public static String fmtExact(Val v) {
+        // 整数（含 2^63）→ 精确整数；小数 → 短格式（Val 里已经是规范化形式）
+        return v.isIntegral() ? Long.toString(v.i()) : fmtFloat(v.d());
+    }
+
+    /** 小数读数的短格式：足够看，又不糊一屏 */
+    private static String fmtFloat(double v) {
+        if (Double.isNaN(v)) {
+            return "-";
+        }
+        double a = Math.abs(v);
+        if (a != 0 && (a >= 1e6 || a < 1e-4)) {
+            String sci = String.format(Locale.ROOT, "%.3E", v);
+            int e = sci.indexOf('E');
+            String mant = sci.substring(0, e);
+            if (mant.indexOf('.') >= 0) {
+                mant = mant.replaceAll("0+$", "");
+                if (mant.endsWith(".")) {
+                    mant = mant.substring(0, mant.length() - 1);
+                }
+            }
+            return mant + "E" + sci.substring(e + 1);
+        }
+        String f = String.format(Locale.ROOT, "%.4f", v);
+        if (f.indexOf('.') >= 0) {
+            f = f.replaceAll("0+$", "");
+            if (f.endsWith(".")) {
+                f = f.substring(0, f.length() - 1);
+            }
+        }
+        return f;
     }
 
     /**
@@ -973,13 +997,13 @@ public final class ChartRenderer {
     }
 
     /** 速率单位是 **n per tick**（第七轮 N12：横轴是世界 tick，速率也按 tick 算才对得上） */
-    private static String fmtRate(int delta, long spanTicks) {
-        return String.format(Locale.ROOT, "%.3f/t", delta / (double) Math.max(1L, spanTicks));
+    private static String fmtRate(Val delta, long spanTicks) {
+        return String.format(Locale.ROOT, "%.3f/t", delta.asDouble() / Math.max(1L, spanTicks));
     }
 
-    /** 带正负号的读数标签（准确整数） */
-    private static String signedExact(int v) {
-        return v > 0 ? "+" + fmtExact(v) : fmtExact(v);
+    /** 带正负号的读数标签（整数精确 / 小数短格式） */
+    private static String signedExact(Val v) {
+        return v.compareTo(Val.ZERO) > 0 ? "+" + fmtExact(v) : fmtExact(v);
     }
 
     private static void centered(GuiGraphics g, Font font, String text, int cx, int y, int color) {

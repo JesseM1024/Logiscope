@@ -1,10 +1,16 @@
 package com.jessetech.logiscope.store;
 
+import com.jessetech.logiscope.analysis.Val;
+
 /**
  * 一次采样：在第 tick 个游戏刻，被探测的槽位里是 itemId × count。
  *
  * 刻意不引用 ItemStack / 世界对象，只保留可序列化的最小信息 ——
  * 这样存储层和分析层都能脱离游戏运行（方便写单元测试、导出、离线画图）。
+ *
+ * 【值是自适应的（第十六轮⑥）】见 {@link Val}：能精确用整数就用 long
+ * （物品数量、能量读数），小数 / 超长整数用 double —— 整数读数保持精确，浮点量也能追。
+ * 旧实现是 {@code int}，2^63 会截断成 -1。
  *
  * 【三种样本：数据 / 无数据 / 中断】
  *
@@ -27,7 +33,12 @@ package com.jessetech.logiscope.store;
  *   时间轴必须留痕。跳过的话，分析层无法区分"什么都没发生"和"我们没看着"，
  *   跨断档的差值会被算成真实变化 —— 那正是这个工具最不能犯的错。
  */
-public record Sample(long tick, String itemId, int count) {
+public record Sample(long tick, String itemId, Val value) {
+
+    /** 整数值样本（旧构造，绝大多数调用点都是它；2^63 这类超 int 的走 {@link Val#of(double)}） */
+    public Sample(long tick, String itemId, long count) {
+        this(tick, itemId, Val.of(count));
+    }
 
     /** 空槽位（不是物品，是"这个格子里什么都没有"） */
     public static final String EMPTY_ITEM = "minecraft:air";
@@ -40,12 +51,12 @@ public record Sample(long tick, String itemId, int count) {
 
     /** 造一条"无数据"样本 */
     public static Sample noData(long tick) {
-        return new Sample(tick, NO_DATA_ITEM, 0);
+        return new Sample(tick, NO_DATA_ITEM, Val.ZERO);
     }
 
     /** 造一条"中断"样本（记录被暂停的那一刻） */
     public static Sample gap(long tick) {
-        return new Sample(tick, GAP_ITEM, 0);
+        return new Sample(tick, GAP_ITEM, Val.ZERO);
     }
 
     /** 这一 tick 是不是"读了但读不到"（与"格子是空的"、"暂停了"都是两件事） */
@@ -65,7 +76,7 @@ public record Sample(long tick, String itemId, int count) {
 
     /** 格子是空的（有数据，但内容为空） */
     public boolean isEmpty() {
-        return !isMarker() && (count <= 0 || EMPTY_ITEM.equals(itemId));
+        return !isMarker() && (value.asDouble() <= 0 || EMPTY_ITEM.equals(itemId));
     }
 
     public String shortName() {

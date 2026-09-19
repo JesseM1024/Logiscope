@@ -62,7 +62,7 @@ import java.util.Set;
  * @param series       按物品"首次出现顺序"排列 —— 顺序稳定，界面才能给每个物品固定的颜色
  * @param firstTick    时间轴起点（含标记样本）
  * @param lastTick     时间轴终点（含标记样本）
- * @param minValue     全体有数据样本的最小值（含未画线的种类）
+ * @param minValue     全体有数据样本的最小值（含未画线的种类；自适应数值 {@link Val}）
  * @param maxValue     全体有数据样本的最大值（含未画线的种类）
  * @param dataCount    有数据的**样本条数**（多格多物品时一个 tick 可能好几条）
  * @param noDataCount  无数据的样本数（一个 tick 最多一条；中断标记不计入）
@@ -74,8 +74,8 @@ public record ChartData(
         List<Series> series,
         long firstTick,
         long lastTick,
-        int minValue,
-        int maxValue,
+        Val minValue,
+        Val maxValue,
         int dataCount,
         int noDataCount,
         int switches,
@@ -83,7 +83,7 @@ public record ChartData(
         long version) {
 
     public static final ChartData EMPTY =
-            new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, 0, Long.MIN_VALUE);
+            new ChartData(List.of(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, Long.MIN_VALUE);
 
     /**
      * 静默大空档兜底（tick）：中间隔了这么多还没断，就直接剪断。
@@ -147,21 +147,25 @@ public record ChartData(
         List<SeriesRange> out = new ArrayList<>();
         for (Series s : series) {
             int n = 0;
-            int first = 0;
-            int last = 0;
-            int min = Integer.MAX_VALUE;
-            int max = Integer.MIN_VALUE;
+            Val first = null;
+            Val last = null;
+            Val min = null;
+            Val max = null;
             for (SeriesPoint p : s.points()) {
                 if (p.tick() < lo || p.tick() > hi) {
                     continue;
                 }
                 if (n == 0) {
-                    first = p.count();
+                    first = p.value();
                 }
-                last = p.count();
+                last = p.value();
                 n++;
-                min = Math.min(min, p.count());
-                max = Math.max(max, p.count());
+                if (min == null || p.value().compareTo(min) < 0) {
+                    min = p.value();
+                }
+                if (max == null || p.value().compareTo(max) > 0) {
+                    max = p.value();
+                }
             }
             if (n == 0) {
                 continue;
@@ -183,7 +187,7 @@ public record ChartData(
     public static ChartData build(long version, List<Sample> samples, int maxItemKinds) {
         int kinds = Math.max(1, maxItemKinds);
         if (samples.isEmpty()) {
-            return new ChartData(List.of(), 0L, 0L, 0, 0, 0, 0, 0, 0, version);
+            return new ChartData(List.of(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, version);
         }
 
         // LinkedHashMap：series 的顺序 = 物品首次出现的顺序，
@@ -195,8 +199,8 @@ public record ChartData(
         long lastTick = samples.get(0).tick();
         int dataCount = 0;
         int noDataCount = 0;
-        int minValue = Integer.MAX_VALUE;
-        int maxValue = Integer.MIN_VALUE;
+        Val minValue = null;
+        Val maxValue = null;
 
         // 上一个**数据 tick**（有内容的那个 tick）与"是否见过"
         long prevDataTick = 0L;
@@ -252,30 +256,34 @@ public record ChartData(
                             || !hasPrevDataTick
                             || b.lastTick != prevDataTick
                             || (t - b.lastTick) > MAX_SILENT_GAP;
-                    b.points.add(new SeriesPoint(t, c.count(), gap));
+                    b.points.add(new SeriesPoint(t, c.value(), gap));
 
                     if (!gap && b.lastTick == t - 1) {
                         // **紧挨着上一格**才算流量：跨格（中间有一格没观测到）的变化
                         // 归不到哪一格上，硬写成 "n/t" 是假的 —— 宁可这一段 IO 空着
-                        int delta = c.count() - b.lastCount;
+                        Val delta = c.value().minus(b.lastCount);
                         b.flow.add(new SeriesPoint(t, delta, b.flowNeedBreak));
                         b.flowNeedBreak = false;
-                        b.flowMin = Math.min(b.flowMin, delta);
-                        b.flowMax = Math.max(b.flowMax, delta);
+                        b.flowMin = b.flowMin == null || delta.compareTo(b.flowMin) < 0 ? delta : b.flowMin;
+                        b.flowMax = b.flowMax == null || delta.compareTo(b.flowMax) > 0 ? delta : b.flowMax;
                     } else {
                         // 断开了：下一段 IO 的第一个点要标成段起点
                         b.flowNeedBreak = true;
                     }
 
                     b.lastTick = t;
-                    b.lastCount = c.count();
-                    b.min = Math.min(b.min, c.count());
-                    b.max = Math.max(b.max, c.count());
+                    b.lastCount = c.value();
+                    b.min = b.min == null || c.value().compareTo(b.min) < 0 ? c.value() : b.min;
+                    b.max = b.max == null || c.value().compareTo(b.max) > 0 ? c.value() : b.max;
                 }
 
                 dataCount++;
-                minValue = Math.min(minValue, c.count());
-                maxValue = Math.max(maxValue, c.count());
+                if (minValue == null || c.value().compareTo(minValue) < 0) {
+                    minValue = c.value();
+                }
+                if (maxValue == null || c.value().compareTo(maxValue) > 0) {
+                    maxValue = c.value();
+                }
             }
 
             prevDataTick = t;
@@ -290,9 +298,11 @@ public record ChartData(
                     b.min, b.max, b.flowMin, b.flowMax));
         }
 
-        if (dataCount == 0) {
-            minValue = 0;
-            maxValue = 0;
+        if (minValue == null) {
+            minValue = Val.ZERO;
+        }
+        if (maxValue == null) {
+            maxValue = Val.ZERO;
         }
 
         return new ChartData(
@@ -364,13 +374,13 @@ public record ChartData(
         final String itemId;
         final List<SeriesPoint> points = new ArrayList<>();
         final List<SeriesPoint> flow = new ArrayList<>();
-        int min = Integer.MAX_VALUE;
-        int max = Integer.MIN_VALUE;
-        int flowMin = 0;
-        int flowMax = 0;
+        Val min = null;
+        Val max = null;
+        Val flowMin = null;
+        Val flowMax = null;
         /** 这条线自己上一次出现的 tick 与数量（判连续性 + 算流量） */
         long lastTick = Long.MIN_VALUE;
-        int lastCount;
+        Val lastCount = Val.ZERO;
         /** 下一段流量的第一个点要不要标成段起点 */
         boolean flowNeedBreak;
 
@@ -386,11 +396,11 @@ public record ChartData(
      * @param first   区间内最早的存量值
      * @param last    区间内最晚的存量值
      */
-    public record SeriesRange(String itemId, int samples, int first, int last, int min, int max) {
+    public record SeriesRange(String itemId, int samples, Val first, Val last, Val min, Val max) {
 
         /** 净变化（存量首尾之差） */
-        public int delta() {
-            return last - first;
+        public Val delta() {
+            return last.minus(first);
         }
     }
 }

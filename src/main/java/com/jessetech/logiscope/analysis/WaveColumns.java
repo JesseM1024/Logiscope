@@ -1,7 +1,6 @@
 package com.jessetech.logiscope.analysis;
 
 import java.util.function.DoubleToIntFunction;
-import java.util.function.IntUnaryOperator;
 import java.util.List;
 
 /**
@@ -24,15 +23,21 @@ import java.util.List;
  *   · **相邻列值不同 → 一条竖直连接线**（台阶数据的跳变）；
  *   · **中间隔着空列 → 逐列线性插值**（采样稀疏时折线不断成孤立点）。
  *
+ * 【值是 double（第十六轮⑥）】采样值本身是自适应的（{@link Val}：整数 long 精确 / 小数
+ * double），但**画图只需要浮点** —— 这里一律走 {@code value.asDouble()}：
+ *   · 列缓冲保持 {@code double[]}，逐列聚合零分配（{@code Val} 是不可变 record，
+ *     逐列新建对象就是每帧几百次分配，禁止）；
+ *   · 精度损失只影响"画在哪个像素"，不影响读数（读数在界面层从 Val 取精确形式）。
+ *
  * 【性能上的两条】见 {@link RectRuns}：游程合并（严格像素等价）+ 只扫"有数据的列"。
  * 列缓冲用**代际标记**复用，不再每次清零满数组。
  */
 public final class WaveColumns {
 
-    private int[] colMin = new int[0];
-    private int[] colMax = new int[0];
-    private int[] colFirst = new int[0];
-    private int[] colLast = new int[0];
+    private double[] colMin = new double[0];
+    private double[] colMax = new double[0];
+    private double[] colFirst = new double[0];
+    private double[] colLast = new double[0];
     private int[] colGen = new int[0];
     private boolean[] colStart = new boolean[0];
     private int gen;
@@ -48,10 +53,10 @@ public final class WaveColumns {
         if (colGen.length >= n) {
             return;
         }
-        colMin = new int[n];
-        colMax = new int[n];
-        colFirst = new int[n];
-        colLast = new int[n];
+        colMin = new double[n];
+        colMax = new double[n];
+        colFirst = new double[n];
+        colLast = new double[n];
         colGen = new int[n];
         colStart = new boolean[n];
     }
@@ -77,13 +82,12 @@ public final class WaveColumns {
     /**
      * 把一条线在 [start, end] 窗口内的点铺成矩形。
      *
-     * @param yOfInt    int 值 → 画布 y（界面层传 yOf；离线传线性映射即可）
-     * @param yOfDouble 同上，给插值列用（浮点）
-     * @param out       矩形出口（内部已做游程合并）
+     * @param yOf  值 → 画布 y（界面层传基于 double 的映射；离线传线性映射即可）
+     * @param out  矩形出口（内部已做游程合并）
      * @return 有采样点的列数；0 表示这条线在这个窗口里没有数据（调用方什么都不用画）
      */
     public int emit(List<SeriesPoint> pts, long start, long end, int plotW, int plotX,
-                    IntUnaryOperator yOfInt, DoubleToIntFunction yOfDouble, RectRuns out) {
+                    DoubleToIntFunction yOf, RectRuns out) {
         out.clear();
         lastRawRects = 0;
         lastColumns = 0;
@@ -105,21 +109,22 @@ public final class WaveColumns {
             if (c < 0 || c >= plotW) {
                 continue;
             }
+            double v = p.value().asDouble();
             if (colGen[c] != g) {
                 colGen[c] = g;
                 colStart[c] = p.breakBefore();
-                colMin[c] = p.count();
-                colMax[c] = p.count();
-                colFirst[c] = p.count();
-                colLast[c] = p.count();
+                colMin[c] = v;
+                colMax[c] = v;
+                colFirst[c] = v;
+                colLast[c] = v;
             } else {
-                if (p.count() < colMin[c]) {
-                    colMin[c] = p.count();
+                if (v < colMin[c]) {
+                    colMin[c] = v;
                 }
-                if (p.count() > colMax[c]) {
-                    colMax[c] = p.count();
+                if (v > colMax[c]) {
+                    colMax[c] = v;
                 }
-                colLast[c] = p.count();
+                colLast[c] = v;
             }
             if (c < cMin) {
                 cMin = c;
@@ -140,19 +145,19 @@ public final class WaveColumns {
             if (prev >= 0 && !colStart[c]) {
                 if (prev == c - 1) {
                     lastLinks++;
-                    pushVLine(out, c, colFirst[c], colLast[prev], plotX, yOfInt);
+                    pushVLine(out, c, colFirst[c], colLast[prev], plotX, yOf);
                 } else {
-                    int v0 = colLast[prev];
-                    int v1 = colFirst[c];
+                    double v0 = colLast[prev];
+                    double v1 = colFirst[c];
                     int d = c - prev;
                     for (int k = prev + 1; k <= c; k++) {
                         double a = v0 + (v1 - v0) * (double) (k - 1 - prev) / d;
                         double b = v0 + (v1 - v0) * (double) (k - prev) / d;
-                        pushVLineF(out, k, a, b, plotX, yOfDouble);
+                        pushVLine(out, k, a, b, plotX, yOf);
                     }
                 }
             }
-            pushVLine(out, c, colMax[c], colMin[c], plotX, yOfInt);
+            pushVLine(out, c, colMax[c], colMin[c], plotX, yOf);
             prev = c;
             lastColumns++;
         }
@@ -160,16 +165,8 @@ public final class WaveColumns {
         return lastColumns;
     }
 
-    private static void pushVLine(RectRuns out, int c, int vA, int vB, int plotX,
-                                  IntUnaryOperator yOf) {
-        int x = plotX + c;
-        out.push(x, x + 1,
-                yOf.applyAsInt(Math.max(vA, vB)),
-                yOf.applyAsInt(Math.min(vA, vB)) + 1);
-    }
-
-    private static void pushVLineF(RectRuns out, int c, double vA, double vB, int plotX,
-                                   DoubleToIntFunction yOf) {
+    private static void pushVLine(RectRuns out, int c, double vA, double vB, int plotX,
+                                  DoubleToIntFunction yOf) {
         int x = plotX + c;
         out.push(x, x + 1,
                 yOf.applyAsInt(Math.max(vA, vB)),

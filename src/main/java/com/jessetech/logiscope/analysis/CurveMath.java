@@ -45,25 +45,26 @@ public final class CurveMath {
     // 极值
     // ------------------------------------------------------------------
 
-    public record Extremes(int min, long minTick, int max, long maxTick) {
+    public record Extremes(Val min, long minTick, Val max, long maxTick) {
     }
 
     public static Extremes extremes(List<SeriesPoint> pts) {
-        int min = Integer.MAX_VALUE;
+        Val min = null;
         long minT = Long.MIN_VALUE;
-        int max = Integer.MIN_VALUE;
+        Val max = null;
         long maxT = Long.MIN_VALUE;
         for (SeriesPoint p : pts) {
-            if (p.count() < min) {
-                min = p.count();
+            if (min == null || p.value().compareTo(min) < 0) {
+                min = p.value();
                 minT = p.tick();
             }
-            if (p.count() > max) {
-                max = p.count();
+            if (max == null || p.value().compareTo(max) > 0) {
+                max = p.value();
                 maxT = p.tick();
             }
         }
-        return new Extremes(min, minT, max, maxT);
+        return new Extremes(min == null ? Val.ZERO : min, minT,
+                max == null ? Val.ZERO : max, maxT);
     }
 
     // ------------------------------------------------------------------
@@ -76,18 +77,18 @@ public final class CurveMath {
 
     public static Stats stats(List<SeriesPoint> pts) {
         int n = pts.size();
-        int[] vals = new int[n];
+        double[] vals = new double[n];
         double sum = 0;
         for (int i = 0; i < n; i++) {
-            vals[i] = pts.get(i).count();
+            vals[i] = pts.get(i).value().asDouble();
             sum += vals[i];
         }
         double mean = sum / n;
-        int[] sorted = vals.clone();
+        double[] sorted = vals.clone();
         Arrays.sort(sorted);
         double med = n % 2 == 1 ? sorted[n / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2.0;
         double ss = 0;
-        for (int v : vals) {
+        for (double v : vals) {
             double d = v - mean;
             ss += d * d;
         }
@@ -103,18 +104,18 @@ public final class CurveMath {
      * @param fall 下降合计（≤ 0）
      * @param gaps 断档处数（那里的变化没有留在观测里，不计入）
      */
-    public record TotalChange(long rise, long fall, int gaps) {
+    public record TotalChange(Val rise, Val fall, int gaps) {
 
         /** net = rise + fall（无断档时 == 区间 Δ） */
-        public long net() {
-            return rise + fall;
+        public Val net() {
+            return rise.plus(fall);
         }
     }
 
     /** 数量线：变化 = 相邻采样值之差（断档不计） */
     public static TotalChange totalChange(List<SeriesPoint> pts) {
-        long rise = 0;
-        long fall = 0;
+        Val rise = Val.ZERO;
+        Val fall = Val.ZERO;
         int gaps = 0;
         for (int i = 1; i < pts.size(); i++) {
             SeriesPoint prev = pts.get(i - 1);
@@ -123,11 +124,11 @@ public final class CurveMath {
                 gaps++;
                 continue;
             }
-            long d = cur.count() - prev.count();
-            if (d > 0) {
-                rise += d;
-            } else if (d < 0) {
-                fall += d;
+            Val d = cur.value().minus(prev.value());
+            if (d.compareTo(Val.ZERO) > 0) {
+                rise = rise.plus(d);
+            } else if (d.compareTo(Val.ZERO) < 0) {
+                fall = fall.plus(d);
             }
         }
         return new TotalChange(rise, fall, gaps);
@@ -150,19 +151,19 @@ public final class CurveMath {
      * （首个流量点的断线只是"这条线从这儿开始"，它的值是本区间内的第一笔真实 Δ）。
      */
     public static TotalChange flowTotal(List<SeriesPoint> flow) {
-        long rise = 0;
-        long fall = 0;
+        Val rise = Val.ZERO;
+        Val fall = Val.ZERO;
         int gaps = 0;
         for (int i = 0; i < flow.size(); i++) {
             SeriesPoint p = flow.get(i);
             if (i > 0 && p.breakBefore()) {
                 gaps++;
             }
-            long v = p.count();
-            if (v > 0) {
-                rise += v;
-            } else if (v < 0) {
-                fall += v;
+            Val v = p.value();
+            if (v.compareTo(Val.ZERO) > 0) {
+                rise = rise.plus(v);
+            } else if (v.compareTo(Val.ZERO) < 0) {
+                fall = fall.plus(v);
             }
         }
         return new TotalChange(rise, fall, gaps);
@@ -182,7 +183,7 @@ public final class CurveMath {
 
     /** 数量线：变更事件 = 相邻采样值之差 ≠ 0（断档不计） */
     public static Events changeEvents(List<SeriesPoint> pts) {
-        List<Long> deltas = new ArrayList<>();
+        List<Double> deltas = new ArrayList<>();
         List<Long> ticks = new ArrayList<>();
         for (int i = 1; i < pts.size(); i++) {
             SeriesPoint prev = pts.get(i - 1);
@@ -190,9 +191,9 @@ public final class CurveMath {
             if (cur.breakBefore()) {
                 continue;
             }
-            long d = cur.count() - prev.count();
-            if (d != 0) {
-                deltas.add(d);
+            Val d = cur.value().minus(prev.value());
+            if (!d.isZero()) {
+                deltas.add(d.asDouble());
                 ticks.add(cur.tick());
             }
         }
@@ -206,18 +207,18 @@ public final class CurveMath {
      * 变更两侧的 tick 差值（周期）在这里也更有意义：它数的是"真实变化之间隔了几格"。
      */
     public static Events flowEvents(List<SeriesPoint> flow) {
-        List<Long> deltas = new ArrayList<>();
+        List<Double> deltas = new ArrayList<>();
         List<Long> ticks = new ArrayList<>();
         for (SeriesPoint p : flow) {
-            if (p.count() != 0) {
-                deltas.add((long) p.count());
+            if (!p.value().isZero()) {
+                deltas.add(p.value().asDouble());
                 ticks.add(p.tick());
             }
         }
         return events(deltas, ticks);
     }
 
-    private static Events events(List<Long> deltas, List<Long> ticks) {
+    private static Events events(List<Double> deltas, List<Long> ticks) {
         List<Long> periods = new ArrayList<>();
         for (int i = 1; i < ticks.size(); i++) {
             periods.add(ticks.get(i) - ticks.get(i - 1));
@@ -229,26 +230,26 @@ public final class CurveMath {
     // 小工具
     // ------------------------------------------------------------------
 
-    private static double mean(List<Long> xs) {
+    private static double mean(List<? extends Number> xs) {
         if (xs.isEmpty()) {
             return Double.NaN;
         }
-        long sum = 0;
-        for (long x : xs) {
-            sum += x;
+        double sum = 0;
+        for (Number x : xs) {
+            sum += x.doubleValue();
         }
         return sum / (double) xs.size();
     }
 
     /** 总体方差（除以 n）；n < 2 时为 0（单一观测没有离散可言，不是 NaN —— 例子：+1,+1 → var=0） */
-    private static double var(List<Long> xs) {
+    private static double var(List<? extends Number> xs) {
         if (xs.size() < 2) {
             return xs.isEmpty() ? Double.NaN : 0;
         }
         double m = mean(xs);
         double ss = 0;
-        for (long x : xs) {
-            double d = x - m;
+        for (Number x : xs) {
+            double d = x.doubleValue() - m;
             ss += d * d;
         }
         return ss / xs.size();
