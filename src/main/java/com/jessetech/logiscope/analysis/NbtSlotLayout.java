@@ -76,6 +76,36 @@ public final class NbtSlotLayout {
         return best;
     }
 
+    /**
+     * **把"点到的格子"定位到该监测哪一个（或哪几个）slot**（第十六轮③）。
+     *
+     * 优先级（越靠前越可信）：
+     *   1. **容器内下标恰好等于某个 NBT slot** → 就是它
+     *      （很多模组就是这么对齐的，能一击命中、真正实现"点哪格监测哪格"）；
+     *   2. 候选只有一个 → 就是它；
+     *   3. 候选多个且下标对不上 → **全都要**（宁可多纳入，也不要漏掉用户想看的格；
+     *      采样时它们名字相同 → 自动求和，图上是一条线）。
+     *
+     * @param candidates        同物品 id 的全部候选（来自 {@link #byItem}）
+     * @param containerSlotIndex 点到的格子在容器里的下标（对不上就传负数）
+     */
+    public static List<Entry> resolvePick(List<Entry> candidates, int containerSlotIndex) {
+        if (candidates == null || candidates.isEmpty()) {
+            return List.of();
+        }
+        if (containerSlotIndex >= 0) {
+            for (Entry e : candidates) {
+                if (e.slot() == containerSlotIndex) {
+                    return List.of(e);
+                }
+            }
+        }
+        if (candidates.size() == 1) {
+            return List.of(candidates.get(0));
+        }
+        return List.copyOf(candidates);
+    }
+
     /** 按 slot 号找元素；不存在（= 这一格是空的）返回 null */
     @Nullable
     public static Entry bySlot(@Nullable Snbt.Node root, @Nullable String listPath, int slot) {

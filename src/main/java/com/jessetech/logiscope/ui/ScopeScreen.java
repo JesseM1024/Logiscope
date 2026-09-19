@@ -237,7 +237,9 @@ public final class ScopeScreen extends Screen {
     private int[] tipRect;
 
     // ---- NBT 槽位型容器（第十六轮）：slot 号写在 NBT 自己身上，按 slot 监测才准 ----
-    /** 当前选格目标是不是"NBT 自带 slot 号"的容器（MEK 那类） */
+    /** 检测到"数据里带 slot 号的物品列表"（只决定按钮能不能点） */
+    private boolean nbtSlotDetected;
+    /** 用户**显式开启**了 NBT 追踪（默认关 —— 避免误判机械手这类设备） */
     private boolean nbtSlotMode;
     /** 检测到的物品列表路径（如 Items） */
     private String nbtSlotListPath = "";
@@ -905,6 +907,14 @@ public final class ScopeScreen extends Screen {
             }
             case PICKER -> {
                 boolean menu = source == Source.MENU;
+                // ★ NBT 追踪是**显式开关**（第十六轮③）★
+                // 原因（用户原话）：错误地自动启用 NBT 追踪，会让"机械手"这类
+                // 形状相似但没有真正 slot 语义的设备**没法按常规路径追踪**。
+                // 所以默认关；只有检测到"数据里带 slot 号的物品列表"时才可点。
+                ProbeInstance pick = pickerProbe();
+                out.add(new Item("nbt_mode",
+                        nbtSlotMode ? tr("logiscope.btn.nbt_mode_on") : tr("logiscope.btn.nbt_mode"),
+                        pick != null && pick.target().hasPersistentId() && nbtSlotDetected));
                 out.add(new Item("cell_mode",
                         cellMode ? tr("logiscope.btn.cell_mode_on") : tr("logiscope.btn.cell_mode"),
                         menu));
@@ -1364,10 +1374,11 @@ public final class ScopeScreen extends Screen {
                     case NONE -> tr("logiscope.src.none");
                 };
                 String line = badge + " · " + tr("logiscope.info.selected") + " " + selectionCount();
-                if (nbtSlotMode) {
-                    // 这类容器的槽位号写在 NBT 里：明确告诉用户"选格会按 slot 监测"
-                    line += "  ·  " + tr("logiscope.picker.nbt_slot").replace("%s", nbtSlotListPath)
-                            + " (" + nbtSlotEntries.size() + ")";
+                if (nbtSlotDetected) {
+                    // 检测到这类容器（slot 号写在 NBT 里）：提示可以按 slot 追踪
+                    line += "  ·  " + (nbtSlotMode ? tr("logiscope.btn.nbt_mode_on")
+                            : tr("logiscope.picker.nbt_slot"))
+                            .replace("%s", nbtSlotListPath) + " (" + nbtSlotEntries.size() + ")";
                 }
                 g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0x9BE1CB, false);
             }
@@ -2668,6 +2679,7 @@ public final class ScopeScreen extends Screen {
         Snbt.Node tree = Snbt.parse(DataCommand.text());
         int added = 0;
         int skipped = 0;
+        int ambiguous = 0;
         for (ContainerAccess.SlotView v : menuSlots) {
             if (!selMenuSlots.contains(v.menuSlotIndex())) {
                 continue;
@@ -2677,12 +2689,20 @@ public final class ScopeScreen extends Screen {
                 skipped++;   // 空格子：NBT 里没有元素 ⇒ 拿不到 slot 号（用户规则：取消监测）
                 continue;
             }
-            List<NbtSlotLayout.Entry> hits = NbtSlotLayout.byItem(tree, nbtSlotListPath, want);
-            if (hits.isEmpty()) {
+            List<NbtSlotLayout.Entry> candidates = NbtSlotLayout.byItem(tree, nbtSlotListPath, want);
+            if (candidates.isEmpty()) {
                 skipped++;   // 这一刻 NBT 里没有这个物品（可能是空格 / 刚被抽走）
                 continue;
             }
-            for (NbtSlotLayout.Entry hit : hits) {
+            // ★ 按格区分（第十六轮③）★：优先"容器下标恰好等于某个 slot"的那个 —— 能真正
+            // 做到"点哪一格监测哪一格"；只有实在分不出来时才把同物品的格子全纳入。
+            List<NbtSlotLayout.Entry> picked = NbtSlotLayout.resolvePick(candidates, v.containerSlotIndex());
+            if (picked.size() > 1) {
+                ambiguous++;
+            }
+            for (NbtSlotLayout.Entry hit : picked) {
+                // 采样用的名字 = **物品 id**（不带任何后缀）→ 同物品多格在聚合时自然求和，
+                // slot 号只出现在目标列表的显示里（可单独删）。
                 String name = hit.itemId() != null && !hit.itemId().isBlank() ? hit.itemId() : want;
                 p.addDataTarget(DataTarget.slotAnchor(nbtSlotListPath, name,
                         p.target().deviceName(), p.target().dimension(), p.target().pos(), hit.slot()));
@@ -2713,6 +2733,10 @@ public final class ScopeScreen extends Screen {
         page = Page.CHART;
         String msg = tr("logiscope.flash.slot_anchor_added").replace("%s",
                 String.valueOf(p.dataTargets().size()));
+        if (ambiguous > 0) {
+            msg += "  ·  " + tr("logiscope.flash.slot_anchor_ambiguous")
+                    .replace("%s", String.valueOf(ambiguous));
+        }
         if (skipped > 0) {
             msg += "  ·  " + tr("logiscope.flash.slot_anchor_skipped").replace("%s", String.valueOf(skipped));
         }
@@ -2721,9 +2745,10 @@ public final class ScopeScreen extends Screen {
 
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
     private void leavePicker() {
-        nbtSlotMode = false;
+        nbtSlotMode = false;      // 每次进选格页都回到"默认关"（用户明确要求默认不启用）
         nbtSlotListPath = "";
         nbtSlotEntries = List.of();
+        nbtSlotDetected = false;
         ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
         if (p != null && !p.hasAnything()) {
             LogiScopeMod.probes().remove(p.id());
@@ -2945,6 +2970,21 @@ public final class ScopeScreen extends Screen {
                 }
             }
             case "data_confirm" -> confirmDataTarget();
+            case "nbt_mode" -> {
+                if (!nbtSlotDetected) {
+                    return;
+                }
+                nbtSlotMode = !nbtSlotMode;
+                if (nbtSlotMode) {
+                    // 开的时候清掉"按菜单/下标"的选择，避免两套语义混在一条探针里
+                    selMenuSlots.clear();
+                    selContainerSlots.clear();
+                    say(tr("logiscope.picker.nbt_mode_hint"));
+                } else {
+                    say(tr("logiscope.flash.nbt_mode_off"));
+                }
+                syncContainerSelection();
+            }
             case "rename" -> {
                 // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 用户原话）
                 renameFocus = true;
@@ -3395,9 +3435,12 @@ public final class ScopeScreen extends Screen {
         }
         nbtSlotParsedFrom = text;
         NbtSlotLayout.Layout layout = NbtSlotLayout.detect(Snbt.parse(text));
-        nbtSlotMode = layout != null;
+        nbtSlotDetected = layout != null;
         nbtSlotListPath = layout == null ? "" : layout.listPath();
         nbtSlotEntries = layout == null ? List.of() : layout.entries();
+        if (!nbtSlotDetected) {
+            nbtSlotMode = false;   // 检测不到就谈不上开启
+        }
     }
 
     /** 探针详情标题：与面板上的 "槽 … · 数据 xN" 呼应 */
@@ -3414,7 +3457,7 @@ public final class ScopeScreen extends Screen {
     private List<String> probeTipLines(ProbeInstance p) {
         List<String> lines = new ArrayList<>();
         for (DataTarget dt : p.dataTargets()) {
-            lines.add(tr("logiscope.tip.line_data") + "  " + dt.valuePath()
+            lines.add(tr("logiscope.tip.line_data") + "  " + dt.displayValue()
                     + (dt.hasNamePath() ? "  ← " + dt.namePath() : ""));
         }
         for (ProbeTarget.SlotRef ref : p.target().slots()) {
@@ -3777,7 +3820,7 @@ public final class ScopeScreen extends Screen {
             }
             String name = dt.hasNamePath() ? "◂" + dt.namePath()
                     : (dt.fallbackName().equals(dt.valuePath()) ? tr("logiscope.data.auto") : dt.fallbackName());
-            String text = dt.valuePath() + "  →  " + name;
+            String text = dt.displayValue() + "  →  " + name;
             int textW = L.w() - 8 - DEL_W - 6;
             g.drawString(this.font, cut(text, Math.max(20, textW)), L.x() + 8, ry, 0xFFE0E0EC, false);
             g.fill(L.x() + L.w() - 4 - DEL_W, ry - 1, L.x() + L.w() - 4, ry + ROW_H - 1,

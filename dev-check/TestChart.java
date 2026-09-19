@@ -82,6 +82,7 @@ public class TestChart {
         t29RenderGeometry();
         t30NbtSlotLayout();
         t31SlotMatchById();
+        t32SlotPickRule();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1015,6 +1016,33 @@ public class TestChart {
         int m = Aggregator.combineAll(ids, counts, 2, outIds, outCounts);
         eq("两格合并成一条", 1, m);
         eq("合计 10", 10, outCounts[0]);
+    }
+
+
+    // 32) 按格定位规则（第十六轮③）：能一击命中就命中，分不出才全纳入
+    private static void t32SlotPickRule() {
+        List<NbtSlotLayout.Entry> two = List.of(
+                new NbtSlotLayout.Entry(0, "minecraft:cobblestone", 2),
+                new NbtSlotLayout.Entry(9, "minecraft:cobblestone", 8));
+
+        // 1) 容器下标恰好等于某个 slot → 就选它（"点哪一格监测哪一格"）
+        List<NbtSlotLayout.Entry> a = NbtSlotLayout.resolvePick(two, 9);
+        eq("下标命中 → 一个", 1, a.size());
+        eq("命中的 slot", 9, a.get(0).slot());
+
+        // 2) 下标对不上、但只有一个候选 → 就是它
+        List<NbtSlotLayout.Entry> one = List.of(new NbtSlotLayout.Entry(3, "minecraft:stone", 1));
+        eq("唯一候选 → 一个", 1, NbtSlotLayout.resolvePick(one, 7).size());
+        eq("唯一候选的 slot", 3, NbtSlotLayout.resolvePick(one, 7).get(0).slot());
+
+        // 3) 下标对不上且多个候选 → 全都要（宁可多纳入，不漏格）
+        List<NbtSlotLayout.Entry> all = NbtSlotLayout.resolvePick(two, 5);
+        eq("分不清 → 全纳入", 2, all.size());
+
+        // 4) 下标为负（没有容器下标可用）→ 同样按"唯一/全要"处理
+        eq("无下标 + 唯一候选", 1, NbtSlotLayout.resolvePick(one, -1).size());
+        eq("无下标 + 多候选", 2, NbtSlotLayout.resolvePick(two, -1).size());
+        eq("空候选", 0, NbtSlotLayout.resolvePick(List.of(), 3).size());
     }
 
     // ---- 断言 ----
