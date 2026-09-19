@@ -11,6 +11,7 @@ import net.neoforged.fml.ModContainer;
 import net.neoforged.fml.common.Mod;
 import net.neoforged.fml.config.ModConfig;
 import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
+import net.neoforged.neoforge.client.event.ClientPlayerNetworkEvent;
 import net.neoforged.neoforge.client.event.ClientTickEvent;
 import net.neoforged.neoforge.client.event.ScreenEvent;
 import net.neoforged.neoforge.client.gui.ConfigurationScreen;
@@ -92,6 +93,14 @@ public final class LogiScopeMod {
 
         // 命令回执的超时计时（1 秒没回就当失败，不然状态永远卡在"等待"）
         NeoForge.EVENT_BUS.<ClientTickEvent.Post>addListener(e -> DataCommand.tick());
+
+        // ★ 进世界 = 清空全部探针 ★ 探针绑定"这个世界里的这台设备"，
+        // 跨世界留着只会变成"坐标同名但设备不是同一台"的僵尸（用户实测 A 存档的
+        // 探针出现在 B 存档）。顺手把 NBT 显示的残留文本也清掉。
+        NeoForge.EVENT_BUS.<ClientPlayerNetworkEvent.LoggingIn>addListener(e -> {
+            LogiScopeMod.probes().clearAll();
+            DataCommand.reset();
+        });
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来

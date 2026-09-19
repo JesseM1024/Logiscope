@@ -72,6 +72,7 @@ public class TestChart {
         t24ArchiveFormat();
         t25CurveMath();
         t26Snbt();
+        t27Offsets();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -802,6 +803,33 @@ public class TestChart {
         Snbt.Node typed = Snbt.parse("{l:[I;1,2,3]}");
         yes("带类型前缀的列表可解析", typed != null
                 && typed.children().get("l").items().size() == 3);
+    }
+
+
+    // 27) SNBT 偏移（第十一轮④②）：悬浮高亮按源偏移定位
+    private static void t27Offsets() {
+        String raw = "barrel has the following block data: {a:1,bb:22,c:\"xyz\"}";
+        Snbt.Node root = Snbt.parse(raw);
+        yes("解析成功", root != null);
+        if (root == null) {
+            return;
+        }
+        for (Snbt.Entry e : Snbt.flatten(root)) {
+            String slice = raw.substring(e.node().start(), e.node().end());
+            if (e.path().equals("a")) {
+                eq("a 的偏移切出原值", "1", slice);
+            }
+            if (e.path().equals("bb")) {
+                eq("bb 的偏移切出原值", "22", slice);
+            }
+            if (e.path().equals("c")) {
+                eq("c 的偏移切出带引号原串", "\"xyz\"", slice);
+            }
+        }
+        // 前缀里的 "block data:" 不该被当成值（offset 不会落进前缀）
+        for (Snbt.Entry e : Snbt.flatten(root)) {
+            yes("偏移在复合标签内", e.node().start() > raw.indexOf(':'));
+        }
     }
 
     // ---- 断言 ----

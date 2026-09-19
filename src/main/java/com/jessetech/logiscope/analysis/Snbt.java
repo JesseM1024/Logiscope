@@ -52,6 +52,14 @@ public final class Snbt {
         private final String raw;
         private final double number;
         private final boolean numeric;
+        /**
+         * 这个节点在**源文本**里的区间 [start, end)（第十一轮④②）。
+         * 界面拿它做"鼠标悬浮值列表 ↔ 高亮 NBT 原文"的联动：偏移是相对
+         * 传给 {@link #parse} 的整段文本的（含命令回复的前缀），
+         * 与原文折行时的偏移同源，所以直接能用。
+         */
+        private int start;
+        private int end;
 
         private Node(Kind kind, Map<String, Node> children, List<Node> items,
                      String raw, double number, boolean numeric) {
@@ -61,6 +69,21 @@ public final class Snbt {
             this.raw = raw;
             this.number = number;
             this.numeric = numeric;
+        }
+
+        /** 源文本区间起点（叶子的 token 含引号） */
+        public int start() {
+            return start;
+        }
+
+        /** 源文本区间终点（不含） */
+        public int end() {
+            return end;
+        }
+
+        private void mark(int start, int end) {
+            this.start = start;
+            this.end = end;
         }
 
         public Kind kind() {
@@ -147,14 +170,19 @@ public final class Snbt {
             return null;
         }
         c.skipWs();
+        int start = c.pos();
         char ch = c.peek();
-        return switch (ch) {
+        Node n = switch (ch) {
             case '{' -> parseCompound(c, depth);
             case '[' -> parseList(c, depth);
             case '"', '\'' -> parseQuoted(c);
             case '\0' -> null;
             default -> parseBare(c);
         };
+        if (n != null) {
+            n.mark(start, c.pos());
+        }
+        return n;
     }
 
     private static Node parseCompound(Cursor c, int depth) {
@@ -395,6 +423,10 @@ public final class Snbt {
             while (i < s.length() && Character.isWhitespace(s.charAt(i))) {
                 i++;
             }
+        }
+
+        int pos() {
+            return i;
         }
 
         /** 读到任一终止字符（不含），用于裸串 / 键 */

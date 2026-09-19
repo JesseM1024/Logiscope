@@ -191,6 +191,21 @@ public final class ProbeManager {
         return false;
     }
 
+    /**
+     * 清空全部探针（进入世界时调用）。
+     *
+     * ★ 为什么要清 ★ 探针绑定的是"**这个世界**里的这台设备"，而实例表是
+     * 客户端进程级的 —— 原先退出存档再进另一个存档，A 存档建的探针还挂在
+     * B 存档的列表里（坐标同名但设备完全不是同一台）。LoggingIn 时清空 =
+     * 每个世界从零开始，跨世界的"僵尸探针"在结构上不可能出现。
+     */
+    public void clearAll() {
+        for (ProbeInstance p : List.copyOf(probes)) {
+            remove(p.id());
+        }
+        activeId = -1;
+    }
+
     /** 用选格页的结果配置某个实例 */
     public void configure(int id, ProbeTarget target, @Nullable List<ContainerAccess.SlotView> verifyViews) {
         ProbeInstance p = find(id);
