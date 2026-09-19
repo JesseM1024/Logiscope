@@ -579,14 +579,35 @@ public final class ProbeInstance {
             // ---- 数据那半边（守卫：lastDataTick，独立于物品——两条路的节拍不锁相）----
             if (hasData && lastDataTick != gameTime) {
                 lastDataTick = gameTime;
+                // ★ 先攒齐、再按名称合并（第十二轮③修）★
+                // 两个目标解析出同一个名字（同一物品装了两罐：Items[0].id == Items[1].id）
+                // 时必须**求和**成一条样本 —— 否则同 tick 同名两条样本，图表会在
+                // 两个值之间来回画（用户实测的"震荡"）。与物品路径的 writeTick 同规。
+                // 读不到的目标这一 tick **留空**（它的线断开，不写 0 连累别的目标）；
+                // 一个都没读到才写整 tick 的 no_data。
+                int want = dts.size();
+                if (bufIds.length < want) {
+                    bufIds = new String[want];
+                    bufCounts = new int[want];
+                    aggIds = new String[want];
+                    aggCounts = new int[want];
+                }
+                int got = 0;
                 for (DataTarget dt : dts) {
                     Double v = dataProbe.readNumber(level, dt);
                     if (v == null) {
-                        // 方块实体没了 / 路径不存在 / 那个值不是数字 —— 如实记"读不到"
-                        store.add(Sample.noData(gameTime));
-                    } else {
-                        String name = resolveDataName(level, dt);
-                        store.add(new Sample(gameTime, name, (int) Math.round(v)));
+                        continue;   // 方块实体没了 / 路径不存在 / 非数字 —— 这个目标留空
+                    }
+                    bufIds[got] = resolveDataName(level, dt);
+                    bufCounts[got] = (int) Math.round(v);
+                    got++;
+                }
+                if (got == 0) {
+                    store.add(Sample.noData(gameTime));
+                } else {
+                    int k = Aggregator.combineAll(bufIds, bufCounts, got, aggIds, aggCounts);
+                    for (int i = 0; i < k; i++) {
+                        store.add(new Sample(gameTime, aggIds[i], aggCounts[i]));
                     }
                 }
             }

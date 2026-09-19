@@ -73,6 +73,7 @@ public class TestChart {
         t25CurveMath();
         t26Snbt();
         t27Offsets();
+        t28CombineAll();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -830,6 +831,34 @@ public class TestChart {
         for (Snbt.Entry e : Snbt.flatten(root)) {
             yes("偏移在复合标签内", e.node().start() > raw.indexOf(':'));
         }
+    }
+
+
+    // 28) 数据目标合并（第十二轮③）：同名求和、保留 0 与负数（与 combine 的物品语义区别）
+    private static void t28CombineAll() {
+        // 两个罐同一物品：5000 + 3000 必须合并成一条 8000（否则图表震荡）
+        String[] ids = {"mekanism:ethene", "mekanism:ethene"};
+        int[] counts = {5000, 3000};
+        String[] outIds = new String[4];
+        int[] outCounts = new int[4];
+        int m = Aggregator.combineAll(ids, counts, 2, outIds, outCounts);
+        eq("同名合并成 1 条", 1, m);
+        eq("求和 8000", 8000, outCounts[0]);
+
+        // 0 与负数是真实读数，必须保留（combine 会把它们当"空格子"丢掉）
+        String[] ids2 = {"energy", "energy", "tank"};
+        int[] counts2 = {0, 0, -5};
+        int m2 = Aggregator.combineAll(ids2, counts2, 3, outIds, outCounts);
+        eq("零值保留（合并为 0）+ 负值独立成条", 2, m2);
+        eq("energy 合计 0", 0, outCounts[0]);
+        eq("tank -5", -5, outCounts[1]);
+
+        // 与 combine 的行为差异：同样输入，combine 会丢掉 ≤0
+        String[] outIds3 = new String[4];
+        int[] outCounts3 = new int[4];
+        int m3 = Aggregator.combine(ids2, counts2, 3, outIds3, outCounts3);
+        eq("对照：combine 全跳过 → air 占位", 1, m3);
+        eq("对照：combine 产出 air x0", 0, outCounts3[0]);
     }
 
     // ---- 断言 ----
