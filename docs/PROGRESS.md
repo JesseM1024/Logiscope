@@ -786,3 +786,18 @@ CSV 里整数原样（64 而不是 64.0）、小数用 double 字面量；
 | 8 | 顶栏光效 | `renderTopGlow`：2px 底条（低 alpha）+ 移动亮斑（15 段梯形 alpha，半宽 45px，周期 2.8s）；页色 = 根页淡绿 / 选格+数据页淡蓝 / 图表淡黄 / 计算淡紫。每帧 ~16 次 fill，与背景同量级 —— **不需要降级呼吸光效** |
 
 **离线**：build / TestChart 398 条 / verify-jar 全过；lang 中英各 165 键一致。
+
+
+### 第十六轮⑦修订：实测反馈三条（open_folder 位置 / 按钮颜色 / 光效不显示）
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| open_folder 被 new probe 挡住 | 浮在存档列表下方，几何上与探针列表重叠 | **改进按钮行**（ROOT buttonItems：create → open_folder → close，与 new probe / hide 同级同行）；删除 renderOpenFolderChip / openFolderRect 整套方案，动作走 `onChip("open_folder")` |
+| 按钮文本颜色替换不成功 | `renderButtons` 把构造时存好的 accent **传成了 0**，renderChip 拿不到语义色 | 渲染时实时求值 `accentFor(c.id())` —— 顺带修掉另一个隐患：accent 依赖运行状态（如 NBT ON 黄），而按钮行只在 rebuild 时重建，构造时求值会**滞后一拍** |
+| 顶栏光效不显示 | `renderTitle` 会整条 fill 标题栏背景，光效画在它**之前**被完全盖住 | 调用顺序改为 renderTitle **之后** renderTopGlow |
+
+**教训（一句话）**：三个都是"画/算的顺序"问题 —— 颜色在渲染链上被中间层丢掉、
+光效被后画的背景盖住、状态色在构造时被冻结。渲染链上的每一段都要问：
+"我传下去的东西，后面会不会被覆盖/丢弃？"
+
+离线：build / TestChart 398 条 / verify-jar 全过。
