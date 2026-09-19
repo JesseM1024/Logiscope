@@ -87,7 +87,7 @@ public final class SlotAlign {
      * | 1 | 顺序对齐 | {@link Result#byOrdinal()} 里有这一格（唯一解，且靠物品 id 验过） |
      * | 2 | 容器下标 | `containerIndexReliable` **且**那个 slot 的元素就是这一格的物品 |
      * | 3 | 按物品 id 唯一命中 | 候选恰好 1 个 |
-     * | 4 | 空格子 | 只能靠**统一位移**外推（{@link Result#shift()}）；推不出来就拒绝 |
+     * | 4 | 空格子 | 数据里没有元素：先靠**统一位移**外推（{@link Result#shift()}）；位移给不出来时，**只有**在容器下标可靠时才退回用它 —— 否则拒绝 |
      *
      * @return 数据里的 slot 号；**null = 拒绝**（宁可少测一格，也不给一个错的号）
      */
