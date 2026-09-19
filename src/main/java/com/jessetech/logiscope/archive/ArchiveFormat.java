@@ -4,10 +4,13 @@ import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.stream.JsonReader;
+import com.google.gson.stream.JsonToken;
 import com.jessetech.logiscope.store.Sample;
 import org.jetbrains.annotations.Nullable;
 
 import java.io.IOException;
+import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -156,27 +159,123 @@ public final class ArchiveFormat {
                 samples);
     }
 
-    /** 读头部（列表页扫描用）：只要小结，不把几万条样本建成对象 */
+    /**
+     * 读头部（列表页扫描用）：只要小结，**不把几万条样本建成对象**。
+     *
+     * ★ 第十六轮⑤ 改成流式读 ★
+     * 旧实现是 `JsonParser.parseString(Files.readString(...))` —— 先把整份文件读成字符串、
+     * 再把**每一条样本都建成 JsonObject**，只为取几行头部。存档大时（几万样本）
+     * 每次打开面板都要付这份代价，而注释一直写着"只读 JSON 头，几 KB 级"（名实不符）。
+     * 现在用 {@link JsonReader} 顺着 token 走：认识的键取值，`samples` 整段
+     * `skipValue()` 数个数就跳过 —— 不建对象、不把整份文本留在内存里。
+     *
+     * 容错口径与旧实现一致：非对象 / 语法坏 → `IOException`（调用方跳过这个存档）；
+     * 某个键的类型不对 → 当它不存在（用默认值），不因此丢掉整个存档。
+     */
     public static Header readHeader(Path file) throws IOException {
-        JsonObject root = parseObject(Files.readString(file, StandardCharsets.UTF_8));
-        if (root == null) {
-            throw new IOException("not a LogiScope archive: " + file);
+        String created = "";
+        String world = "unknown";
+        String probeName = "";
+        String probeDesc = "";
+        long first = 0L;
+        long last = 0L;
+        int markerCount = 0;
+        int sampleCount = 0;
+        try (Reader in = Files.newBufferedReader(file, StandardCharsets.UTF_8);
+             JsonReader r = new JsonReader(in)) {
+            r.setLenient(true);
+            r.beginObject();
+            while (r.hasNext()) {
+                switch (r.nextName()) {
+                    case "created" -> created = stringOr(r, "");
+                    case "world" -> world = stringOr(r, "unknown");
+                    case "probe" -> {
+                        if (r.peek() == JsonToken.BEGIN_OBJECT) {
+                            r.beginObject();
+                            while (r.hasNext()) {
+                                String k = r.nextName();
+                                if ("name".equals(k)) {
+                                    probeName = stringOr(r, "");
+                                } else if ("description".equals(k)) {
+                                    probeDesc = stringOr(r, "");
+                                } else {
+                                    r.skipValue();
+                                }
+                            }
+                            r.endObject();
+                        } else {
+                            r.skipValue();
+                        }
+                    }
+                    case "range" -> {
+                        if (r.peek() == JsonToken.BEGIN_OBJECT) {
+                            r.beginObject();
+                            while (r.hasNext()) {
+                                String k = r.nextName();
+                                if ("first".equals(k)) {
+                                    first = longOr(r, 0L);
+                                } else if ("last".equals(k)) {
+                                    last = longOr(r, 0L);
+                                } else {
+                                    r.skipValue();
+                                }
+                            }
+                            r.endObject();
+                        } else {
+                            r.skipValue();
+                        }
+                    }
+                    case "markers" -> markerCount = countArray(r);
+                    case "samples" -> sampleCount = countArray(r);
+                    default -> r.skipValue();      // 不认识的键（含将来的新字段）直接跳过
+                }
+            }
+            r.endObject();
+        } catch (RuntimeException e) {
+            throw new IOException("not a LogiScope archive: " + file, e);
         }
-        JsonObject probe = root.has("probe") && root.get("probe").isJsonObject()
-                ? root.getAsJsonObject("probe") : new JsonObject();
-        JsonObject range = root.has("range") && root.get("range").isJsonObject()
-                ? root.getAsJsonObject("range") : new JsonObject();
-        JsonArray samples = arrayOrNull(root, "samples");
-        JsonArray markers = arrayOrNull(root, "markers");
-        return new Header(
-                str(root, "created", ""),
-                str(root, "world", "unknown"),
-                str(probe, "name", ""),
-                str(probe, "description", ""),
-                range.has("first") ? range.get("first").getAsLong() : 0L,
-                range.has("last") ? range.get("last").getAsLong() : 0L,
-                markers == null ? 0 : markers.size(),
-                samples == null ? 0 : samples.size());
+        return new Header(created, world, probeName, probeDesc, first, last, markerCount, sampleCount);
+    }
+
+    /** 数一个数组有几个元素 —— 逐个 token 跳过去，不建任何对象 */
+    private static int countArray(JsonReader r) throws IOException {
+        if (r.peek() != JsonToken.BEGIN_ARRAY) {
+            r.skipValue();
+            return 0;
+        }
+        int n = 0;
+        r.beginArray();
+        while (r.hasNext()) {
+            r.skipValue();
+            n++;
+        }
+        r.endArray();
+        return n;
+    }
+
+    private static String stringOr(JsonReader r, String def) throws IOException {
+        JsonToken t = r.peek();
+        if (t == JsonToken.STRING || t == JsonToken.NUMBER) {
+            return r.nextString();
+        }
+        r.skipValue();
+        return def;
+    }
+
+    private static long longOr(JsonReader r, long def) throws IOException {
+        JsonToken t = r.peek();
+        if (t == JsonToken.NUMBER) {
+            return r.nextLong();
+        }
+        if (t == JsonToken.STRING) {
+            try {
+                return Long.parseLong(r.nextString());
+            } catch (NumberFormatException e) {
+                return def;
+            }
+        }
+        r.skipValue();
+        return def;
     }
 
     // ------------------------------------------------------------------

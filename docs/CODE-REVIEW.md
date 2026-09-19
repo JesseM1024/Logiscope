@@ -1,5 +1,16 @@
 # LogiScope · 全项目代码审查（2026-09-19，基线 `ecfc7cc`）
 
+> **修复进度（第十六轮⑤，提交见 PROGRESS）**：第一节建议顺序里的 ① ② ③ 共 **8 条 P1 全部修完**，
+> 每条都在 `ARCHITECTURE` 的 **CP25** 里立了契约，离线断言 336 → **376 条**。
+> 复核中另外纠正了本报告自身的两处：
+>   · **P1-8 的机制**：`Screen#resize` 只走 `rebuildWidgets()`、**不重跑 `init()`**
+>     —— "拖窗口反复扫盘"不成立；真正的浪费是 `readHeader` 整份解析（已改流式）。
+>   · **P1-5 的判据**：光把"列表不在"判成读不到会破坏刚验过的"空格子 = 0"
+>     （MEK 全空时 `items` 键本来就不写）⇒ 改用**方块实体类型比对**（C24-10）。
+> 修 P1-1 时发现旧断言**把 bug 固化了**（期望值正是被吞掉的那笔流量），已按新语义改正。
+> 复现脚本 `dev-check/ProbeFlow.java` 已并入 `TestChart` 的 t34 并删除。
+> 仍未修：P2 13 条 + P3 6 条（清单在第三、四节），以及 P1-9 那条**等拍板的已知残留**。
+
 > **怎么审的**：三个子系统分头读（采集/绑定/存储、UI、分析与存档）＋ 我自己复核每一条
 > 高优先级结论。**代理的话不当事实** —— 每条 P0/P1 都用「读源码行号」或「离线复现」验过，
 > 复核中**否掉了 1 条**（见第四节）。
@@ -26,7 +37,7 @@
 
 ## 二、P1：建议下一轮修（每条都给了证据）
 
-### 1. ★ IO 线统计吞掉每个数据段的第一笔真实流量，并谎报一次断档 ★
+### 1. ★ IO 线统计吞掉每个数据段的第一笔真实流量，并谎报一次断档 ★　✅ 已修（t34）
 - **位置**：`analysis/ChartData.java:250-267`（分流点）＋ `analysis/CurveMath.java:134-150`、`185-196`（统计）
 - **机制**：存量线的**首点**按契约带 `breakBefore`（"首点前面没有观测"）→ 这一格本该如此；
   但它顺手把 `b.flowNeedBreak = true` 传给了下一格，而下一格的 Δ 是**两个都观测到的相邻格之差**，
@@ -42,7 +53,7 @@
   IO 线的"缺口数"应改为由存量侧推导（少了几笔 Δ），而不是数 `breakBefore`。
   修的时候把上面那三个数写成断言（t34）。
 
-### 2. ★ NBT 数值被窄化进 `int`，越界/NaN 静默变成错值 ★
+### 2. ★ NBT 数值被窄化进 `int`，越界/NaN 静默变成错值 ★　✅ 已修（t36）
 - **位置**：`collect/ProbeInstance.java:691` `bufCounts[got] = (int) Math.round(v);` → `store/Sample.java:30`（`int count`）
 - **机制**：`data get`/NBT 里的 long 或 double 超过 `Integer.MAX_VALUE` 时 `(int)` 静默回绕成负数；
   `FloatTag` 的 NaN 经 `Math.round` 变 **0**（被当成"真实的 0"记进曲线）。
@@ -50,21 +61,21 @@
 - **建议**：`Math.round` 前判 `Double.isFinite` 与 int 范围，越界/非有限一律按"读不到"处理（留空），
   不要写一个错的数。**宽化存储（int→long）是更大的改动，先修诚实性。**
 
-### 3. ★ 纯数据探针暂停时不写 `gap` 标记 → 恢复后曲线跨过暂停连起来 ★
+### 3. ★ 纯数据探针暂停时不写 `gap` 标记 → 恢复后曲线跨过暂停连起来 ★　✅ 已修
 - **位置**：`collect/ProbeInstance.java:786-791`（`writeGapMarker` 只看 `lastSampledGameTime`）
 - **机制**：`lastSampledGameTime` 只在**物品**路径的 `advanceTick` 里更新；纯数据探针走 `lastDataTick`
   → 恒为 `Long.MIN_VALUE` → `pause()` 时什么都不写 → 恢复后画图把暂停前后连成一条直线，
   正是 `gap` 标记要防的"编造连续数据"。
 - **建议**：水位取 `max(lastSampledGameTime, lastDataTick)`（数据半边也维护一个"最后采样 tick"）。
 
-### 4. `configure()` 与"在飞的服务端采样"竞态 → 新会话第一格写的是**旧设备**的值
+### 4. `configure()` 与"在飞的服务端采样"竞态 → 新会话第一格写的是**旧设备**的值　✅ 已修（C25-4）
 - **位置**：`collect/ProbeInstance.java:620-652`（快照在锁外取，锁内只复查 `state`）＋ `344-373`（`configure`）
 - **机制**：服务端线程在 620 行取到旧 `target`/`dataTargets` 后等锁；渲染线程此时 `configure()`
   改目标、`store.clear()`、`lastSampledGameTime = MIN_VALUE` 后放锁 → 服务端线程进锁后 `state` 仍是
   RECORDING/FOLLOWING（复查通过）→ `advanceTick` 因 MIN_VALUE 必返回 true → **用旧目标读值写进新会话**。
 - **建议**：锁内重新读 `target`/`dataTargets` 并重算 `hasItems/hasData`（或加一个 generation 序号）。
 
-### 5. `readSlotAnchor` 把"列表路径不存在"也写成 `0`（应与"这格是空的"区分）
+### 5. `readSlotAnchor` 把"列表路径不存在"也写成 `0`（应与"这格是空的"区分）　✅ 已修（C24-10，改用方块实体类型比对）
 - **位置**：`collect/DataProbe.java:49-61`（`bySlot` 返回 null 的两种含义被合并成 `count = 0`）
 - **机制**：`bySlot → entriesAt` 在**路径不存在 / 结构不符**时返回空表，于是返回 `Entry(slot, null, 0)`
   —— "读不到"被当成"真实的 0"记进曲线（同文件 `readNumber` 的语义是"路径不存在 → null → no_data"，自相矛盾）。
@@ -74,7 +85,7 @@
 - **建议**：至少把"路径存在但元素缺"与"路径不存在"分开；后者按"读不到"处理（no_data），
   并把上面这条 MEK 特例写进注释，免得下一轮把 0 全变成 no_data。
 
-### 6. 跨世界的静态残留：`ContainerAnchor.clearActive()` 与 `ProbeSlots.reset()` **都没有调用点**
+### 6. 跨世界的静态残留：`ContainerAnchor.clearActive()` 与 `ProbeSlots.reset()` **都没有调用点**　✅ 已修（C25-5）
 - **位置**：`bind/ContainerAnchor.java:99`（定义）、`collect/ProbeSlots.java:119`（定义）；
   对照 `LogiScopeMod.java:100-103`（进世界时清了 `probes` 与 `DataCommand`，**漏了这两个**）
 - **机制**：容器 id 只在 0~99 循环，新世界第一个容器撞上旧 `activeContainerId` 时
@@ -82,7 +93,7 @@
   `ProbeSlots` 同理：新世界目标坐标与旧世界相同时直接复用旧槽位清单（或遗留 `pending` 永久早退）。
 - **建议**：在 `LoggingIn` 监听里一并调用这两个 reset（与 `probes().clearAll()` 同一时机）。
 
-### 7. 重命名输入框离开回放页后**不释放焦点** → 之后所有按键被吃掉
+### 7. 重命名输入框离开回放页后**不释放焦点** → 之后所有按键被吃掉　✅ 已修（C25-6）
 - **位置**：`ui/ScopeScreen.java:3401-3432`（`renameFocus` 时 `return true` 吞键）
   vs `3518`（`!renameFocus || !L.hasChart()` 才画框）；清焦点只在 Esc(3412)/Enter(3489)
 - **机制**：点「重命名」→ 点「返回列表」→ 页面变成 ROOT（不画输入框），但 `renameFocus` 仍为 true
@@ -90,7 +101,7 @@
 - **建议**：切页分支（`replay_back` / `data_back` / `close`）或 render 开头加一句
   "`renameFocus && !L.hasChart()` → 置 false"。
 
-### 8. 存档列表扫描**解析整份 JSON**，而 `init()` 每次窗口变化都扫一遍
+### 8. 存档列表扫描**解析整份 JSON**，而 `init()` 每次窗口变化都扫一遍　✅ 已修（头改流式；"resize 会重跑 init"这条经核实**不成立**）
 - **位置**：`archive/Archives.java:152-166`（`scan` 对每个存档调 `readHeader`）＋
   `archive/ArchiveFormat.java:161`（`readString` + 整份 `parseObject`）＋ `ui/ScopeScreen.java:552`
   （注释写"只读 JSON 头，几 KB 级"—— **与实现不符**；vanilla `Screen.resize` 会重新 `init`）

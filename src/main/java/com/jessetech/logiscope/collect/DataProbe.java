@@ -4,11 +4,13 @@ import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.bind.DataTarget;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.NumericTag;
 import net.minecraft.nbt.StringTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.block.entity.BlockEntity;
 import org.jetbrains.annotations.Nullable;
@@ -38,19 +40,33 @@ public final class DataProbe {
     }
 
     /**
-     * **NBT 槽位目标**的读数（第十六轮）：
-     * 读方块本体 NBT → 解析 → 在 {@code valuePath} 那个列表里找 {@code slot == nbtSlot} 的元素。
+     * **NBT 槽位目标**的读数（第十六轮）：读方块本体 NBT → 解析 →
+     * 在 {@code valuePath} 那个列表里找 {@code slot == nbtSlot} 的元素。
      *
-     * @return null = 这台设备现在读不到（方块实体没了 / 区块不在）→ 上层记 no_data；
-     *         非 null = 这一刻的值。元素**不存在**时返回一条 {@code count = 0} 的空条目 ——
-     *         "这一格是空的"就该是 0（而不是 no_data，因为设备本身读得到）。
+     * ★ 元素不在有两种原因，不能混成一件 ★（第十六轮⑤）
+     *   · **还是同一台设备** → 这一格空了 ⇒ `count = 0`
+     *     （"这格是空的"就该是 0，不是 no_data —— 设备本身读得到）；
+     *   · **这地方换了设备**（换成别的机器 / 箱子 / 空气）→ 那个 slot 号已经**没有意义**了
+     *     ⇒ 返回 null 走上层 no_data。
+     * 旧实现一律写 0，于是"设备早被拆了"会表现为**一条永远为 0 的假曲线**。
+     *
+     * 判据 = 方块实体类型：锚点建档时从 `data get block` 的 SNBT 根上记下 `id`，
+     * 这里用 `BlockEntityType.getKey(be.getType())` 比 —— 两处是同一个字符串
+     * （`BlockEntity#saveId` 写的正是它）。记不到类型（beType 为空）就退回老行为。
+     *
+     * @return null = 这台设备现在读不到（方块实体没了 / 区块不在 / 换了设备）→ 上层记 no_data；
+     *         非 null = 这一刻的值（元素不存在时是 `count = 0` 的空条目）
      */
     @Nullable
     public NbtSlotLayout.Entry readSlotAnchor(ServerLevel level, DataTarget target) {
-        CompoundTag root = readRoot(level, target.pos());
-        if (root == null) {
+        BlockEntity be = level.getBlockEntity(target.pos());
+        if (be == null) {
             return null;
         }
+        if (!sameBlockEntityType(be, target.beType())) {
+            return null;
+        }
+        CompoundTag root = be.saveWithoutMetadata(level.registryAccess());
         Snbt.Node tree = Snbt.parse(root.getAsString());
         NbtSlotLayout.Entry e = NbtSlotLayout.bySlot(tree, target.valuePath(), target.nbtSlot());
         if (e == null) {
@@ -58,6 +74,15 @@ public final class DataProbe {
             return new NbtSlotLayout.Entry(target.nbtSlot(), null, 0);
         }
         return e;
+    }
+
+    /** 现在这块地方的方块实体，还是锚点建档时那一种吗（记不到类型时一律当作"是"） */
+    private static boolean sameBlockEntityType(BlockEntity be, @Nullable String want) {
+        if (want == null || want.isBlank()) {
+            return true;
+        }
+        ResourceLocation now = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType());
+        return now != null && want.equals(now.toString());
     }
 
     /** 按路径取字符串（给"名称来自 NBT"的场景用） */

@@ -617,30 +617,38 @@ public final class ProbeInstance {
         if (st != State.RECORDING && st != State.FOLLOWING) {
             return false;
         }
-        ProbeTarget t = target;
-        List<DataTarget> dts = dataTargets;
-        boolean hasData = !dts.isEmpty();
-        boolean hasItems = !t.slots().isEmpty() && t.hasPersistentId();
-        // 物品那半边的"可服务端采样"条件（与旧逻辑一致：界面开着且下标没验证时，
-        // 物品交给客户端菜单路 —— 但**数据目标不受此限**，它们只认服务端直读）。
-        boolean itemsReady = hasItems
-                && (st == State.FOLLOWING || probe.mappingStatus(t) == WorldProbe.MappingStatus.VERIFIED);
-        if (!hasData && !itemsReady) {
+        // 锁外的预筛（便宜的早退；真正的判定在锁内重做一遍）
+        ProbeTarget t0 = target;
+        List<DataTarget> dts0 = dataTargets;
+        boolean itemsReady0 = !t0.slots().isEmpty() && t0.hasPersistentId()
+                && (st == State.FOLLOWING || probe.mappingStatus(t0) == WorldProbe.MappingStatus.VERIFIED);
+        if (dts0.isEmpty() && !itemsReady0) {
             return false;
         }
-        // 同一台设备：维度取槽位的（没有槽位就取数据目标的）
-        ResourceKey<Level> dim = t.hasPersistentId() ? t.dimension() : dts.get(0).dimension();
-        ServerLevel level = server.getLevel(dim);
-        if (level == null) {
-            return false;
-        }
-        long gameTime = level.getGameTime();
         synchronized (sampleLock) {
-            // ★ 锁内复查状态 ★（暂停 / 删除后绝不能再用旧目标写样本）
+            // ★ 锁内复查状态 + 重取目标 ★（第十六轮⑤）
+            // 只复查 state 是不够的：`configure()`（换设备 / 改选格）在另一条线程上改
+            // target 与 dataTargets、还会 store.clear()。若这里继续用锁外那份旧快照，
+            // 就会**用旧设备的值写进刚清空的新会话**（新会话第一格出现上一台机器的数）。
             State now = state;
             if (now != State.RECORDING && now != State.FOLLOWING) {
                 return false;
             }
+            ProbeTarget t = target;
+            List<DataTarget> dts = dataTargets;
+            boolean hasData = !dts.isEmpty();
+            boolean itemsReady = !t.slots().isEmpty() && t.hasPersistentId()
+                    && (now == State.FOLLOWING || probe.mappingStatus(t) == WorldProbe.MappingStatus.VERIFIED);
+            if (!hasData && !itemsReady) {
+                return false;
+            }
+            // 同一台设备：维度取槽位的（没有槽位就取数据目标的）
+            ResourceKey<Level> dim = t.hasPersistentId() ? t.dimension() : dts.get(0).dimension();
+            ServerLevel level = server.getLevel(dim);
+            if (level == null) {
+                return false;
+            }
+            long gameTime = level.getGameTime();
             // ---- 物品那半边（守卫：lastSampledGameTime，与菜单路互斥，旧语义不变）----
             if (itemsReady && advanceTick(gameTime)) {
                 List<ContainerAccess.SlotView> views = probe.readOnServer(level, t);
@@ -687,8 +695,16 @@ public final class ProbeInstance {
                     if (v == null) {
                         continue;   // 方块实体没了 / 路径不存在 / 非数字 —— 这个目标留空
                     }
+                    // ★ 别把"装不下"悄悄变成错值 ★（第十六轮⑤）
+                    // 存储层是 int（`Sample.count`）。能量类设备的读数常在 2^31 以上，
+                    // 直接 `(int) Math.round(v)` 会**回绕成负数**；NaN 会变成 0
+                    // （被当成"真实的 0"记进曲线）。装不下就按"读不到"处理：留空。
+                    long rounded = Math.round(v);
+                    if (!Double.isFinite(v) || rounded < Integer.MIN_VALUE || rounded > Integer.MAX_VALUE) {
+                        continue;
+                    }
                     bufIds[got] = resolveDataName(level, dt);
-                    bufCounts[got] = (int) Math.round(v);
+                    bufCounts[got] = (int) rounded;
                     got++;
                 }
                 if (got == 0) {
@@ -784,7 +800,11 @@ public final class ProbeInstance {
      * 但语义是对的，而且一定落在这段空白里，画图时能把线剪在该剪的地方。
      */
     private void writeGapMarker() {
-        long last = lastSampledGameTime;
+        // ★ 两条采样路各有自己的水位，取最靠后的那个 ★（第十六轮⑤）
+        // `lastSampledGameTime` 只在**物品**路径的 advanceTick 里更新；纯数据探针
+        // （只有 NBT 目标、没有槽位）永远走不到那里 → 恒为 MIN_VALUE → 暂停时
+        // 什么都不写 → 恢复后画图会把暂停前后连成一条（正是 gap 标记要防的"编造连续数据"）。
+        long last = Math.max(lastSampledGameTime, lastDataTick);
         if (last != Long.MIN_VALUE) {
             store.add(Sample.gap(last + 1));
         }
