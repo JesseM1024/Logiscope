@@ -1367,6 +1367,32 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 
 ---
 
+### CP22 · "机器在不在跑"的判定（采样门）　风险：中 ⚠️
+
+**契约**：读值前必须先过 `ChunkTicking.ticking(level, pos)`，
+即 `ServerLevel#shouldTickBlocksAt(chunkPos)` —— 与 vanilla 决定
+"这一格要不要 tick 方块"用的是同一条判据（距离管理器的 block-ticking 范围）。
+
+**为什么不能用 `Level#isLoaded`**（第十三轮①的 B5 根因）：
+`isLoaded` 只回答"这个区块在区块表里吗"。**边界区块**（渲染距离内、模拟距离外）
+也在表里，但**不做方块 tick** —— 机器是停的，方块实体 NBT 停在最后一次 tick 的
+状态。用它当判据，读到的是**冻结值**：曲线看起来像"设备稳定运行在这个数"，
+其实已经出范围了。这与本工具"宁可留空也不编数据"的底线直接冲突。
+
+**三条读值路径都要走这个门**：
+`WorldProbe.readOnServer`（容器物品）/ `ProbeSlots.readNow`（选格页内容）/
+`DataProbe.readRoot`（NBT 数据目标）。
+
+**顺带的收益**：这个判据**不加载区块**。而 `Level#getBlockEntity` 会经
+`getChunkAt` 强制加载 —— 那既慢（每 tick 一次磁盘/生成开销）又会把区块按在内存里。
+
+**语义结果**（与用户口径一致）：走出模拟距离 / 换维度 / 区块卸载 → 记 `no_data`；
+回到范围内 → 自动恢复（`no_data` 只是那一段的留白，不影响后面的记录）。
+
+---
+
+---
+
 ## 三、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |

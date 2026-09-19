@@ -217,6 +217,24 @@ public final class ScopeScreen extends Screen {
     @Nullable
     private String replaySelectedItem;
 
+    // ---- 存档重命名（第十三轮④）----
+    /** 当前打开存档的显示名（可被重命名覆盖）与目录名（身份标识，永不改） */
+    private String replayName = "";
+    private String replayDir = "";
+    /** 重命名输入框：是否激活 + 缓冲区（激活时吃掉键盘，Enter 确认 / Esc 取消） */
+    private boolean renameFocus;
+    private String renameBuf = "";
+
+    // ---- 悬浮详情（第十三轮⑤）：长列表用滚轮翻，避免"只有个 +N 看不出是啥" ----
+    private String tipTitle = "";
+    private List<String> tipLines = List.of();
+    private int tipScroll;
+    private int tipKey;
+    private int tipKeyShown;
+    private final int[] tipBuf = new int[4];
+    @Nullable
+    private int[] tipRect;
+
     // ---- 回放计算（第十一轮②）----
     /** 运算选择（工具栏「运算」弹窗）。OP_* 常量见下 */
     private int analyzeOp = OP_NONE;
@@ -897,6 +915,7 @@ public final class ScopeScreen extends Screen {
                         p != null && p.store().size() > 0));
             }
             case REPLAY -> {
+                out.add(new Item("rename", tr("logiscope.btn.rename"), replayArchive != null));
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1094,6 +1113,10 @@ public final class ScopeScreen extends Screen {
     public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
         rebuildIfNeeded();
         refreshAnalyze();
+        // 悬浮详情每帧重建（鼠标动一下就可能换目标）
+        tipKey = 0;
+        tipTitle = "";
+        tipLines = List.of();
         Layout L = layout();
         int x = L.x();
         int y = L.y();
@@ -1133,7 +1156,11 @@ public final class ScopeScreen extends Screen {
         // 弹出菜单压在按钮之上（它经常盖住底部按钮区）
         renderLegendPopup(g, L, mouseX, mouseY);
         renderOpPopup(g, L, mouseX, mouseY);
+        renderRenameBox(g, L);
         renderResizeGrip(g, L, mouseX, mouseY);
+        // 悬浮详情最后画：它永远在最上层，且位置跟着鼠标
+        updateHoverTips(L, mouseX, mouseY);
+        renderTip(g, L, mouseX, mouseY);
         renderFlash(g, y);
 
         // 最后两样必须压在最上层，和 vanilla 的顺序一致：
@@ -1335,9 +1362,10 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, counts, right - this.font.width(counts), y, 0x808088, false);
                 y += ROW_H;
 
-                String mm = "min " + ChartRenderer.fmtExact(summary.min()) + "  max "
-                        + ChartRenderer.fmtExact(summary.max()) + "  avg "
-                        + ChartRenderer.fmtExact(summary.average());
+                // 第十三轮④：min/max/avg 删掉（要看统计就存档后做区间运算，那里更完整），
+                // 换成"实时样本条数 / 缓冲上限" —— 这才是实时页真正想知道的事。
+                String mm = tr("logiscope.info.samples") + " " + p.store().size()
+                        + " / " + p.store().capacity();
                 String sw = "switch " + chartData.switches() + "  series " + chartData.series().size();
                 if (chartData.droppedKinds() > 0) {
                     // 超过 maxItemKinds 的种类：数据照记，只是不画线 —— 得让用户知道
@@ -1362,7 +1390,7 @@ public final class ScopeScreen extends Screen {
                 // 回放页的信息区：存档名 / 探针来源 / 统计
                 ArchiveData a = replayArchive;
                 if (a != null) {
-                    g.drawString(this.font, cut(a.name() + "  ·  " + a.created(), L.w() - 2 * PAD),
+                    g.drawString(this.font, cut(replayName + "  ·  " + a.created(), L.w() - 2 * PAD),
                             left, y, 0xE0B8E0, false);
                     y += ROW_H;
                     g.drawString(this.font, cut(a.probeName() + " " + a.probeDesc(), L.w() - 2 * PAD),
@@ -1433,7 +1461,21 @@ public final class ScopeScreen extends Screen {
     private void renderArchives(GuiGraphics g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
         int y = L.archTop();
-        g.drawString(this.font, tr("logiscope.info.archives"), x + PAD, y, 0xE0B8E0, false);
+        List<Archives.Info> head = archiveList;
+        String colName = tr("logiscope.arch.col.name");
+        String colDir = tr("logiscope.arch.col.dir");
+        String colCnt = tr("logiscope.arch.col.count");
+        int headNameW = Math.max(96, (L.w() - 16) * 44 / 100);
+        int headNameX = x + 8;
+        int headDirX = headNameX + headNameW + 6;
+        int headCntX = x + L.w() - 8 - this.font.width(colCnt);
+        g.drawString(this.font, tr("logiscope.info.archives") + (head.isEmpty() ? "" : "  "), x + PAD, y,
+                0xE0B8E0, false);
+        if (!head.isEmpty()) {
+            // 列名贴在标题行右侧，和下面的三列同位置 —— "名称-文件夹-样本数"一眼对上
+            g.drawString(this.font, colDir, headDirX, y, 0x6A6A78, false);
+            g.drawString(this.font, colCnt, headCntX, y, 0x6A6A78, false);
+        }
         if (L.archRows() <= 0) {
             return;
         }
@@ -1451,7 +1493,7 @@ public final class ScopeScreen extends Screen {
             }
             Archives.Info info = list.get(idx);
             int ry = y + ROW_H + i * ROW_H;
-            boolean loaded = replayArchive != null && replayArchive.name().equals(info.dirName());
+            boolean loaded = replayArchive != null && info.dirName().equals(replayDir);
             boolean over = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8, ROW_H);
             if (over) {
                 g.fill(x + 4, ry - 1, x + L.w() - 4, ry + ROW_H - 1, 0x40FFFFFF);
@@ -1459,15 +1501,20 @@ public final class ScopeScreen extends Screen {
             if (loaded) {
                 g.fill(x + 4, ry - 1, x + 6, ry + ROW_H - 1, COLOR_ANALYZE);
             }
-            String label = info.probeName().isBlank() ? info.dirName() : info.probeName();
-            String meta = info.dirName() + " · " + info.sampleCount();
-            g.drawString(this.font, cut(label, 110), x + 8, ry,
+            // 三列**固定对齐**：名称（左侧留宽，可重命名） / 文件夹 / 样本数（右对齐）
+            String name = info.displayName().isBlank() ? info.dirName() : info.displayName();
+            String cnt = String.valueOf(info.sampleCount());
+            int nameW = Math.max(96, (L.w() - 16) * 44 / 100);
+            int nameX = x + 8;
+            int dirX = nameX + nameW + 6;
+            int cntX = x + L.w() - 8 - this.font.width(cnt);
+            g.drawString(this.font, cut(name, nameW), nameX, ry,
                     loaded ? 0xFFF0E0F8 : 0xFFC8C8D8, false);
-            int mx = x + 8 + this.font.width(label) + 6;
-            int metaW = x + L.w() - 8 - mx;
-            if (metaW > 20) {
-                g.drawString(this.font, cut(meta, metaW), mx, ry, 0xFF9099A8, false);
+            int dirW = Math.max(16, cntX - dirX - 8);
+            if (dirW > 16) {
+                g.drawString(this.font, cut(info.dirName(), dirW), dirX, ry, 0xFF9099A8, false);
             }
+            g.drawString(this.font, cnt, cntX, ry, 0xFF9099A8, false);
         }
         if (list.size() > L.archRows()) {
             String more = (scrollArchives + L.archRows()) + " / " + list.size()
@@ -2615,7 +2662,10 @@ public final class ScopeScreen extends Screen {
     private void openArchive(Archives.Info info) {
         try {
             loadReplay(Archives.load(info));
-            say(tr("logiscope.flash.replay_loaded").replace("%s", info.dirName()));
+            // 身份用目录名（永不改），显示名可用 name.txt 覆盖（第十三轮④）
+            replayDir = info.dirName();
+            replayName = info.displayName().isBlank() ? info.dirName() : info.displayName();
+            say(tr("logiscope.flash.replay_loaded").replace("%s", replayName));
         } catch (Exception e) {
             LogiScopeMod.LOGGER.error("[LogiScope] archive load failed: {}", info.dirName(), e);
             say(tr("logiscope.flash.archive_failed"));
@@ -2632,6 +2682,8 @@ public final class ScopeScreen extends Screen {
      */
     private void loadReplay(ArchiveData data) {
         replayArchive = data;
+        replayName = data.name();
+        replayDir = data.name();   // 导出时目录名 == 存档名；从列表打开时由 openArchive 覆盖
         chartData = ChartData.build(0, data.samples(), LogiScopeConfig.maxItemKinds());
         summary = Analyzer.summarize(data.samples());
         replayMarkers.clear();
@@ -2786,6 +2838,11 @@ public final class ScopeScreen extends Screen {
                 }
             }
             case "data_confirm" -> confirmDataTarget();
+            case "rename" -> {
+                // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 用户原话）
+                renameFocus = true;
+                renameBuf = replayName;
+            }
             case "data_back" -> {
                 cellMode = false;
                 page = Page.PICKER;
@@ -3003,6 +3060,12 @@ public final class ScopeScreen extends Screen {
             if (dir == 0) {
                 return true;
             }
+            // 悬浮详情框里的长列表：滚它（用户要求"文本过多时能上下翻"）
+            if (tipRect != null && !tipLines.isEmpty()
+                    && isIn((int) mouseX, (int) mouseY, tipRect[0], tipRect[1], tipRect[2], tipRect[3])) {
+                tipScroll = Math.max(0, tipScroll - dir);
+                return true;
+            }
             // DATA 页：滚原文 / 滚目标列表 / 滚值列表（看光标落在哪一块）
             if (page == Page.DATA) {
                 DataRects R = dataRects(L);
@@ -3050,6 +3113,12 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean charTyped(char codePoint, int modifiers) {
+        if (renameFocus && !Character.isISOControl(codePoint)) {
+            if (renameBuf.length() < 48) {
+                renameBuf += codePoint;
+            }
+            return true;
+        }
         if (page == Page.DATA && dataFocus != 0 && !Character.isISOControl(codePoint)) {
             if (dataFocus == 1) {
                 if (dataPath.length() < 120) {
@@ -3066,6 +3135,39 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+        if (renameFocus) {
+            switch (keyCode) {
+                case 259 -> {   // Backspace
+                    renameBuf = chop(renameBuf);
+                    return true;
+                }
+                case 257, 335 -> {   // Enter / 小键盘 Enter → 确认
+                    commitRename();
+                    return true;
+                }
+                case 256 -> {   // Esc → 取消
+                    renameFocus = false;
+                    return true;
+                }
+                case 86 -> {   // Ctrl+V
+                    if (hasControlDown()) {
+                        try {
+                            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+                            if (clip != null) {
+                                String t = clip.trim();
+                                renameBuf = t.length() > 48 ? t.substring(0, 48) : t;
+                            }
+                        } catch (Exception ignored) {
+                            // 剪贴板不可用就算了
+                        }
+                        return true;
+                    }
+                }
+                default -> {
+                }
+            }
+            return true;   // 输入框激活时吃掉所有按键，免得误触发别的交互
+        }
         if (page == Page.DATA && dataFocus != 0) {
             switch (keyCode) {
                 case 259 -> {   // Backspace
@@ -3113,6 +3215,186 @@ public final class ScopeScreen extends Screen {
         } catch (Exception ignored) {
             // 剪贴板不可用时静默（不该因为粘贴失败把界面搞崩）
         }
+    }
+
+    // ==================================================================
+    // 存档重命名（第十三轮④）
+    // ==================================================================
+
+    /** 提交重命名：只写 name.txt（不动 recording.json），然后刷新列表与标题 */
+    private void commitRename() {
+        renameFocus = false;
+        Archives.Info info = null;
+        for (Archives.Info i : archiveList) {
+            if (i.dirName().equals(replayDir)) {
+                info = i;
+                break;
+            }
+        }
+        if (info == null) {
+            return;
+        }
+        try {
+            Archives.rename(info, renameBuf);
+            archiveList = Archives.scan();
+            for (Archives.Info i : archiveList) {
+                if (i.dirName().equals(replayDir)) {
+                    replayName = i.displayName().isBlank() ? i.dirName() : i.displayName();
+                    break;
+                }
+            }
+            say(tr("logiscope.flash.renamed").replace("%s", replayName));
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.warn("[LogiScope] rename failed: {}", e.toString());
+            say(tr("logiscope.flash.archive_failed"));
+        }
+    }
+
+    /** 重命名输入框：画在绘图区顶部（浮层，不占常规布局） */
+    private void renderRenameBox(GuiGraphics g, Layout L) {
+        if (!renameFocus || !L.hasChart()) {
+            return;
+        }
+        int x = L.x() + PAD + 4;
+        int y = L.chartTop() + 4;
+        int w = Math.min(L.w() - 2 * PAD - 8, 260);
+        String label = tr("logiscope.rename.label");
+        g.fill(x, y, x + w, y + 26, 0xF2181822);
+        ring(g, x, y, w, 26, COLOR_ANALYZE);
+        g.drawString(this.font, label, x + 5, y + 3, 0xFF8A8AA0, false);
+        String shown = renameBuf;
+        int avail = w - 10;
+        String draw = this.font.width(shown) <= avail ? shown : cut(shown, avail);
+        g.drawString(this.font, draw, x + 5, y + 13, 0xFFE0E0EC, false);
+        if ((LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
+            int cx = x + 5 + Math.min(this.font.width(shown), avail);
+            g.fill(cx, y + 12, cx + 1, y + 21, 0xFFE0E0EC);
+        }
+        g.drawString(this.font, tr("logiscope.rename.hint"), x + w + 6, y + 13, 0xFF9099A8, false);
+    }
+
+    // ==================================================================
+    // 悬浮详情（第十三轮⑤）：+N / data xN / 槽列表 —— 鼠标悬浮出完整列表
+    // ==================================================================
+
+    /** 本帧请求一条悬浮详情（后调用者覆盖先调用者；调用方自己判鼠标是否在上面） */
+    private void wantTip(int key, String title, List<String> lines) {
+        if (lines.isEmpty()) {
+            return;
+        }
+        tipKey = key;
+        tipTitle = title;
+        tipLines = lines;
+    }
+
+    /**
+     * 判定"鼠标现在压着哪个需要展开的东西"，并填好详情内容。
+     * 三处来源：图例的 {@code +N}（收起的线）/ 探针行的 {@code 数据 xN}（NBT 键）/
+     * 选格页第一行的 {@code 槽 …}（完整格子列表）。
+     */
+    private void updateHoverTips(Layout L, int mouseX, int mouseY) {
+        // 图例 +N：列出被收起的那些线
+        for (Chip c : L.legend()) {
+            if (!c.id().equals("legend_more") || !c.hit(mouseX, mouseY)) {
+                continue;
+            }
+            List<String> lines = new ArrayList<>();
+            for (Series ser : chartData.series()) {
+                boolean shown = false;
+                for (Chip lc : L.legend()) {
+                    if (lc.id().equals(SERIES_PREFIX + ser.itemId())) {
+                        shown = true;
+                        break;
+                    }
+                }
+                if (!shown) {
+                    lines.add(ChartRenderer.label(chartData.indexOf(ser.itemId()), ser.itemId()));
+                }
+            }
+            wantTip(1, c.label() + " " + tr("logiscope.tip.hidden_series"), lines);
+            return;
+        }
+
+        // 探针行 / 存档行：探针行上悬浮显示它追踪的 NBT 键
+        if (page == Page.ROOT && L.listRows() > 0) {
+            int row = (mouseY - L.listTop()) / ROW_H;
+            int idx = scrollRow + row;
+            List<ProbeInstance> probes = LogiScopeMod.probes().all();
+            if (row >= 0 && mouseY >= L.listTop() && idx < probes.size()) {
+                ProbeInstance pr = probes.get(idx);
+                if (pr.isDataProbe()) {
+                    List<String> lines = new ArrayList<>();
+                    for (DataTarget dt : pr.dataTargets()) {
+                        lines.add(dt.valuePath() + (dt.hasNamePath() ? "  ← " + dt.namePath() : ""));
+                    }
+                    wantTip(2, tr("logiscope.tip.data_targets").replace("%s", String.valueOf(lines.size())), lines);
+                    return;
+                }
+            }
+        }
+
+        // 选格页第一行（描述里带 槽 0,1,2+24）：列出全部已选格子
+        if (page == Page.PICKER) {
+            ProbeInstance src = pickerProbe();
+            int rowY = L.infoTop();
+            if (src != null && mouseY >= rowY && mouseY < rowY + ROW_H && selectionCount() > 0) {
+                List<String> lines = new ArrayList<>();
+                for (ProbeTarget.SlotRef ref : src.target().slots()) {
+                    String item = ref.itemId() == null || ref.itemId().isBlank()
+                            ? tr("logiscope.slot.empty")
+                            : ChartRenderer.label(-1, ref.itemId()) + " x" + ref.count();
+                    lines.add(tr("logiscope.tip.slot").replace("%s", String.valueOf(ref.menuSlotIndex()))
+                            + "  ·  " + item);
+                }
+                wantTip(3, tr("logiscope.tip.slots").replace("%s", String.valueOf(lines.size())), lines);
+            }
+        }
+    }
+
+    /** 画详情框（跟着鼠标，夹在面板内；行多时底部给"x / y 滚轮"提示） */
+    private void renderTip(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        if (tipLines.isEmpty()) {
+            tipRect = null;
+            return;
+        }
+        if (tipKey != tipKeyShown) {
+            tipKeyShown = tipKey;
+            tipScroll = 0;
+        }
+        int lineH = 10;
+        int maxRows = 12;
+        int w = this.font.width(tipTitle) + 10;
+        for (String l : tipLines) {
+            w = Math.max(w, this.font.width(l) + 10);
+        }
+        int rows = Math.min(tipLines.size(), maxRows);
+        int h = (rows + 1) * lineH + 4 + (tipLines.size() > rows ? lineH : 0);
+        int x = mouseX + 10;
+        int y = mouseY + 10;
+        if (x + w > L.x() + L.w() - 2) {
+            x = Math.max(L.x() + 2, mouseX - w - 10);
+        }
+        if (y + h > L.y() + L.h() - 2) {
+            y = Math.max(L.y() + 2, mouseY - h - 10);
+        }
+        tipScroll = Math.max(0, Math.min(tipScroll, Math.max(0, tipLines.size() - rows)));
+        g.fill(x - 2, y - 2, x + w + 2, y + h, 0xF2181822);
+        ring(g, x - 2, y - 2, w + 4, h + 2, 0xFF3A3A4A);
+        g.drawString(this.font, tipTitle, x + 2, y, COLOR_HILIGHT, false);
+        int ly = y + lineH + 1;
+        for (int i = tipScroll; i < Math.min(tipLines.size(), tipScroll + rows); i++) {
+            g.drawString(this.font, cut(tipLines.get(i), w - 6), x + 2, ly, 0xFFE0E0EC, false);
+            ly += lineH;
+        }
+        if (tipLines.size() > rows) {
+            String more = (tipScroll + rows) + " / " + tipLines.size() + "  " + tr("logiscope.hint.scroll");
+            g.drawString(this.font, more, x + 2, y + h - lineH, 0xFF9099A8, false);
+        }
+        tipBuf[0] = x - 2;
+        tipBuf[1] = y - 2;
+        tipBuf[2] = w + 4;
+        tipBuf[3] = h + 2;
+        tipRect = tipBuf;
     }
 
     // ==================================================================

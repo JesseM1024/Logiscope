@@ -3,6 +3,7 @@
 
 
 
+
   "key.categories.logiscope": "物流示波器",
   "logiscope.key.open_scope": "打开/收起物流示波器",
   "logiscope.title": "物流示波器",
@@ -135,5 +136,17 @@
   "logiscope.calc.events": "变更 %s 次",
   "logiscope.calc.delta": "变化量 mean %s var %s",
   "logiscope.calc.period": "周期 mean %s t var %s t",
-  "logiscope.data.auto": "(自动)"
+  "logiscope.data.auto": "(自动)",
+  "logiscope.info.samples": "样本",
+  "logiscope.btn.rename": "重命名",
+  "logiscope.rename.label": "存档名称",
+  "logiscope.rename.hint": "Enter 确认 · Esc 取消",
+  "logiscope.flash.renamed": "已重命名：%s",
+  "logiscope.arch.col.name": "名称",
+  "logiscope.arch.col.dir": "文件夹",
+  "logiscope.arch.col.count": "样本",
+  "logiscope.tip.slots": "已选格子 %s 个（滚轮可翻）",
+  "logiscope.tip.data_targets": "追踪的 NBT 键 %s 个（滚轮可翻）",
+  "logiscope.tip.hidden_series": "条线被收起（滚轮可翻）",
+  "logiscope.tip.slot": "槽 %s"
 }
