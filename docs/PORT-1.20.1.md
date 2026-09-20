@@ -95,11 +95,14 @@
    首次会下载 1.20.1 全套产物，较慢。
 4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
    （随分支走）；File → Project Structure → Project SDK 选 17（只影响 IJ 编辑器解析）。
-5. **切分支串味**：`build/`、`run/` 不受 git 管理——
-   - 切回 1.21.1 前先 `gradlew.bat clean`，切完重新 sync；
-   - 建议本分支在 build.gradle 的 runs 里把工作目录改成 `run120/`，
-     `saves` / `options.txt` / `run/mods` 就不会与 1.21.1 互踩。
-   - 两条铁律照旧：测试 jar 换版本线时**先删同名旧 jar**；正在开发的模组不进 `run/mods`。
+5. **切分支串味**（已解决一半）：`build/`、run 目录不受 git 管理——
+   - 本分支 build.gradle 的 runs.configureEach 里已设
+     `gameDirectory = project.file('1_20_1_neo')`（属性名 javap 核实：
+     `RunModel.getGameDirectory()`），首次 `runClient` 会自动创建该目录；
+     `saves` / `options.txt` / mods / logs 与 master 的 `run/` 互不覆盖。
+   - `build/` 仍共用：**切回 1.21.1 前先 `gradlew.bat clean`，切完重新 sync**。
+   - 两条铁律照旧：测试 jar 换版本线时**先删同名旧 jar**；正在开发的模组不进 run 目录的 mods。
+   - 测试 jar 目标路径：1.20.1 线 = `1_20_1_neo/mods/`；master 线 = `run/mods/`。
 6. 分支策略：`master` = 1.21.1 主线；通用 bugfix 进 master 后 cherry-pick 到 `1.20.1-neo`；
    只对单侧成立的修复不互挑（在提交消息里注明"仅 1.20.1"或"仅 1.21.1"）。
 

@@ -45,6 +45,11 @@ legacyForge {
             // jvmArguments.addAll '-Dmixin.debug.export=true'
         }
         configureEach {
+            // 各版本线独立 run 目录，切分支互不串味：
+            // 本分支（1.20.1）用 1_20_1_neo/，master（1.21.1）仍用默认 run/。
+            // saves / options.txt / mods / logs 互不覆盖。属性名已用 javap 核实
+            // （RunModel.getGameDirectory()，DirectoryProperty）。
+            gameDirectory = project.file('1_20_1_neo')
             systemProperty 'forge.logging.markers', 'REGISTRIES'
             logLevel = org.slf4j.event.Level.DEBUG
         }
