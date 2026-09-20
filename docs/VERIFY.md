@@ -102,8 +102,9 @@ gradlew.bat runClient
 ```bat
 cd /d D:\dev\logiscope
 gradlew.bat build
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar" TestChart
+javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
+:: t38 起需要最后一个 jar：DataTarget 的 record 组件签名引用游戏类（只解析、不启动游戏）
+java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
 python verify-jar.py build/libs/logiscope-0.1.0.jar
@@ -175,4 +176,25 @@ python verify-jar.py build/libs/logiscope-0.1.0.jar
 | Q6 | 图表页按钮顺序 | `Pause → Resume → Clear → Stop & archive → Keep tracking… → Back to slot（淡蓝）→ Main screen（淡绿）` |
 | ★Q7 | 计算页**右键**图例条目 | 等于按下该图例弹出菜单里的「分析」—— 曲线被钉中（品红高亮、统计框出现）；再右键一次取消。左键行为不变（弹菜单） |
 | ★Q8 | 顶栏光效 | 面板顶边 2px：根页**淡绿**、选格/数据页**淡蓝**、图表页**淡黄**、计算页**淡紫**；一个亮斑从左到右循环（周期 ~2.8s）。实现是每帧 ~16 次 fill，**渲染压力可忽略**（若实测掉帧再降级为呼吸光效） |
-| H2 | `TestChart` | **398 条断言全过**；lang 中英各 165 键一致 |
+| H2 | `TestChart` | **411 条断言全过**（t38 新增）；lang 中英各 169 键一致 |
+
+
+---
+
+## 第十六轮⑧：AE 网络支持（★ 优先）
+
+**准备**：一个 AE2 网络（ME 网络有物品流动），一个终端（ME 终端 / 合成终端均可）。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★A1 | 打开终端 GUI → 面板选格页 | 信息行显示**"AE 网络终端 · 点选要监测的物品"**（黄色行 + 灰色说明行）；不再是普通槽位列表的提示 |
+| ★A2 | 点网络列表里的一个物品行 | 该行勾选，「已选」计数 +1；再点取消。列表里的**背包格 / 合成格**点了没反应（它们不是网络物品） |
+| A3 | 「cell_mode（选格）」按钮 | AE 模式下**置灰**（两套选格语义不能混） |
+| ★A4 | 点几件物品 → Done | 每件物品一条监测目标；图表页正常出线，读数 = 该物品在**网络中的可用数量**；关掉终端 GUI 读数不变 |
+| A5 | 从网络里取走某物品（数量减到 0 / 物品消失） | 线如实降到 **0**（不是断档，网络还在线） |
+| A6 | 给 AE 网络断电 | 该线变 **no-data**（网络读不到 ≠ 0）|
+| A7 | 回选格页 | 选过的物品**自动勾着**；减选 1 件 → Done 后目标数 = 减完的数量（覆写语义）；一件不选 → 不变（提示"先点选"） |
+| A8 | 两个终端监测同一物品 | 曲线**合并求和**（采样名 = 物品 id，同一聚合语义） |
+| A9 | 卸掉 AE2 相关 jar 重开（可选） | 非 AE 探针完全不受影响；AE 目标恒 no-data（日志记一次） |
+| A10 | 普通箱子 / MEK 机器（回归） | 选格行为完全不变（AE 检测只在 ME 存储菜单家族生效） |
+| H2 | `TestChart` | **411 条**全过 |

@@ -815,3 +815,24 @@ CSV 里整数原样（64 而不是 64.0）、小数用 double 字面量；
 - 选格页「Done」→ 黄色（`0xFFFFD24A`，与 NBT ON 同一黄）；
 - 图表页「Stop & archive」→ 淡紫（复用 `COLOR_CALC_GLOW`，与计算页光效同色系）。
   accentFor 加两个静态分支即可（渲染时实时求值的机制上一轮已修好）。build / verify-jar 全过。
+
+
+## 第十六轮⑧：AE 网络支持（特例覆盖，用户点名 2026-09-20）
+
+**需求**：选格页为 AE 终端等面板时，点击一个容器格 = 监测该 AE 网络内对应物品数量；
+AE 不能通过容器格判断，写特例覆盖逻辑。
+
+**API 核实（javap，AE2 19.2.17）**：AE 终端格子 = `RepoSlot`（网络列表显示窗口，非容器内容）；
+菜单家族 `MEStorageMenu`（wtlib 无线终端同族；PatternAccessTerm 不在此族）；19.x 的
+存储读值 = `MEStorage.getAvailableStacks()` → `KeyCounter`（没有旧版 IItemList）；
+`getGridNode(dir)` 的 default 实现按 `isExposedOnSide` 过滤 + CableBus 不实现 IActionHost
+⇒ 必须遍历 6 面取节点。
+
+| 件 | 内容 |
+|---|---|
+| `collect/AeNetworkReader`（新） | 全反射零编译依赖。`read(level,pos,itemId)`：host → 6 面找节点 → isActive → storageService.getInventory().getAvailableStacks() → AEItemKey.of → KeyCounter.get。语义：null = 读不到（非 AE/断电/缺 AE2）→ no_data；0 = 网络在线没这物品（真值）。`isAeStorageMenu(menu)` 供 UI 检测。失败只记一次日志 |
+| `bind/DataTarget` | `AE_NETWORK_PATH = "ae:network"` 标记 + `aeNetwork` 工厂 + `isAeNetwork`；去重规则抽成静态 `isDuplicate`（AE 按 literalName —— valuePath 全相同，绝不能拿它去重；t38 钉住） |
+| `collect/ProbeInstance` | isDuplicate 委托；`replaceAeTargets`（覆写 AE 目标，保留纯路径/锚点）；采样循环加 AE 分支（Val.of(long) 精确承载） |
+| `ui/ScopeScreen` | seedSelectionOnce 检测 + 回填已选；toggleRow 只认 RepoSlot；selectionCount/isSelected AE 分支；cell_mode 禁用 + applyCell 双保险；commitPicker → commitAeTargets（覆写，空选不动）；信息行 AE 文案；leavePicker 清标志 |
+| lang | picker.ae_mode / picker.ae_hint / flash.ae_none / flash.ae_replaced（中英 169 键一致） |
+| 测试 | t38（13 条）：AE 工厂/判定/displayValue + 去重三分支 + 与锚点/普通路径互不干扰。TestChart 398 → **411 条全过**。t38 起测试 classpath 加 MDG merged jar（record 签名解析需要，VERIFY 命令已更新） |

@@ -5,6 +5,8 @@ import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.List;
+
 /**
  * 数据探针的目标（第十一轮③）：**从方块实体的 NBT 里按路径取一个数** ——
  * 用来追踪物品之外的东西：FE 能量、流体量、化学品的量，以及任何能在 NBT 里
@@ -44,6 +46,33 @@ public record DataTarget(
         this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null);
     }
 
+    // ------------------------------------------------------------------
+    // AE 网络目标（第十六轮⑧，用户点名的特例覆盖）
+    // ------------------------------------------------------------------
+
+    /**
+     * AE 网络目标的 {@code valuePath} 固定值 —— **一个标记，不是路径**：
+     * AE 终端的"格子"不是容器内容（是网络存储列表的显示窗口），所以这类目标
+     * 不走 NBT / 菜单，走 {@code AeNetworkReader} 的反射链读"网络中该物品的可用数量"。
+     */
+    public static final String AE_NETWORK_PATH = "ae:network";
+
+    /**
+     * **AE 网络目标**：监测 {@code itemId}（registry id）在探针所对准的那台
+     * AE 设备所在网络里的可用数量。
+     * 读值 = 服务端从设备拿 IGrid → StorageService → availableStacks（KeyCounter）
+     * → 按 AEItemKey 取数量；物品不在网内 = 0（网络在线），设备不可用 = no_data。
+     */
+    public static DataTarget aeNetwork(String itemId, String blockLabel,
+                                       ResourceKey<Level> dimension, BlockPos pos) {
+        return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null);
+    }
+
+    /** 是不是 AE 网络目标 */
+    public boolean isAeNetwork() {
+        return AE_NETWORK_PATH.equals(valuePath);
+    }
+
     /**
      * **NBT 槽位目标**（第十六轮）：{@code valuePath} = 物品列表在 NBT 里的路径
      * （如 {@code items}），{@code nbtSlot} = 元素自带 {@code slot} 号。
@@ -77,6 +106,34 @@ public record DataTarget(
         return valuePath == null || valuePath.isBlank() ? "value" : valuePath;
     }
 
+    /**
+     * **目标去重规则**（第十六轮⑧抽成纯静态：离线可断言，三条路各自的关键不同）。
+     *
+     * | 目标类型 | 重复判据 | 为什么 |
+     * |---|---|---|
+     * | NBT 槽位锚点（{@code isSlotAnchor}） | (列表路径, slot 号) 相同 | 同一 slot 只该有一条 |
+     * | **AE 网络** | {@code literalName}（物品 registry id）相同 | 读的是"网络中该物品"，名字就是身份；★ valuePath 全是 {@code ae:network}，**绝不能拿它去重**（不然所有 AE 目标互判重复） |
+     * | 普通路径 | valuePath 相同 | 一个路径一个数 |
+     */
+    public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
+        for (DataTarget d : list) {
+            boolean dup;
+            if (t.isAeNetwork() && d.isAeNetwork()) {
+                dup = d.literalName().equals(t.literalName());
+            } else if (d.isSlotAnchor() && t.isSlotAnchor()) {
+                dup = d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath());
+            } else {
+                dup = !d.isSlotAnchor() && !t.isSlotAnchor()
+                        && !d.isAeNetwork() && !t.isAeNetwork()
+                        && d.valuePath().equals(t.valuePath());
+            }
+            if (dup) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public String anchorText() {
         return dimension.location().getPath() + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
@@ -87,12 +144,18 @@ public record DataTarget(
      * "同种物品多格求和"不受这个后缀影响（用户要求：聚合计算不要被后缀干扰）。★
      */
     public String displayValue() {
+        if (isAeNetwork()) {
+            return "ae:network[" + fallbackName() + "]";
+        }
         return isSlotAnchor() ? valuePath + "[slot=" + nbtSlot + "]" : valuePath;
     }
 
     /** 面板上的一行描述 */
     public String describe() {
         String label = blockLabel == null || blockLabel.isBlank() ? "block" : blockLabel;
+        if (isAeNetwork()) {
+            return label + " · " + displayValue() + " · " + anchorText();
+        }
         if (isSlotAnchor()) {
             return label + " · " + valuePath + "[slot=" + nbtSlot + "] · " + anchorText();
         }
