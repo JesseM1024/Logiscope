@@ -1523,6 +1523,47 @@ vanilla 的 `Screen#resize` 只走 `rebuildWidgets()`、**不会**重跑 `init()
 
 ---
 
+### CP27 · AE 网络目标：点格 = 监测网络物品（第十六轮⑧）　风险：中
+
+**起因**：用户要求支持 AE2 —— 终端面板上点一个"容器格"，监测的是 **AE 网络里
+对应物品的数量**。AE 终端的格子不是容器内容（是网络存储列表的显示窗口，
+客户端从同步包拿到的 repo），所以这是一条**特例覆盖**，不能套 NBT / 菜单两条路。
+
+**契约**：
+- **C27-1 检测靠菜单家族，不靠方块**：`AeNetworkReader.isAeStorageMenu(menu)` 用
+  反射判 `menu` 是否 `appeng.menu.me.common.MEStorageMenu` 的实例（终端 / 合成终端 /
+  单元仓；wtlib 无线终端也是这个家族 —— 字节码核实过继承链）。
+  PatternAccessTerm **不是**这个家族（它显示的是 pattern 供给，语义不同，自动排除）。
+  AE2 未安装 → 返回 false，一切照旧。
+- **C27-2 目标身份 = 物品 registry id**：`DataTarget.aeNetwork(itemId, …)`，
+  `valuePath` 固定为标记 `"ae:network"`（**不是路径**）。去重按 `literalName` ——
+  ★ 所有 AE 目标的 valuePath 相同，**绝不能拿 valuePath 去重**（`DataTarget.isDuplicate`
+  的 AE 分支 + t38 断言钉住）。
+- **C27-3 选格交互**：AE 模式下只有**网络列表的显示格**（`RepoSlot`，按 slot 类名判定）
+  可以选；背包 / 合成格的物品不是"网络中的物品"，点击忽略。cell_mode（可视化选格）
+  在 AE 模式禁用（两套语义不能混）。「完成」= **覆写**全部 AE 目标（与槽位锚点同一
+  覆写语义，第十六轮④）；一个都没选 = 什么都不动。
+- **C27-4 读值链（服务端，全反射，零编译依赖）**：
+  `GridHelper.getNodeHost(level, pos)` → 遍历 6 个面取第一个非 null 的
+  `getGridNode(dir)`（★ 不能只试一个方向：CableBus 的 default 实现按
+  `isExposedOnSide` 过滤，节点被部件遮住的面返回 null；也不能用
+  `getActionableNode()` —— CableBusBlockEntity 不实现 IActionHost，字节码核实过）→
+  `isActive()` → `getGrid().getStorageService().getInventory().getAvailableStacks()`
+  （KeyCounter）→ `AEItemKey.of(stack)` → `counter.get(key)`。
+- **C27-5 三种语义**（延续"读不到 / 空格子 / 没在记录"的纪律）：
+  - 返回 **null** = 设备读不到（不是 AE 节点 / 网络断电 `isActive()==false` /
+    AE2 未安装 / 物品已不在注册表）→ 上层记 **no_data**；
+  - 返回 **0** = 网络在线但没有这物品（craftable 条目也不在 availableStacks）→ 真值；
+  - 返回 **n** = 网络中该物品的可用数量（long → Val 精确承载）。
+- **C27-6 失败策略**：AE2 缺失只记一次日志后恒 no_data（不刷屏）；单次反射异常记一次
+  日志、本次 no_data、下次采样重试。采样名 = 物品 registry id → 两个终端监测同一物品
+  会**合并求和**（与槽位锚点同一聚合语义）。
+- **C27-7 已知边界**：`"ae:network"` 是保留的 valuePath —— 用户在数据页手输这个路径
+  会被当成 AE 目标分流（文档明示，勿在别的模组上测试该路径）。六面全被遮挡的设备
+  读不到（no_data）。
+
+---
+
 ## 三、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |

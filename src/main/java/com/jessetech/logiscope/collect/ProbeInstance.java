@@ -247,17 +247,44 @@ public final class ProbeInstance {
         }
     }
 
-    /** 目标去重规则：锚点按 (列表路径, slot 号) 去重；普通路径目标按路径去重 */
+    /**
+     * 目标去重规则（第十六轮⑧抽到 {@link DataTarget#isDuplicate}：三条路各有各的
+     * 身份键 —— 锚点 (路径, slot)、AE 物品 id、普通路径；AE 目标的 valuePath 全是
+     * {@code ae:network}，绝不能拿它去重）。
+     */
     private static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
-        for (DataTarget d : list) {
-            boolean dup = d.isSlotAnchor() && t.isSlotAnchor()
-                    ? d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath())
-                    : !d.isSlotAnchor() && !t.isSlotAnchor() && d.valuePath().equals(t.valuePath());
-            if (dup) {
-                return true;
+        return DataTarget.isDuplicate(list, t);
+    }
+
+    /**
+     * **用"这一刻选中的物品"替换掉全部 AE 网络目标**（第十六轮⑧，覆写语义，
+     * 与 {@link #replaceSlotAnchors} 同一条用户规则：界面上看到选了哪些，就只测哪些）。
+     *
+     * 只换 AE 目标：**DATA 页的纯路径目标（FE / 流体）与 NBT 槽位锚点原样保留**。
+     *
+     * @param itemIds 新的物品 registry id 集合（调用方已去重）
+     * @return 替换后该探针的目标总数
+     */
+    public int replaceAeTargets(List<DataTarget> targets) {
+        synchronized (sampleLock) {
+            List<DataTarget> n = new ArrayList<>();
+            for (DataTarget d : dataTargets) {
+                if (!d.isAeNetwork()) {
+                    n.add(d);          // 其它两类目标：留下
+                }
             }
+            for (DataTarget a : targets) {
+                if (isDuplicate(n, a)) {
+                    continue;
+                }
+                n.add(a);
+            }
+            dataTargets = List.copyOf(n);
+            if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
+                enterFollowing(false);
+            }
+            return dataTargets.size();
         }
-        return false;
     }
 
     /** 删除一个数据追踪目标（DATA 页目标列表行尾的 ×）。@return 是否真的删了 */
@@ -677,6 +704,20 @@ public final class ProbeInstance {
                 }
                 int got = 0;
                 for (DataTarget dt : dts) {
+                    if (dt.isAeNetwork()) {
+                        // ★ AE 网络目标（第十六轮⑧）★：读"这台 AE 设备所在网络中该物品
+                        // 的可用数量"—— 与菜单/GUI 状态无关（终端关掉照读）。
+                        // null = 设备读不到（不是 AE 节点 / 断电）→ 留空走 no_data；
+                        // 0 = 网络在线但没这物品（真值，不是 no_data）。
+                        Long v = AeNetworkReader.read(level, dt.pos(), dt.literalName());
+                        if (v == null) {
+                            continue;
+                        }
+                        bufIds[got] = dt.literalName();
+                        bufVals[got] = Val.of(v);
+                        got++;
+                        continue;
+                    }
                     if (dt.isSlotAnchor()) {
                         // ★ NBT 槽位目标（第十六轮）★：只认 NBT 里的 slot 号，
                         // 与菜单/GUI 状态无关 —— 于是不会再有"开界面 2 个、关界面 8 个"

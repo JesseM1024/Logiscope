@@ -169,6 +169,10 @@
   "logiscope.flash.slot_anchor_need_cells": "check some cells first: NBT targets follow the checked cells (delete targets on the data page to clear)",
   "logiscope.btn.nbt_mode": "NBT tracking: off",
   "logiscope.btn.nbt_mode_on": "NBT tracking: ON",
+  "logiscope.picker.ae_mode": "AE network terminal - click items to track",
+  "logiscope.picker.ae_hint": "value = that item's available amount in this AE network; power loss reads no-data, absent items read 0",
+  "logiscope.flash.ae_none": "pick items to track first",
+  "logiscope.flash.ae_replaced": "AE targets updated: %s total",
   "logiscope.picker.nbt_mode_hint": "NBT tracking: targets come from the slot number in the data - the cell you click is the cell tracked, independent of the GUI; Done overwrites the checked cells (off by default, so non-slot machines stay on the normal path)",
   "logiscope.data.slot_fallback": "slot %s",
   "logiscope.flash.nbt_mode_off": "NBT tracking off"
