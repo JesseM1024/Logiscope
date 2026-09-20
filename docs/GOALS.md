@@ -15,7 +15,8 @@
 **目标**：项目能编译、能打包、能进游戏加载，为后续所有工作提供地基。
 
 **验收标准**
-- [x] `gradlew.bat build` 产出 `build/libs/logiscope-0.1.0.jar`
+- [x] `gradlew.bat build` 产出 `build/libs/logiscope-0.1.0-1.21.1.jar`
+      （mod_version 带 MC 后缀，见 `gradle.properties`；1.20.1 分支为 `logiscope-0.1.0-1.20.1`）
 - [x] jar 内含 `META-INF/neoforge.mods.toml`、`.class`、`lang/*.json`
 - [x] 元数据里的 `${}` 占位符被正确替换
 - [x] **元数据文件编码为合法 UTF-8**（中文 description）
