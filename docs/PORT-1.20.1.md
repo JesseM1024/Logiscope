@@ -61,22 +61,66 @@
 
 ## 四、代码层必撞的 API（按文件，全部"待核实→改→记结论"）
 
+### ★ 第一撞（2026-09-20 compileJava 实测，200 条错误的根因）：包名家族反了
+
+**1.20.1 世代的 NeoForge 没有改包名 —— 还是 Forge 的 `net.minecraftforge.*`**。
+`net.neoforged.*` 是 1.20.4+ 才引入的。开包核实
+（`build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar`，15910 条目）：
+jar 内只有 `net/minecraft` + `net/minecraftforge`，**没有任何 `net/neoforged`**。
+所以移植方向是 `net.neoforged.*` → `net.minecraftforge.*`（不是"包名不用改"）：
+
+| 1.21.1（master） | 1.20.1（本分支，已开包核实） |
+|---|---|
+| `net.neoforged.fml.common.Mod` | `net.minecraftforge.fml.common.Mod`（FML 类不在 merged jar 里，走独立 FML 依赖） |
+| `net.neoforged.bus.api.IEventBus` | `net.minecraftforge.eventbus.api.IEventBus` |
+| `net.neoforged.api.distmarker.Dist` | `net.minecraftforge.api.distmarker.Dist` |
+| `net.neoforged.fml.ModContainer` / `config.ModConfig` | `net.minecraftforge.fml.ModContainer` / `net.minecraftforge.fml.config.ModConfig` |
+| `net.neoforged.neoforge.common.NeoForge`（事件总线） | `net.minecraftforge.common.MinecraftForge` |
+| `net.neoforged.neoforge.common.ModConfigSpec` | `net.minecraftforge.common.ForgeConfigSpec` |
+| `net.neoforged.neoforge.client.event.*` | `net.minecraftforge.client.event.*` |
+| `net.neoforged.neoforge.event.entity.player.*` | `net.minecraftforge.event.entity.player.*` |
+| `net.neoforged.neoforge.items.IItemHandler` | `net.minecraftforge.items.IItemHandler`（jar 内存在 ✓） |
+| `net.neoforged.neoforge.capabilities.Capabilities` | `net.minecraftforge.common.capabilities.ForgeCapabilities` |
+| `net.neoforged.neoforge.client.ClientHooks` | `net.minecraftforge.client.ForgeHooksClient`（签名待核） |
+| `net.neoforged.neoforge.client.gui.ConfigurationScreen` | **不存在**（1.20.1 Forge 无自动配置界面）；`IConfigScreenFactory` 也不在 jar 里，1.20.1 的对应物是 `net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory`（待核） |
+
+jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerTickEvent/Phase`、
+`ScreenEvent`、`ClientPlayerNetworkEvent`、`PlayerInteractEvent`、
+`capabilities/Capability`、`IClientItemExtensions`。
+
+### 逐文件撞点（compileJava 200 条错误分布）
+
+| 文件 | 错误数 |
+|---|---|
+| `LogiScopeMod` | 86 |
+| `collect/WorldProbe` | 20 |
+| `bind/KeyBindings` | 18 |
+| `bind/ProbeContext` | 16 |
+| `LogiScopeConfig` | 14 |
+| `ui/ScopeScreen` | 12 |
+| `collect/ProbeManager` | 8 |
+| `bind/TextInputGuard` / `bind/DataCommand` | 各 6 |
+| `collect/DataProbe` / `bind/ContainerAnchor` | 各 4 |
+| `collect/ContainerAccess` / `ui/ChartRenderer` / `collect/AeNetworkReader` | 各 2 |
+
+### 其余 API 差异（import 修完后的第二轮撞点，预期）
+
 | 文件 | 1.21.1 现状 | 1.20.1 情况（预期） |
 |---|---|---|
-| `LogiScopeMod` / `collect/ProbeManager` | `net.neoforged.neoforge.event.tick.ServerTickEvent`（Pre/Post） | `TickEvent.ServerTickEvent` + `phase`（`event.tick` 包是 20.4+ 拆的）。**CP 采样点挂权威事件的结构不变，挂点换成 phase == END** |
-| `LogiScopeMod` / `bind/KeyBindings` | `ClientTickEvent.Pre/Post` | `TickEvent.ClientTickEvent` + `phase == TickEvent.Phase.END` |
-| `bind/ProbeContext` / `collect/WorldProbe` | `Capabilities` 注册表 + `IItemHandler` | 20.4 能力系统重做前的旧 API：`ForgeCapabilities.ITEM_HANDLER` + `level.getCapability(cap, side)` |
-| `bind/ContainerAnchor` | `useWithoutItem(...).consumesAction()` 判"会不会消费这次交互" | 1.20.5 才拆出 `useWithoutItem`，1.20.1 是 `use(player, hand)`。**判据必须重新核实**（教训：别拿静态判据猜行为） |
-| `LogiScopeMod` | `ConfigurationScreen` / `IConfigScreenFactory` | `ConfigurationScreen`（自动生成配置界面）大概率 1.20.1 没有。备选：砍掉配置入口或手写 |
-| `ui/ScopeScreen` | `ClientHooks.guiLayers`（真正的 Screen 栈） | 方法名/签名要用 1.20.1 sources jar 重核（历史上栽过"同名不同物"） |
-| `ui/ScopeScreen` | `IClientItemExtensions` | 1.19.x 起就有，预期不用动 |
-| `LogiScopeConfig` | `ModConfigSpec` | NeoForge 1.20.1 已改名，预期不动；配置注册方式待核 |
-| `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | `dist` 参数 1.20.1 是否存在**待核实**；备选 `@Mod("logiscope")` + `EventBusSubscriber(value = Dist.CLIENT)` / 构造时判 Dist |
-| `collect/AeNetworkReader` | AE2 1.21.1 版 grid/node API | AE2 1.20.1 的对应 API 有差异，逐个核实 |
-| `analysis/Snbt` / `archive/*` | 若引用 DataComponent 系 API | data component 是 1.20.5 才有，1.20.1 是 `getTag()` NBT。grep 一遍确认引用面 |
+| `LogiScopeMod` / `collect/ProbeManager` | `event.tick.ServerTickEvent`（Pre/Post） | `TickEvent.ServerTickEvent` + `phase == Phase.END`。**CP 采样点挂权威事件的结构不变** |
+| `LogiScopeMod` / `bind/KeyBindings` | `ClientTickEvent.Pre/Post` | `TickEvent.ClientTickEvent` + `phase == Phase.END` |
+| `bind/ProbeContext` / `collect/WorldProbe` | `Capabilities` 注册表 | `ForgeCapabilities.ITEM_HANDLER` + `getCapability(cap, side)` |
+| `bind/ContainerAnchor` | `useWithoutItem(...).consumesAction()` | 1.20.5 才拆出 `useWithoutItem`，1.20.1 是 `use(player, hand)`。**判据必须重新核实** |
+| `ui/ScopeScreen` | `ClientHooks.guiLayers` | `ForgeHooksClient` 对应方法签名重核（历史教训：同名不同物） |
+| `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | Forge 1.20.1 的 `@Mod` **没有 dist 参数**；备选 `@Mod("logiscope")` + `EventBusSubscriber(value = Dist.CLIENT)` / 构造时判 Dist |
+| `DataCommand` | `ClientChatReceivedEvent.System` | 1.20.1 该事件无 System 子类型（待核），用 `type == ChatType.SYSTEM` 判 |
+| `bind/TextInputGuard` | `ScreenEvent.CharacterTyped.Pre` | 1.20.1 是 `ScreenEvent.CharacterTyped`（无 Pre/Post，待核） |
+| `collect/AeNetworkReader` | AE2 1.21.1 版 grid/node API | AE2 1.20.1 对应 API 逐个核实 |
+| `analysis/Snbt` / `archive/*` | DataComponent 系 | 1.20.1 是 `getTag()` NBT，grep 确认引用面 |
 
-核实手段不变：legacy 插件同步后能拿到 1.20.1 的 sources jar，
-`dev-check` 离线断言的 classpath 换成 1.20.1 的 merged jar 路径。
+核实手段不变：legacy 插件同步后能拿到 1.20.1 的 sources jar
+（`build/moddev/artifacts/forge-1.20.1-47.1.106-sources.jar`），
+`dev-check` 离线断言的 classpath 换成这个 merged jar 路径。
 
 ## 五、文档口径（两个版本线并存时的规矩）
 
