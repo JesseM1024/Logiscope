@@ -242,9 +242,10 @@ public final class KeyBindings {
 
         BlockPos pos = hit.getBlockPos();
 
-        // ★ 先判"是不是容器"，不是就**绝对不发交互** ——
-        //   这条顺序是无副作用的保证：我们对非容器方块（拉杆、门、按钮……）一个包都不发。
-        if (!ProbeContext.isContainerLike(mc.level, pos)) {
+        // ★ 探测资格（第十六轮⑨放宽）：有方块实体即可 —— 无容器的 BE 走
+        //   "无容器格，可监测 NBT"。不是目标就**绝对不发交互**：
+        //   非目标方块（拉杆、门、按钮……普通非 BE 方块）一个包都不发。
+        if (!ProbeContext.isProbeTarget(mc.level, pos)) {
             ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
@@ -252,9 +253,12 @@ public final class KeyBindings {
         String name = ProbeContext.blockName(mc.level, pos);
 
         // ★ "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）★
-        //   getMenuProvider 只对原版箱子这类有效（原版熔炉都不覆写它），所以只用它做肯定判断。
-        boolean hasGui = ProbeContext.hasMenuProvider(mc.level, pos)
-                || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player);
+        //   ★ 但模拟右键只对**真容器**做（isContainerLike = Container/ItemHandler）★
+        //   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
+        //   真的触发睡觉 —— 右键模拟的资格必须比探测资格更严（第十六轮⑨）。
+        boolean containerLike = ProbeContext.isContainerLike(mc.level, pos);
+        boolean hasGui = containerLike && (ProbeContext.hasMenuProvider(mc.level, pos)
+                || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player));
 
         if (!hasGui) {
             // 无 GUI 的容器（机械手这类）→ 直接进入这台设备的创建流程。
@@ -292,7 +296,9 @@ public final class KeyBindings {
         if (mc.screen != null || mc.level == null) {
             return;
         }
-        if (ProbeContext.isContainerLike(mc.level, p.pos())) {
+        // 第十六轮⑨：探测资格已放宽到"有 BE" —— 这里同步放宽（模拟右键误判
+        // 超时兜底也该对无容器 BE 生效）
+        if (ProbeContext.isProbeTarget(mc.level, p.pos())) {
             ScopeScreen.openWorldCreate(mc, p.dim(), p.pos(), p.name());
         }
     }
