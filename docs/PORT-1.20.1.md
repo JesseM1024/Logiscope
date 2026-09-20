@@ -150,7 +150,27 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 6. 分支策略：`master` = 1.21.1 主线；通用 bugfix 进 master 后 cherry-pick 到 `1.20.1-neo`；
    只对单侧成立的修复不互挑（在提交消息里注明"仅 1.20.1"或"仅 1.21.1"）。
 
-## 七、待办与待定
+## 七、已知限制（1.20.1 线）
+
+| 限制 | 原因 |
+|---|---|
+| 配置界面入口不存在 | NeoForge 的 ConfigurationScreen 是 20.4+ 才有；改 TOML（config/logiscope-client.toml） |
+| 假槽无法识别 | Forge 1.20.1 的 Slot 没有 isFake()；isSelectable 只排除玩家背包 |
+| `/tick rate` 改速时秒数按 20 换算 | 1.20.1 没有 tickRateManager / 速率同步包 |
+| **模组必须带 pack.mcmeta**（pack_format 15） | 1.20.1 资源包机制；没有 = lang 不加载 = 界面全是键名（2026-09-20 实测踩中，日志证据 `Missing metadata in pack mod:logiscope`）。1.21 的 NeoForge 用 neoforge.mods.toml 充当打包元数据，master 不需要 |
+
+## 八、测试环境（1_20_1_neo/mods/，2026-09-20 已就位）
+
+| 模组 | 版本 | 来源 |
+|---|---|---|
+| AE2 | appliedenergistics2-forge-15.4.10 | Modrinth（Forge 版，NeoForge 1.20.1 兼容期可跑） |
+| Mekanism | 1.20.1-10.4.16.80 | Modrinth（forge+neoforge 双标） |
+| Create | 1.20.1-6.0.8 | Modrinth（Flywheel 已内置，无外部依赖） |
+
+三者均按 Modrinth 元数据校过字节数与 zip 完整性。AE2 的 grid API 走反射（零编译期依赖），
+装上即可测 AeNetworkReader。
+
+## 九、待办与待定
 
 - [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）
 - [x] 建分支 `1.20.1-neo` 并切过去（用户在 IJ 中完成）
