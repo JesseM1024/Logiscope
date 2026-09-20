@@ -801,3 +801,10 @@ CSV 里整数原样（64 而不是 64.0）、小数用 double 字面量；
 "我传下去的东西，后面会不会被覆盖/丢弃？"
 
 离线：build / TestChart 398 条 / verify-jar 全过。
+
+
+### 第十六轮⑦续：两个按钮语义色（2026-09-20）
+
+- 选格页「Done」→ 黄色（`0xFFFFD24A`，与 NBT ON 同一黄）；
+- 图表页「Stop & archive」→ 淡紫（复用 `COLOR_CALC_GLOW`，与计算页光效同色系）。
+  accentFor 加两个静态分支即可（渲染时实时求值的机制上一轮已修好）。build / verify-jar 全过。
