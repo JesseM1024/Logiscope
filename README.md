@@ -46,6 +46,12 @@ gradlew.bat createLaunchScripts
 | Gradle | 9.2.1（wrapper 自带） |
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.209 |
+| 模组版本 | `0.1.0-1.21.1`（master 主线） |
+
+> **版本分支约定**：`master` = 1.21.1 主线；`mc-1.20.1` 分支 = MC 1.20.1 + NeoForge 47.1.x 移植线
+> （构建插件换成 `net.neoforged.moddev.legacyforge`，Java 17，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
+> 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
+> 通用 bugfix 默认进 master，再 cherry-pick 到 `mc-1.20.1`。
 
 ---
 
@@ -60,6 +66,7 @@ gradlew.bat createLaunchScripts
 | [`docs/VERIFY-HISTORY.md`](docs/VERIFY-HISTORY.md) | 历轮验证结论、根因 → 修法、**已接受的限制**、完整 A–F 功能清单 | 回归排查时回看 |
 | [`docs/PROGRESS.md`](docs/PROGRESS.md) | 目前进度、已知问题、验证记录 | 每次开工前 |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复、**本地 git 用法（含要不要上传 GitHub）** | 做有风险的改动前 |
+| [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) | **1.20.1 移植方案**：构建插件差异、必撞 API 清单、待核实项 | 在 `mc-1.20.1` 分支上动手前 |
 
 **最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`；提交前 → `BACKUP.md`。
 
