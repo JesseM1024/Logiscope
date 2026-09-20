@@ -1,7 +1,7 @@
 # LogiScope · 1.20.1 NeoForge 移植方案
 
 > 状态：**方案已定，尚未动手移植**。本文先于分支建立（master 提交），
-> 之后随 `mc-1.20.1` 分支逐步更新，每完成一项就回写结论。
+> 之后随 `1.20.1-neo` 分支逐步更新，每完成一项就回写结论。
 >
 > 原则：**本文只记 1.20.1 的差异与 1.20.1 上重新核实的结论**。
 > 1.21.1 的事实记录留在 [`ARCHITECTURE.md`](ARCHITECTURE.md)，不要两边改写。
@@ -17,7 +17,7 @@
 | 目标 NeoForge | `1.20.1-47.1.106`（1.20.1 线最后一个版本；**待核实**：以 maven 实际产物为准） |
 | Java | **17**（`org.gradle.java.home` 与 toolchain 都要改） |
 | 模组版本 | `0.1.0-1.20.1`（版本号带 MC 后缀的约定见 `gradle.properties` 注释） |
-| 分支 | `mc-1.20.1`（从 master 的"版本号 0.1.0-1.21.1"提交切出） |
+| 分支 | `1.20.1-neo`（从 master 的"版本号 0.1.0-1.21.1"提交切出） |
 
 **前提（待用户确认）**：需要一个 1.20.1 的测试实例。现有两个实例
 （`1.21.1-NeoForge`、`NAST hard d0.9.5`）都是 1.21.1，可能需新装 `1.20.1-NeoForge`。
@@ -35,23 +35,29 @@
    （legacy 插件自带 remapJar；开发环境照常用官方映射）。`verify-jar.py` 的检查口径按 remapJar 产物理解。
 4. toolchain `JavaLanguageVersion.of(21)` → `of(17)`。
 5. parchment 属性：1.20.1 对应 `2023.09.03`（若启用）。
-6. Gradle wrapper 9.2.1 对 legacy 插件是否兼容——**待核实**，不行就换 wrapper
-   （MDK-Forge-1.20.1-ModDevGradle 官方示例可对照）。
+6. Gradle wrapper 9.2.1 对 legacy 插件是否兼容——**已核实：兼容**（`generateModMetadata`
+   在 Gradle 9.2.1 + 插件 2.0.147 下 BUILD SUCCESSFUL）。
 7. ⚠️ 现有 `filteringCharset = 'UTF-8'` 的编码铁律原样保留（跨版本通用，参考 build.gradle 注释块）。
+8. ★ **DSL 已用字节码核实（javap 插件 jar）**：2.0.147 里 `LegacyForgeExtension` 外层只有
+   `version`（Forge 线）和 `mcpVersion`（原版线）；**NeoForge 1.20.1 要写
+   `legacyForge { enable { neoForgeVersion = '...' } }`**（`neoForgeVersion` 在
+   `LegacyForgeModdingSettings` 上，三选一互斥）。网上资料（DeepWiki）写的外层
+   `neoForgeVersion` 会直接报 "unknown property"。
+   预防性配置 `obfuscation { createRemappingConfiguration(configurations.localRuntime) }` 照官方 MDK 加了。
 
 ## 三、元数据层改动
 
 | 项 | 1.21.1（master） | 1.20.1（本分支） |
 |---|---|---|
-| 元数据文件名 | `META-INF/neoforge.mods.toml` | **`META-INF/mods.toml`** |
+| 元数据文件名 | `META-INF/neoforge.mods.toml` | **`META-INF/mods.toml`**（已改名，`git mv`） |
 | 依赖字段 | `type="required"` | **`mandatory=true`**（`type` 写法是 20.2+ 才有） |
-| 平台依赖 modId | `neoforge` | **`forge`**（1.20.1 世代平台 mod id 未改名，**待核实**） |
-| `loader_version_range` | `[4,)` | `[47,)`（以 1.20.1 官方 MDK 模板核对） |
-| `neo_version_range` | `[21.1.209,)` | `[1.20.1-47.1.106,)`（写法待模板核对） |
+| 平台依赖 modId | `neoforge` | **`forge`**（1.20.1 世代平台 mod id 未改名；依赖范围用 `[47,)`） |
+| `loader_version_range` | `[4,)` | `[47,)` |
+| `neo_version_range` | `[21.1.209,)` | `[47,)`（对平台 mod 的范围；`neo_version=1.20.1-47.1.106` 只给构建插件用） |
 
-模板文件 `src/main/templates/META-INF/neoforge.mods.toml` 需**改名为
-`src/main/templates/META-INF/mods.toml`**，同时 `build.gradle` 的 generateModMetadata
-产物路径注释同步更新。
+模板文件 `src/main/templates/META-INF/neoforge.mods.toml` **已改名为
+`src/main/templates/META-INF/mods.toml`**。
+小坑：模板注释里不要写 `${}`（空表达式）——Groovy expand 会把它替换成 `null`。
 
 ## 四、代码层必撞的 API（按文件，全部"待核实→改→记结论"）
 
@@ -84,7 +90,7 @@
 
 1. master 上已提交"版本号 0.1.0-1.21.1 + 文档标注"（本文所在提交）。
 2. **建分支**：IJ 右下角 Git widget（或菜单 Git → Branches）→ master 右键 →
-   New Branch from 'master'，名字 `mc-1.20.1`，勾选 Checkout。等价 `git switch -c mc-1.20.1`。
+   New Branch from 'master'，名字 `1.20.1-neo`，勾选 Checkout。等价 `git switch -c 1.20.1-neo`。
 3. 在分支上改配置层（本文二、三节）→ 弹出 "Load Gradle Changes"（Ctrl+Shift+O）→ 同步；
    首次会下载 1.20.1 全套产物，较慢。
 4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
@@ -94,14 +100,14 @@
    - 建议本分支在 build.gradle 的 runs 里把工作目录改成 `run120/`，
      `saves` / `options.txt` / `run/mods` 就不会与 1.21.1 互踩。
    - 两条铁律照旧：测试 jar 换版本线时**先删同名旧 jar**；正在开发的模组不进 `run/mods`。
-6. 分支策略：`master` = 1.21.1 主线；通用 bugfix 进 master 后 cherry-pick 到 `mc-1.20.1`；
+6. 分支策略：`master` = 1.21.1 主线；通用 bugfix 进 master 后 cherry-pick 到 `1.20.1-neo`；
    只对单侧成立的修复不互挑（在提交消息里注明"仅 1.20.1"或"仅 1.21.1"）。
 
 ## 七、待办与待定
 
 - [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）
-- [ ] 建分支 `mc-1.20.1` 并切过去（IJ 步骤见上）
-- [ ] 配置层移植（二、三节）+ Gradle 同步通过
+- [x] 建分支 `1.20.1-neo` 并切过去（用户在 IJ 中完成）
+- [x] 配置层移植（二、三节）—— `generateModMetadata` 在 Gradle 9.2.1 + 插件 2.0.147 下通过，元数据占位符替换正确（2026-09-20）
 - [ ] 逐文件 API 移植（第四节表格逐行打勾）
 - [ ] `VERIFY.md` 按 1.20.1 重建当轮清单（含 H 组离线断言新 classpath）
 - [ ] 实机验收（等测试实例）

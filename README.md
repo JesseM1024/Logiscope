@@ -38,20 +38,20 @@ gradlew.bat createLaunchScripts
 > （cygpath 路径不匹配，会报 `ClassNotFoundException: GradleWrapperMain`）。
 > Git Bash 下的替代写法见下方「构建备忘」。
 
-**环境要求**
+**环境要求**（本分支 = 1.20.1 线）
 
 | 项 | 值 |
 |---|---|
-| JDK | 21（`org.gradle.java.home` 已锁定） |
+| JDK | 17（`org.gradle.java.home` 已锁定） |
 | Gradle | 9.2.1（wrapper 自带） |
-| Minecraft | 1.21.1 |
-| NeoForge | 21.1.209 |
-| 模组版本 | `0.1.0-1.21.1`（master 主线） |
+| Minecraft | 1.20.1 |
+| NeoForge | 1.20.1-47.1.106（构建插件用 legacy 线 `net.neoforged.moddev.legacyforge`） |
+| 模组版本 | `0.1.0-1.20.1`（本分支） |
 
-> **版本分支约定**：`master` = 1.21.1 主线；`mc-1.20.1` 分支 = MC 1.20.1 + NeoForge 47.1.x 移植线
-> （构建插件换成 `net.neoforged.moddev.legacyforge`，Java 17，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
+> **版本分支约定**：`master` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
+> 本分支 `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
 > 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
-> 通用 bugfix 默认进 master，再 cherry-pick 到 `mc-1.20.1`。
+> 通用 bugfix 默认进 master，再 cherry-pick 到 `1.20.1-neo`。
 
 ---
 
