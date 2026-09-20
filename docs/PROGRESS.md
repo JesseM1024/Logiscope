@@ -856,3 +856,12 @@ AE 不能通过容器格判断，写特例覆盖逻辑。
    （本次虽不是它害的，但它是个纯隐患；menu.getClass() 是运行时真实对象，零假设）。
 
 离线：build / TestChart 411 条 / verify-jar 全过。
+
+
+## 第十六轮⑨：三件 QoL（2026-09-20，AE 实测通过之后）
+
+| # | 项 | 落地 |
+|---|---|---|
+| 1 | AE 说明行改悬浮 | 选格页黄色行保留、灰色说明行删除；`updateHoverTips` 新增 2.5 号分支：AE 模式下鼠标压在**第二行信息行**（infoTop+ROW_H..+2ROW_H）→ `wantTip(4, ae_mode, [ae_hint])`。省一行空间 |
+| 2 | MEK 自动 NBT 追踪 | `createProbe` 里判准星方块的注册命名空间（`mekanism`）→ `nbtSlotMode = true` + 提示 `flash.mek_nbt`（"MEK 设备无容器槽位，已自动开启 NBT 追踪"）。NBT 识别本身仍靠形状（CP24），这只是替用户把开关预先打开 |
+| 3 | 无容器 BE 提示 | `renderInfo` PICKER 分支：`source == WORLD && worldSlots.isEmpty()` → 黄行 `picker.no_cells`（"无容器格，可监测 NBT"，NBT 开着时带 `NBT tracking: ON (N)`）；相关按钮（清空/选格/Done）由现有 selectionCount/menu 条件自动置灰，无需新逻辑 |

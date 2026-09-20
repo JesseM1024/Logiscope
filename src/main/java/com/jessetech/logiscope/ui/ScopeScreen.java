@@ -33,6 +33,7 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -1454,13 +1455,22 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, cut(head, L.w() - 2 * PAD), left, y, 0xBFBFBF, false);
                 y += ROW_H;
                 if (aeMode) {
-                    // AE 网络终端（第十六轮⑧）：这一页的语义完全不同
+                    // AE 网络终端（第十六轮⑧）：这一页的语义完全不同。
+                    // 说明行改为**悬浮**在黄行上显示（第十六轮⑨，省一行空间）
                     String line = tr("logiscope.picker.ae_mode") + "  ·  "
                             + tr("logiscope.info.selected") + " " + selectionCount();
                     g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
-                    y += ROW_H;
-                    String tip2 = tr("logiscope.picker.ae_hint");
-                    g.drawString(this.font, cut(tip2, L.w() - 2 * PAD), left, y, 0x8A8AA0, false);
+                    break;
+                }
+                if (source == Source.WORLD && worldSlots.isEmpty()) {
+                    // 无容器方块实体（第十六轮⑨）：没有格子可选，但 NBT / 数据页仍可用。
+                    // 相关按钮（选格/清空/可视化选格）本来就由 selectionCount/menu 驱动，已自动置灰。
+                    String line = tr("logiscope.picker.no_cells");
+                    if (nbtSlotMode) {
+                        line += "  ·  " + tr("logiscope.btn.nbt_mode_on")
+                                + " (" + nbtSlotEntries.size() + ")";
+                    }
+                    g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
                     break;
                 }
                 String badge = switch (source) {
@@ -3426,6 +3436,16 @@ public final class ScopeScreen extends Screen {
             say(tr("logiscope.flash.too_many_probes"));
             return;
         }
+        // ★ MEK 设备（第十六轮⑨）：自动开启 NBT 追踪 + 提示 ★
+        // MEK 的机器没有可从外部列出的容器槽位（worldSlots 为空），槽位号写在 NBT 里 ——
+        // 用户点名：创建这类设备的探针时直接开好，别让人手动按按钮再猜。
+        // 判据 = 准星所指方块的注册命名空间（mekanism）；NBT 识别本身仍靠形状（CP24）。
+        if (cand.hasAnchor() && mc.level != null && "mekanism".equals(
+                BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(cand.pos()).getBlock())
+                        .getNamespace())) {
+            nbtSlotMode = true;
+            say(tr("logiscope.flash.mek_nbt"));
+        }
         // 全新实例：先把"已回填"标记打上，免得 enterPicker 里的回填把它清成空
         // （其实也没得回填，但这样语义明确：回填只针对"已经有槽位的实例"）
         seededForProbeId = created.id();
@@ -3910,6 +3930,14 @@ public final class ScopeScreen extends Screen {
                 wantTip(2, probeTipTitle(p), probeTipLines(p));
                 return;
             }
+        }
+
+        // --- 2.5) AE 模式第二行（黄色提示行）→ 悬浮显示说明（第十六轮⑨）---
+        if (page == Page.PICKER && aeMode
+                && mouseY >= L.infoTop() + ROW_H && mouseY < L.infoTop() + 2 * ROW_H) {
+            wantTip(4, tr("logiscope.picker.ae_mode"),
+                    List.of(tr("logiscope.picker.ae_hint")));
+            return;
         }
 
         // --- 3) 根页探针列表行 → 同一个探针详情 ---
