@@ -169,6 +169,8 @@
   "logiscope.flash.slot_anchor_need_cells": "check some cells first: NBT targets follow the checked cells (delete targets on the data page to clear)",
   "logiscope.btn.nbt_mode": "NBT tracking: off",
   "logiscope.btn.nbt_mode_on": "NBT tracking: ON",
+  "logiscope.flash.mek_nbt": "MEK devices have no container slots - NBT tracking was enabled automatically",
+  "logiscope.picker.no_cells": "No container slots - NBT data can still be tracked",
   "logiscope.picker.ae_mode": "AE network terminal - click items to track",
   "logiscope.picker.ae_hint": "value = that item's available amount in this AE network; power loss reads no-data, absent items read 0",
   "logiscope.flash.ae_none": "pick items to track first",

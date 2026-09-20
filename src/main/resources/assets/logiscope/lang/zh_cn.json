@@ -169,6 +169,8 @@
   "logiscope.flash.slot_anchor_need_cells": "先勾格子：NBT 目标按勾选的格子建立（要清空请到探测数据页逐个删除）",
   "logiscope.btn.nbt_mode": "NBT 追踪：关",
   "logiscope.btn.nbt_mode_on": "NBT 追踪：开",
+  "logiscope.flash.mek_nbt": "MEK 设备无容器槽位，已自动开启 NBT 追踪",
+  "logiscope.picker.no_cells": "无容器格，可监测 NBT",
   "logiscope.picker.ae_mode": "AE 网络终端 · 点选要监测的物品",
   "logiscope.picker.ae_hint": "读数 = 该物品在此 AE 网络中的可用数量；网络断电时记 no-data，物品不在网内记 0",
   "logiscope.flash.ae_none": "先点选要监测的物品",
