@@ -977,18 +977,11 @@ public final class ChartRenderer {
      * 当前世界的 tick 速率（tick/秒）。
      *
      * 时间轴上的"秒"必须按它换算 —— 固定按 20 算的话 `/tick rate 200` 下
-     * 1 秒会被标成 10 秒。客户端能从 `Level#tickRateManager()` 拿到真实速率
-     * （服务端通过 `ClientboundTickingStatePacket` 同步过来，21.1.209 核实），
-     * 拿不到（主菜单等）就退回 vanilla 默认 20。
+     * 1 秒会被标成 10 秒。★ 1.20.1 已知限制：没有 Level#tickRateManager（1.21 才有），
+     * 服务端也不向客户端同步 tick 速率 —— vanilla 1.20.1 固定 20 t/s。
+     * 若装了改 tick 速率的第三方模组，秒数会按 20 换算（如实记录，不假装有真值）。
      */
     private static double ticksPerSecond() {
-        Minecraft mc = Minecraft.getInstance();
-        if (mc.level != null) {
-            float rate = mc.level.tickRateManager().tickrate();
-            if (rate > 0.0F) {
-                return rate;
-            }
-        }
         return 20.0;
     }
 

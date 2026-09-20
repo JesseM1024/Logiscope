@@ -66,7 +66,7 @@ public final class AeNetworkReader {
             if (aeUnavailable) {
                 return null;
             }
-            Optional<Item> item = BuiltInRegistries.ITEM.getOptional(ResourceLocation.parse(itemId));
+            Optional<Item> item = BuiltInRegistries.ITEM.getOptional(new ResourceLocation(itemId));
             if (item.isEmpty()) {
                 return null;   // 注册表里已经没有这个物品（模组被移除）→ 读不到
             }

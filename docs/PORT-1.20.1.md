@@ -155,6 +155,14 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 - [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）
 - [x] 建分支 `1.20.1-neo` 并切过去（用户在 IJ 中完成）
 - [x] 配置层移植（二、三节）—— `generateModMetadata` 在 Gradle 9.2.1 + 插件 2.0.147 下通过，元数据占位符替换正确（2026-09-20）
-- [ ] 逐文件 API 移植（第四节表格逐行打勾）
+- [x] 逐文件 API 移植 —— **compileJava 0 错误（2026-09-20）**，14 个文件全部改完：
+  包名家族映射（见第四节表）、TickEvent Pre/Post → phase 判定、Capabilities →
+  ForgeCapabilities + LazyOptional（走 BE#getCapability）、ModConfigSpec → ForgeConfigSpec、
+  ClientChatReceivedEvent.System → isSystem()、useWithoutItem → use(+MAIN_HAND)、
+  mouseScrolled 双参数 → 单参数、saveWithoutMetadata 去参、ResourceLocation.parse → new、
+  @Mod(dist) → FMLEnvironment.dist 判定、ConfigurationScreen → 不注册（限制）。
+  `gradlew.bat build` 通过，产出 reobf 后的 `build/libs/logiscope-0.1.0-1.20.1.jar`，
+  元数据/reobf 已开包核验；verify-jar.py 已改为双版本线通用（两个 jar 都过）。
+  ★ 注意：这只说明**编译层**通过；逻辑等价性要靠离线断言 + 实机验收。
 - [ ] `VERIFY.md` 按 1.20.1 重建当轮清单（含 H 组离线断言新 classpath）
 - [ ] 实机验收（等测试实例）

@@ -18,8 +18,8 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.items.IItemHandler;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
@@ -172,7 +172,7 @@ public final class ProbeContext {
      */
     public static boolean wouldConsumeClick(Level level, BlockPos pos, BlockHitResult hit, Player player) {
         try {
-            return level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction();
+            return level.getBlockState(pos).use(level, player, InteractionHand.MAIN_HAND, hit).consumesAction();
         } catch (Throwable t) {
             return true;
         }
@@ -212,12 +212,18 @@ public final class ProbeContext {
 
     @Nullable
     private static IItemHandler itemHandler(Level level, BlockPos pos) {
-        IItemHandler direct = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, null);
+        // 1.20.1 没有 Level#getCapability(cap,pos,side)（那是 NeoForge 20.4+ 的
+        // Capabilities 注册表），走方块实体的 LazyOptional 通道
+        BlockEntity be = level.getBlockEntity(pos);
+        if (be == null) {
+            return null;
+        }
+        IItemHandler direct = be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
         if (direct != null) {
             return direct;
         }
         for (Direction side : SIDES) {
-            IItemHandler sided = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, side);
+            IItemHandler sided = be.getCapability(ForgeCapabilities.ITEM_HANDLER, side).orElse(null);
             if (sided != null) {
                 return sided;
             }
@@ -241,7 +247,7 @@ public final class ProbeContext {
      *   → 方块 use → 物品 use。第一条是"物品抢在方块前面"，任何装了扳手/工具类物品的玩家
      *   在对着箱子按快捷键时都会被那条抢走（工具被用掉/机器被改设置）。
      *   所以这里先确认"手上的物品没有覆写 onItemUseFirst"：
-     *   用反射读它的**声明类**（只看，不调用），是原版/NeoForge 的就算安全。
+     *   用反射读它的**声明类**（只看，不调用），是原版/Forge 的就算安全。
      *
      * @return true = 已经发出交互（界面会在 1~3 tick 后由服务端打开）；
      *         false = 手上物品可能抢走这次交互，没有发出 —— 调用方应提示用户空手再试
@@ -266,11 +272,11 @@ public final class ProbeContext {
         try {
             Method m = held.getItem().getClass()
                     .getMethod("onItemUseFirst", ItemStack.class, UseOnContext.class);
-            // 没覆写时得到的是接口 IItemExtension 上的 default 方法（声明类是 net.neoforged.*），
+            // 没覆写时得到的是接口 IForgeItem 上的 default 方法（声明类是 net.minecraftforge.*），
             // 覆写了就落在模组自己的类上。只看声明类，不调用。
             String declaring = m.getDeclaringClass().getName();
             return declaring.startsWith("net.minecraft.")
-                    || declaring.startsWith("net.neoforged.")
+                    || declaring.startsWith("net.minecraftforge.")
                     || m.getDeclaringClass() == Item.class;
         } catch (NoSuchMethodException e) {
             return false;

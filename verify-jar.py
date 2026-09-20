@@ -44,8 +44,10 @@ def main():
             print(f"  {z.getinfo(n).file_size:>7d}  {n}")
 
         print("\n---------- 验收点 1：三类文件齐全 ----------")
+        # 元数据文件名随版本线不同：1.20.1 = META-INF/mods.toml，1.20.4+ = META-INF/neoforge.mods.toml
+        META = next((n for n in names if n in ("META-INF/mods.toml", "META-INF/neoforge.mods.toml")), None)
         checks = {
-            "模组元数据 META-INF/neoforge.mods.toml": any(n.endswith("META-INF/neoforge.mods.toml") for n in names),
+            "模组元数据（mods.toml / neoforge.mods.toml 任一）": META is not None,
             "编译后的 .class": any(n.endswith(".class") for n in names),
             "资源文件 assets/.../lang": any("/lang/" in n for n in names),
         }
@@ -55,10 +57,10 @@ def main():
             print(f"  {'[OK]  ' if v else '[FAIL]'} {k}")
 
         print("\n---------- 验收点 2：占位符替换 ----------")
-        if "META-INF/neoforge.mods.toml" not in names:
+        if META is None:
             print("  [SKIP] jar 里没有模组元数据，跳过")
         else:
-            toml = z.read("META-INF/neoforge.mods.toml").decode("utf-8")
+            toml = z.read(META).decode("utf-8")
             token = "$" + "{"
             bad = [ln.strip() for ln in toml.splitlines() if token in ln]
             if bad:

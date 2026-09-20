@@ -72,7 +72,7 @@ public final class DataProbe {
         if (!sameBlockEntityType(be, target.beType())) {
             return null;
         }
-        CompoundTag root = be.saveWithoutMetadata(level.registryAccess());
+        CompoundTag root = be.saveWithoutMetadata();
         Snbt.Node tree = Snbt.parse(root.getAsString());
         NbtSlotLayout.Entry e = NbtSlotLayout.bySlot(tree, target.valuePath(), target.nbtSlot());
         if (e == null) {
@@ -113,7 +113,7 @@ public final class DataProbe {
         if (be == null) {
             return null;
         }
-        return be.saveWithoutMetadata(level.registryAccess());
+        return be.saveWithoutMetadata();
     }
 
     /** 沿路径走。任一段不存在就返回 null（不猜、不返回 0） */

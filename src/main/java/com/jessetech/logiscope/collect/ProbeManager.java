@@ -6,8 +6,7 @@ import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.ProbeTarget;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.MinecraftServer;
-import net.neoforged.neoforge.client.event.ClientTickEvent;
-import net.neoforged.neoforge.event.tick.ServerTickEvent;
+import net.minecraftforge.event.TickEvent;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Collections;
@@ -60,7 +59,11 @@ public final class ProbeManager {
     // ------------------------------------------------------------------
 
     /** 由主类注册到游戏总线，签名固定为 (event) */
-    public static void onClientTick(ClientTickEvent.Post event) {
+    public static void onClientTick(TickEvent.ClientTickEvent event) {
+        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），只认 END（= NeoForge 的 Post）
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
         ContainerAnchor.tick();
         // 先推进全局时钟（客户端 tick + 权威世界 tick），再让各实例按同一刻度走状态机
         ServerClock.tickClient();
@@ -87,13 +90,19 @@ public final class ProbeManager {
      * 只处理**自己这个集成服务端**（LAN 发布出去的也是它），
      * 专用服务器上这个监听器不会被加载（模组声明为纯客户端）。
      */
-    public static void onServerTick(ServerTickEvent.Post event) {
+    public static void onServerTick(TickEvent.ServerTickEvent event) {
+        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），只认 END（= NeoForge 的 Post）
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
         Minecraft mc = Minecraft.getInstance();
         if (!mc.isLocalServer()) {
             return;
         }
-        MinecraftServer server = event.getServer();
-        if (server != mc.getSingleplayerServer()) {
+        // 1.20.1 的 ServerTickEvent 不带 getServer()（NeoForge 20.4+ 才有）；
+        // 上面已经确认是本地集成服务端，直接取它 —— 采样线程就是当前线程。
+        MinecraftServer server = mc.getSingleplayerServer();
+        if (server == null) {
             return;
         }
         LogiScopeMod.probes().sampleAll(server);

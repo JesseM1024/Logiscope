@@ -5,7 +5,7 @@ import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.components.events.GuiEventListener;
 import net.minecraft.client.gui.screens.Screen;
-import net.neoforged.neoforge.client.event.ScreenEvent;
+import net.minecraftforge.client.event.ScreenEvent;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
@@ -31,9 +31,9 @@ import java.lang.reflect.Method;
  *
  *   3) 通用兜底 —— "上一个字符事件被界面吃掉了"
  *      核实过 KeyboardHandler#charTyped 的实现：
- *        if (ClientHooks.onScreenCharTypedPre(...)) return;   // 被 cancel → 不发 Post
+ *        if (ForgeHooksClient.onScreenCharTypedPre(...)) return;   // 被 cancel → 不发 Post
  *        if (screen.charTyped(...)) return;                   // 被控件吃掉 → 不发 Post
- *        ClientHooks.onScreenCharTypedPost(...);              // 只有没人接手才发 Post
+ *        ForgeHooksClient.onScreenCharTypedPost(...);              // 只有没人接手才发 Post
  *      所以 **Pre 发过、Post 没跟上来 ⇒ 上一个字符被某处消费了 ⇒ 有输入框在接手**。
  *      这条对任何模组都成立，代价是"刚打完字想开面板"时要多按一次（会自愈，见下）。
  *

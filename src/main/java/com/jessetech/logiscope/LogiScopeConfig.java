@@ -1,9 +1,9 @@
 package com.jessetech.logiscope;
 
-import net.neoforged.neoforge.common.ModConfigSpec;
+import net.minecraftforge.common.ForgeConfigSpec;
 
 /**
- * 模组的可调参数（NeoForge **客户端**配置）。
+ * 模组的可调参数（Forge **客户端**配置）。
  *
  * 三条都是"资源上限"，与具体设备无关，所以放配置而不是代码常量：
  * 有人只测一台机器（想留很久的历史），有人同时挂十几个探针（得省内存）。
@@ -28,13 +28,13 @@ import net.neoforged.neoforge.common.ModConfigSpec;
  */
 public final class LogiScopeConfig {
 
-    public static final ModConfigSpec SPEC;
-    public static final ModConfigSpec.IntValue BUFFER_SAMPLES;
-    public static final ModConfigSpec.IntValue MAX_PROBES;
-    public static final ModConfigSpec.IntValue MAX_ITEM_KINDS;
+    public static final ForgeConfigSpec SPEC;
+    public static final ForgeConfigSpec.IntValue BUFFER_SAMPLES;
+    public static final ForgeConfigSpec.IntValue MAX_PROBES;
+    public static final ForgeConfigSpec.IntValue MAX_ITEM_KINDS;
 
     static {
-        ModConfigSpec.Builder b = new ModConfigSpec.Builder();
+        ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
         b.comment("LogiScope 的资源上限").push("limits");
         BUFFER_SAMPLES = b
                 .comment("每个探针实例的环形缓冲容量（样本条数）。",

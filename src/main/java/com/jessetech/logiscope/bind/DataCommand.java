@@ -10,7 +10,7 @@ import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.neoforged.neoforge.client.event.ClientChatReceivedEvent;
+import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import org.jetbrains.annotations.Nullable;
 
 /**
@@ -126,12 +126,17 @@ public final class DataCommand {
         if (be == null) {
             return null;
         }
-        CompoundTag tag = be.saveWithoutMetadata(level.registryAccess());
+        CompoundTag tag = be.saveWithoutMetadata();
         return tag.getAsString();
     }
 
     /** 系统消息到达（仅多人命令路会走到这里）：收下回执并吞掉，不刷聊天框 */
-    public static void onChatReceived(ClientChatReceivedEvent.System event) {
+    public static void onChatReceived(ClientChatReceivedEvent event) {
+        // 1.20.1 没有 System 子类型（NeoForge 20.4+ 才拆），
+        // 事件自带 isSystem()：`data get block` 的回执就是系统消息
+        if (!event.isSystem()) {
+            return;
+        }
         if (!waiting || event.isCanceled()) {
             return;
         }

@@ -40,8 +40,8 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.neoforged.neoforge.client.ClientHooks;
-import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
+import net.minecraftforge.client.ForgeHooksClient;
+import net.minecraftforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Files;
@@ -488,7 +488,7 @@ public final class ScopeScreen extends Screen {
     /** 压在当前容器界面上打开 */
     public static void openOverlay(Minecraft mc, Page page, int probeId) {
         ScopeScreen scope = new ScopeScreen(mc.screen, page, probeId);
-        ClientHooks.pushGuiLayer(mc, scope);
+        ForgeHooksClient.pushGuiLayer(mc, scope);
         // ★ pushGuiLayer 不会替你释放鼠标（那是 Minecraft#setScreen 干的活），
         //   不手动释放的话界面上根本看不到光标，面板就没法点、没法拖、没法框选。
         mc.mouseHandler.releaseMouse();
@@ -525,7 +525,7 @@ public final class ScopeScreen extends Screen {
     public void closeScope() {
         Minecraft mc = Minecraft.getInstance();
         if (overlayMode) {
-            ClientHooks.popGuiLayer(mc);
+            ForgeHooksClient.popGuiLayer(mc);
         } else {
             mc.setScreen(null);
         }
@@ -3600,7 +3600,8 @@ public final class ScopeScreen extends Screen {
     }
 
     @Override
-    public boolean mouseScrolled(double mouseX, double mouseY, double scrollX, double scrollY) {
+    public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
+        // 1.20.1 的 mouseScrolled 只有单滚动参数（NeoForge 21.1 拆成 scrollX/scrollY）
         Layout L = layout();
         if (overPanel(mouseX, mouseY, L)) {
             int dir = (int) Math.signum(scrollY);
@@ -3655,7 +3656,7 @@ public final class ScopeScreen extends Screen {
         }
         // 面板外滚轮让给容器（部分模组的容器界面用滚轮翻页）
         AbstractContainerScreen<?> bg = backgroundContainer();
-        return bg != null && bg.mouseScrolled(mouseX, mouseY, scrollX, scrollY);
+        return bg != null && bg.mouseScrolled(mouseX, mouseY, scrollY);
     }
 
     @Override

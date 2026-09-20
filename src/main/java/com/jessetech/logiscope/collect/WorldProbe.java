@@ -11,8 +11,8 @@ import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.neoforged.neoforge.capabilities.Capabilities;
-import net.neoforged.neoforge.items.IItemHandler;
+import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -270,7 +270,7 @@ public final class WorldProbe {
                 out.add(ContainerAccess.make(-1, idx, container.getItem(idx)));
                 continue;
             }
-            // ---- 路径 2：NeoForge 的物品 capability（模组机器的主通道）----
+            // ---- 路径 2：Forge 的物品 capability（模组机器的主通道）----
             // 实测（javap 反查，第五轮）：Sophisticated Storage 的 StorageBlockEntity 与
             // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
             // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
@@ -291,16 +291,20 @@ public final class WorldProbe {
      * 问不到再按六个方向逐个试 —— 有些模组只给"面向某一面"的分视图。
      *
      * 刻意**每次读取都重新问**（不缓存 IItemHandler）：方块实体可能被换掉，
-     * 而这条查询走 NeoForge 的能力缓存，成本可以忽略。
+     * 而这条查询走 Forge 的能力缓存，成本可以忽略。
      */
     @Nullable
     static IItemHandler itemHandler(ServerLevel level, BlockPos pos, @Nullable BlockEntity be) {
-        IItemHandler direct = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, null);
+        // 1.20.1 走方块实体的 LazyOptional 通道（见 ProbeContext#itemHandler 注释）
+        if (be == null) {
+            return null;
+        }
+        IItemHandler direct = be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
         if (direct != null) {
             return direct;
         }
         for (Direction side : SIDES) {
-            IItemHandler sided = level.getCapability(Capabilities.ItemHandler.BLOCK, pos, side);
+            IItemHandler sided = be.getCapability(ForgeCapabilities.ITEM_HANDLER, side).orElse(null);
             if (sided != null) {
                 return sided;
             }
