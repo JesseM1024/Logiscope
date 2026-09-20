@@ -836,3 +836,23 @@ AE 不能通过容器格判断，写特例覆盖逻辑。
 | `ui/ScopeScreen` | seedSelectionOnce 检测 + 回填已选；toggleRow 只认 RepoSlot；selectionCount/isSelected AE 分支；cell_mode 禁用 + applyCell 双保险；commitPicker → commitAeTargets（覆写，空选不动）；信息行 AE 文案；leavePicker 清标志 |
 | lang | picker.ae_mode / picker.ae_hint / flash.ae_none / flash.ae_replaced（中英 169 键一致） |
 | 测试 | t38（13 条）：AE 工厂/判定/displayValue + 去重三分支 + 与锚点/普通路径互不干扰。TestChart 398 → **411 条全过**。t38 起测试 classpath 加 MDG merged jar（record 签名解析需要，VERIFY 命令已更新） |
+
+
+### 第十六轮⑧修订：A1 失败 —— AE 检测从未执行（2026-09-20）
+
+**根因不在反射，在时序**：`createProbe` 调 `enterPicker` **之前**就把
+`seededForProbeId = created.id()` 预标记了（这是第十轮"免得回填清空"的既有语义），
+而 AE 检测放在 `seedSelectionOnce` 的早退检查**之后** ⇒ 首次进入直接被早退短路，
+检测根本没跑 —— A1 的"没有黄色行"就是这么来的。
+
+**修法**：
+1. **检测挪到 `enterPicker`，每次进入都判**（不再依赖 seed 的去重标记）；
+   判据 = `isAeStorageMenu(currentMenu)`，外加一条兜底：**纯 AE 探针**（无槽位 +
+   有 AE 目标）即使 GUI 关着也保持 AE 模式（否则勾选状态无法显示）。
+2. **AE 勾选 = 探针现有 AE 目标**，每次进入重建 —— 覆写语义的不变量
+   （界面上勾的就是探针在测的）；未 Done 就离开的编辑不保留。
+3. 顺手把 `isAeStorageMenu` 从 `Class.forName(...).isInstance` 改成
+   **沿父类链比对类名** —— 消除"模组类加载器可见性"这一整类假设
+   （本次虽不是它害的，但它是个纯隐患；menu.getClass() 是运行时真实对象，零假设）。
+
+离线：build / TestChart 411 条 / verify-jar 全过。

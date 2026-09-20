@@ -145,18 +145,22 @@ public final class AeNetworkReader {
         }
     }
 
-    /** 菜单是不是 AE 的 ME 存储界面家族（终端 / 合成终端 / 单元仓…，字节码核实过继承链） */
+    /**
+     * 菜单是不是 AE 的 ME 存储界面家族（终端 / 合成终端 / 单元仓…，字节码核实过继承链）。
+     *
+     * ★ 判定方式 = 沿父类链比对**类名**，不用 {@code Class.forName} ★
+     *   模组环境里每个模组在自己的类加载器里，{@code Class.forName("appeng.…")} 用的是
+     *   **调用方**的加载器 —— 在 NeoForge 的分模块加载下不一定能看到 AE2（实测 A1 失败
+     *   正是死在这里）。而 {@code menu.getClass()} 是运行时的真实对象，沿
+     *   {@code getSuperclass()} 往上走总能拿到 AE2 那个类，比对名字即可 —— 零加载、
+     *   零可见性假设。AE2 未安装时菜单类名永远对不上 → false，行为正确。
+     */
     public static boolean isAeStorageMenu(@Nullable Object menu) {
-        if (menu == null) {
-            return false;
+        for (Class<?> c = menu == null ? null : menu.getClass(); c != null; c = c.getSuperclass()) {
+            if ("appeng.menu.me.common.MEStorageMenu".equals(c.getName())) {
+                return true;
+            }
         }
-        try {
-            Class<?> meStorage = Class.forName("appeng.menu.me.common.MEStorageMenu");
-            return meStorage.isInstance(menu);
-        } catch (ClassNotFoundException e) {
-            return false;   // AE2 没装
-        } catch (Throwable t) {
-            return false;
-        }
+        return false;
     }
 }

@@ -672,6 +672,23 @@ public final class ScopeScreen extends Screen {
      */
     private void enterPicker(ProbeInstance p) {
         pickerProbeId = p.id();
+        // ★ AE 模式检测必须在这里、每次进入都判（第十六轮⑧实测 A1 失败的根因）★
+        // 不能放进 seedSelectionOnce：createProbe 会**先**打上 seededForProbeId 预标记，
+        // 首次进入时 seed 直接早退 —— 检测就永远不跑。
+        // 判据 = 当前菜单 ∈ ME 存储家族；纯 AE 探针（无槽位 + 有 AE 目标）即使在
+        // GUI 关闭的状态下回选格页，也保持 AE 模式（否则勾选状态无法显示）。
+        boolean menuIsAe = AeNetworkReader.isAeStorageMenu(ContainerAccess.currentMenu());
+        boolean pureAeProbe = p.target().slots().isEmpty()
+                && p.dataTargets().stream().anyMatch(DataTarget::isAeNetwork);
+        aeMode = menuIsAe || pureAeProbe;
+        // AE 选择 = 探针现有 AE 目标（覆写语义的不变量：界面上勾的就是探针在测的）。
+        // 每次进入都重建 —— 用户没 Done 就离开的编辑不保留（与槽位选择不同，但一致于覆写）。
+        selectedAeIds.clear();
+        for (DataTarget d : p.dataTargets()) {
+            if (d.isAeNetwork()) {
+                selectedAeIds.add(d.literalName());
+            }
+        }
         seedSelectionOnce(p);
         if (p.target().hasPersistentId()) {
             ProbeSlots.request(p.target().dimension(), p.target().pos());
@@ -695,22 +712,8 @@ public final class ScopeScreen extends Screen {
         seededForProbeId = p.id();
         selMenuSlots.clear();
         selContainerSlots.clear();
-        selectedAeIds.clear();
         cellMode = false;
         cellDragButton = -1;
-        // ★ AE 网络模式（第十六轮⑧，特例覆盖）★：菜单是 AE 的 ME 存储界面家族
-        // （终端 / 合成终端 / 单元仓…，wtlib 无线终端也是这个家族）⇒ 这一页的
-        // 语义完全不同：格子不是容器内容，点击 = 选"网络中的物品"。
-        // 已有 AE 目标回填成选中（与槽位锚点的回填同一规则）。
-        aeMode = AeNetworkReader.isAeStorageMenu(ContainerAccess.currentMenu());
-        for (DataTarget d : p.dataTargets()) {
-            if (d.isAeNetwork()) {
-                selectedAeIds.add(d.literalName());
-            }
-        }
-        if (aeMode) {
-            return;   // 槽位回填是另一套语义，AE 模式不用
-        }
         for (ProbeTarget.SlotRef ref : p.target().slots()) {
             if (ref.menuSlotIndex() >= 0) {
                 selMenuSlots.add(ref.menuSlotIndex());
