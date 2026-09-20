@@ -1161,6 +1161,12 @@ public final class ScopeScreen extends Screen {
         if ("pick".equals(id)) {
             return COLOR_BACKSLOT;     // 「回选格」淡蓝
         }
+        if ("done".equals(id)) {
+            return 0xFFFFD24A;         // 「Done」黄色（第十六轮⑦续，与 NBT ON 同一黄）
+        }
+        if ("archive".equals(id)) {
+            return COLOR_CALC_GLOW;    // 「Stop & archive」淡紫（与计算页光效同色系）
+        }
         return 0;
     }
 
