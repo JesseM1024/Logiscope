@@ -865,3 +865,25 @@ AE 不能通过容器格判断，写特例覆盖逻辑。
 | 1 | AE 说明行改悬浮 | 选格页黄色行保留、灰色说明行删除；`updateHoverTips` 新增 2.5 号分支：AE 模式下鼠标压在**第二行信息行**（infoTop+ROW_H..+2ROW_H）→ `wantTip(4, ae_mode, [ae_hint])`。省一行空间 |
 | 2 | MEK 自动 NBT 追踪 | `createProbe` 里判准星方块的注册命名空间（`mekanism`）→ `nbtSlotMode = true` + 提示 `flash.mek_nbt`（"MEK 设备无容器槽位，已自动开启 NBT 追踪"）。NBT 识别本身仍靠形状（CP24），这只是替用户把开关预先打开 |
 | 3 | 无容器 BE 提示 | `renderInfo` PICKER 分支：`source == WORLD && worldSlots.isEmpty()` → 黄行 `picker.no_cells`（"无容器格，可监测 NBT"，NBT 开着时带 `NBT tracking: ON (N)`）；相关按钮（清空/选格/Done）由现有 selectionCount/menu 条件自动置灰，无需新逻辑 |
+
+
+### 第十六轮⑨修订：MEK 加压管道 F9 无效（2026-09-20）
+
+**根因**：`ProbeContext.current` / `KeyBindings.openFromCrosshair` 的门槛
+`isContainerLike` = "BE 是 `Container` 或暴露 ItemHandler 能力"。Pipez 管道是物品
+管道、暴露 capability → 通过；**MEK 加压管道的物品在 transmitter 内部网络里流动、
+不对外暴露 ItemHandler，BE 也不是 Container** → 被挡在门外（data get 有数据 ≠
+有能力暴露）。这正是上一轮"无容器 BE 可探测"该覆盖的场景，但探测资格忘了放宽。
+
+**修法（拆成两层，防一个新副作用）**：
+- 新增 **`isProbeTarget`（探测资格）= 有方块实体即可**；`current` 与
+  `expirePendingOpen` 用它。
+- **`isContainerLike` 降格为"模拟右键的资格"**（Container/ItemHandler）——
+  `openFromCrosshair` 里 `hasGui = isContainerLike && (hasMenuProvider || wouldConsumeClick)`。
+  ★ 分离的原因：有 BE 但没容器的方块（**床、告示牌**…）如果也走模拟右键，
+  对床按 F9 会**真的触发睡觉** —— 右键模拟必须只对真容器做。
+- 非 BE 方块（拉杆 / 门 / 石头）仍一律拒绝："对非目标方块一个包都不发"的保证不变。
+
+MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasGui ✗ →
+`openWorldCreate` 直接进创建流程 → 选格页显示"无容器格，可监测 NBT"。
+离线：build / TestChart 411 条 / verify-jar 全过。

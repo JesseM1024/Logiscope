@@ -109,7 +109,8 @@ public final class ProbeContext {
             return null;
         }
         BlockPos pos = hit.getBlockPos();
-        if (!isContainerLike(mc.level, pos)) {
+        // 第十六轮⑨：探测资格放宽到"有方块实体"（无容器的 BE 走"无容器格，可监测 NBT"）
+        if (!isProbeTarget(mc.level, pos)) {
             return null;
         }
         return new Candidate(mc.level.dimension(), pos.immutable(), false, blockName(mc.level, pos));
@@ -177,7 +178,30 @@ public final class ProbeContext {
         }
     }
 
-    /** 这个方块是不是"能读到物品的容器"（原版 Container 或 NeoForge ItemHandler 能力） */
+    /**
+     * 这个方块是不是**可探测目标**（第十六轮⑨放宽：**有方块实体即可**）。
+     *
+     * 旧判据（{@code Container} / ItemHandler 能力）会把 MEK 管道这类方块挡在门外 ——
+     * 实测：终极加压管道 `data get block` 明明有数据，按 F9 却没反应。原因：
+     * 它的物品在 transmitter 内部网络里流动，**不对外暴露 ItemHandler 能力**，
+     * BE 也不是 `Container` —— 但 NBT 监测（数据页 / NBT 锚点）对它完全可用。
+     * 用户口径：既然 NBT 可监测，"有没有容器"就不再是探测资格的一部分。
+     *
+     * 普通方块（石头 / 拉杆 / 门）没有 BE → 仍然拒绝，"对非目标方块一个包都不发"
+     * 的保证保持不变。
+     */
+    public static boolean isProbeTarget(Level level, BlockPos pos) {
+        return level.getBlockEntity(pos) != null;
+    }
+
+    /**
+     * 这个方块是不是"能读到物品的容器"（原版 Container 或 NeoForge ItemHandler 能力）。
+     *
+     * ★ 第十六轮⑨起它只回答一个问题："值不值得**模拟右键**开 GUI"★
+     *   探测资格见 {@link #isProbeTarget}（放宽到有 BE 即可）。两者分离的原因：
+     *   有 BE 但没有容器的方块（床、告示牌、MEK 管道…）如果也走"模拟右键"，
+     *   对床按 F9 会真的触发睡觉 —— 右键模拟必须只对真容器做。
+     */
     public static boolean isContainerLike(Level level, BlockPos pos) {
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
