@@ -107,7 +107,7 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.0-1.21.1.jar
+python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 ```
 
 | # | 检查 | 期望 |
@@ -233,4 +233,5 @@ python verify-jar.py build/libs/logiscope-0.1.0-1.21.1.jar
 | N7 | 小数线（流体 mB/t 这类） | 按符号正常计数；`+0.5` 这类小变化也照算一次（非零即事件，不分大小） |
 | R1 | 既有运算回归：极值 / 简单统计 / 变化总量 / 变更区间 | 数值与上一版一致（离线 443 条已覆盖，实机抽样即可） |
 | R2 | 运算弹窗本身 | 共 **7 项**（关闭 / 极值 / 简单统计 / 变化总量 / 变更区间 / 上升事件 / 下降事件）；弹窗高度、悬停、选中品红块正常；中文显示"上升事件 / 下降事件"、英文 "Rise events / Fall events" |
+| V1 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.21.1`**；构建产物 `build/libs/logiscope-0.1.1-1.21.1.jar`。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
 | H2 | `TestChart` | **443 条**断言全过（t39 新增 32 条）；lang 中英各 **175** 键一致 |

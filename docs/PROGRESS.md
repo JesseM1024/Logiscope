@@ -622,7 +622,7 @@ javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/T
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" TestChart
 
 :: 3) 产物验收（元数据 / 编码 / 占位符）
-python verify-jar.py build/libs/logiscope-0.1.0.jar
+python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 
 :: 4) 进游戏（或用 build\moddev\runClient.cmd 脱离 Gradle 反复重启）
 gradlew.bat runClient
@@ -911,4 +911,6 @@ MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasG
   （同一份 Δ 只有正负两种去向）；IO 侧同式。
 
 离线：build / TestChart 443 条 / verify-jar / BenchRender（台阶 99.3%・混合 63.8%，
-与第十三轮一致）全过。实机复测见 `VERIFY.md` 第十七轮①。
+与第十三轮一致）全过。**版本号 0.1.0 → 0.1.1**（按约定带 MC 后缀，发布版本
+`0.1.1-1.21.1`；`gradle.properties` / README / GOALS / VERIFY / 本文件的命令同步，
+1.20.1 分支的 `0.1.0-1.20.1` 按约定不动）。实机复测见 `VERIFY.md` 第十七轮①。
