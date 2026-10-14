@@ -12,7 +12,7 @@ import java.util.List;
  * {@code ScopeScreen#inRange}）；"要不要把边界外的一格算进来"是界面层的语义决定，
  * 不在这里做（IO 的段内口径见下）。
  *
- * 【四种运算】
+ * 【六种运算】
  *
  * | 运算 | 输入回答 | 备注 |
  * |---|---|---|
@@ -20,6 +20,8 @@ import java.util.List;
  * | 简单统计 | mean / med / var | var = **总体方差**（除以 n）——样本就是区间内的全部观测 |
  * | 变化总量 | 上升 Σ / 下降 Σ（net = Δ） | 只计**相邻两次采样之间**的变化；断档（breakBefore）不计，缺口数单独报出 |
  * | 变更区间 | 变更次数 / 变化量 mean·var / 周期 mean·var | 变化量为 0 不算"变更"；周期 = 相邻两次变更的 tick 间隔 |
+ * | 上升事件 | 同"变更区间"，只收 Δ > 0 | 断档不计；周期 = 相邻两次**上升**的 tick 间隔 |
+ * | 下降事件 | 同"变更区间"，只收 Δ < 0 | 断档不计；周期 = 相邻两次**下降**的 tick 间隔 |
  *
  * 【数量线 vs IO 线】
  *   · 数量线：变化 = 相邻两个采样值之差，且必须 {@code !breakBefore()}
@@ -174,15 +176,36 @@ public final class CurveMath {
     // ------------------------------------------------------------------
 
     /**
-     * @param count 变更次数（变化量 ≠ 0 的次数）
+     * 变更区间 / 上升事件 / 下降事件共用的结果。
+     * 上升、下降是"过滤后的事件序列"——变化量已经只含同向的那些，
+     * 周期也相应变成"相邻两次同向事件"的间隔。
+     *
+     * @param count 事件次数（变化量 ≠ 0；上升/下降运算里只数符合方向的那些）
      * @param dMean / dVar 变化量的均值 / 总体方差（count == 0 时为 NaN）
-     * @param pMean / pVar 周期（相邻两次变更的 tick 间隔）的均值 / 方差（事件 < 2 时为 NaN）
+     * @param pMean / pVar 周期（相邻两次事件的 tick 间隔）的均值 / 方差（事件 < 2 时为 NaN）
      */
     public record Events(int count, double dMean, double dVar, double pMean, double pVar) {
     }
 
     /** 数量线：变更事件 = 相邻采样值之差 ≠ 0（断档不计） */
     public static Events changeEvents(List<SeriesPoint> pts) {
+        return changeEvents(pts, 0);
+    }
+
+    /** 数量线：仅上升事件 = 相邻采样值之差 > 0（断档不计；相等的差值不算事件） */
+    public static Events changeRiseEvents(List<SeriesPoint> pts) {
+        return changeEvents(pts, 1);
+    }
+
+    /** 数量线：仅下降事件 = 相邻采样值之差 < 0（断档不计；相等的差值不算事件） */
+    public static Events changeFallEvents(List<SeriesPoint> pts) {
+        return changeEvents(pts, -1);
+    }
+
+    /**
+     * @param sign 0 = 全部变更 / +1 = 仅上升 / −1 = 仅下降
+     */
+    private static Events changeEvents(List<SeriesPoint> pts, int sign) {
         List<Double> deltas = new ArrayList<>();
         List<Long> ticks = new ArrayList<>();
         for (int i = 1; i < pts.size(); i++) {
@@ -192,7 +215,7 @@ public final class CurveMath {
                 continue;
             }
             Val d = cur.value().minus(prev.value());
-            if (!d.isZero()) {
+            if (keepEvent(d.compareTo(Val.ZERO), sign)) {
                 deltas.add(d.asDouble());
                 ticks.add(cur.tick());
             }
@@ -207,15 +230,47 @@ public final class CurveMath {
      * 变更两侧的 tick 差值（周期）在这里也更有意义：它数的是"真实变化之间隔了几格"。
      */
     public static Events flowEvents(List<SeriesPoint> flow) {
+        return flowEvents(flow, 0);
+    }
+
+    /** IO 线：仅上升事件 = 流量值 > 0（不按 {@code breakBefore} 过滤，理由同 {@link #flowEvents}） */
+    public static Events flowRiseEvents(List<SeriesPoint> flow) {
+        return flowEvents(flow, 1);
+    }
+
+    /** IO 线：仅下降事件 = 流量值 < 0（不按 {@code breakBefore} 过滤，理由同 {@link #flowEvents}） */
+    public static Events flowFallEvents(List<SeriesPoint> flow) {
+        return flowEvents(flow, -1);
+    }
+
+    /**
+     * @param sign 0 = 全部变更 / +1 = 仅上升 / −1 = 仅下降
+     */
+    private static Events flowEvents(List<SeriesPoint> flow, int sign) {
         List<Double> deltas = new ArrayList<>();
         List<Long> ticks = new ArrayList<>();
         for (SeriesPoint p : flow) {
-            if (!p.value().isZero()) {
-                deltas.add(p.value().asDouble());
+            Val v = p.value();
+            if (keepEvent(v.compareTo(Val.ZERO), sign)) {
+                deltas.add(v.asDouble());
                 ticks.add(p.tick());
             }
         }
         return events(deltas, ticks);
+    }
+
+    /** 事件过滤：Δ = 0 永远不算事件；sign 0 = 全部 / +1 = 只收上升 / −1 = 只收下降 */
+    private static boolean keepEvent(int cmp, int sign) {
+        if (cmp == 0) {
+            return false;
+        }
+        if (sign > 0) {
+            return cmp > 0;
+        }
+        if (sign < 0) {
+            return cmp < 0;
+        }
+        return true;
     }
 
     private static Events events(List<Double> deltas, List<Long> ticks) {

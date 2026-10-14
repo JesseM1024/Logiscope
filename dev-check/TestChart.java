@@ -96,6 +96,7 @@ public class TestChart {
         t36NumberGuards();
         t37Val();
         t38AeTargets();
+        t39RiseFallEvents();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -654,6 +655,100 @@ public class TestChart {
                 DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 0, null)));
         eq("锚点异 slot 不重复", false, DataTarget.isDuplicate(anchors,
                 DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 1, null)));
+    }
+
+    // 39) 上升/下降事件（第十七轮①）："变更区间"的单向过滤版
+    //     —— 只收增/减方向的事件；周期相应变成"相邻两次同向事件"的间隔
+    private static void t39RiseFallEvents() {
+        // 有升有降的一条线：1 → 3 → 2 → 5（Δ = +2, -1, +3）
+        List<SeriesPoint> mixed = List.of(
+                new SeriesPoint(1, 1, true),
+                new SeriesPoint(2, 3, false),
+                new SeriesPoint(3, 2, false),
+                new SeriesPoint(4, 5, false));
+
+        CurveMath.Events rise = CurveMath.changeRiseEvents(mixed);
+        eq("上升事件 2 次（+2 / +3）", 2, rise.count());
+        eq("上升量 mean 2.5", 2.5, rise.dMean(), 1e-9);
+        // 偏差 ±0.5 → (0.25 + 0.25) / 2 = 0.25
+        eq("上升量 var 0.25", 0.25, rise.dVar(), 1e-9);
+        eq("上升周期 mean 2t（t2 → t4）", 2.0, rise.pMean(), 1e-9);
+        eq("上升周期 var 0（只一次间隔）", 0.0, rise.pVar(), 1e-9);
+
+        CurveMath.Events fall = CurveMath.changeFallEvents(mixed);
+        eq("下降事件 1 次（-1）", 1, fall.count());
+        eq("下降量 mean -1", -1.0, fall.dMean(), 1e-9);
+        // 单事件：var = 0（"没有离散可言"）而周期无定义 → NaN —— 两者不能混
+        eq("下降量 var 0（不是 NaN）", 0.0, fall.dVar(), 1e-9);
+        yes("单事件 → 周期 mean NaN", Double.isNaN(fall.pMean()));
+        yes("单事件 → 周期 var NaN", Double.isNaN(fall.pVar()));
+        // 不变量：上 + 下 = 全部变更（同一份 Δ 只有正负两种去向，没有第三种）
+        eq("上 + 下 = 全部变更", 3, rise.count() + fall.count());
+
+        // 全升线（= 用户给的 7 7 8 8 9 例子）：Δ = 0, +1, 0, +1 —— 相等的差值不算事件
+        List<SeriesPoint> onlyUp = List.of(
+                new SeriesPoint(10, 7, true),
+                new SeriesPoint(11, 7, false),
+                new SeriesPoint(13, 8, false),
+                new SeriesPoint(14, 8, false),
+                new SeriesPoint(15, 9, false));
+        eq("全升线：上升 2 次", 2, CurveMath.changeRiseEvents(onlyUp).count());
+        eq("全升线：下降 0 次", 0, CurveMath.changeFallEvents(onlyUp).count());
+        yes("零事件 → 变化量 mean NaN", Double.isNaN(CurveMath.changeFallEvents(onlyUp).dMean()));
+
+        // 断档段：跨档的差不是事件（与 changeEvents / 变化总量同口径）
+        List<SeriesPoint> broken = List.of(
+                new SeriesPoint(1, 10, true),
+                new SeriesPoint(2, 12, false),
+                new SeriesPoint(5, 20, true),    // 断档：10 → 20 的 +8 谁也不收
+                new SeriesPoint(6, 18, false));
+        CurveMath.Events br = CurveMath.changeRiseEvents(broken);
+        eq("断档段：上升 1 次（+2；跨档 +8 不算）", 1, br.count());
+        eq("断档段：上升量 mean 2", 2.0, br.dMean(), 1e-9);
+        CurveMath.Events bf = CurveMath.changeFallEvents(broken);
+        eq("断档段：下降 1 次（-2）", 1, bf.count());
+        eq("断档段：上 + 下 = 全部变更", 2, br.count() + bf.count());
+
+        // 小数值（Val 的非整数形态）照样按符号过滤
+        List<SeriesPoint> frac = List.of(
+                new SeriesPoint(1, Val.of(1.5), true),
+                new SeriesPoint(2, Val.of(1.2), false),   // Δ = -0.3
+                new SeriesPoint(3, Val.of(2.0), false));  // Δ = +0.8
+        eq("小数线：上升 1 次（1.2 → 2.0）", 1, CurveMath.changeRiseEvents(frac).count());
+        eq("小数线：上升量 mean 0.8", 0.8, CurveMath.changeRiseEvents(frac).dMean(), 1e-9);
+        eq("小数线：下降 1 次（1.5 → 1.2）", 1, CurveMath.changeFallEvents(frac).count());
+
+        // IO 线：流量点本身就是 Δ；段起点那一笔照算（不按 breakBefore 过滤，同 flowEvents 口径）
+        List<SeriesPoint> flow = List.of(
+                new SeriesPoint(2, 64, true),
+                new SeriesPoint(3, 64, false),
+                new SeriesPoint(4, 0, false),
+                new SeriesPoint(5, -10, false),
+                new SeriesPoint(8, 30, true));
+        CurveMath.Events fir = CurveMath.flowRiseEvents(flow);
+        eq("IO 上升 3 次（64 / 64 / 30；0 不算）", 3, fir.count());
+        eq("IO 上升量 mean 158/3", 158 / 3.0, fir.dMean(), 1e-9);
+        // 偏差 34/3 与 -68/3 → (1156/9 × 2 + 4624/9) / 3 = 2312/9
+        eq("IO 上升量 var 2312/9", 2312 / 9.0, fir.dVar(), 1e-9);
+        eq("IO 上升周期 mean 3t（t2→t3 = 1，t3→t8 = 5）", 3.0, fir.pMean(), 1e-9);
+        eq("IO 上升周期 var 4", 4.0, fir.pVar(), 1e-9);
+
+        CurveMath.Events fif = CurveMath.flowFallEvents(flow);
+        eq("IO 下降 1 次（-10）", 1, fif.count());
+        eq("IO 下降量 mean -10", -10.0, fif.dMean(), 1e-9);
+        eq("IO 上 + 下 = 全部事件", CurveMath.flowEvents(flow).count(),
+                fir.count() + fif.count());
+
+        // 全升 IO 线：下降侧是空集
+        List<SeriesPoint> upOnly = List.of(
+                new SeriesPoint(1, 5, true),
+                new SeriesPoint(2, 8, false));
+        eq("IO 全升：下降 0 次", 0, CurveMath.flowFallEvents(upOnly).count());
+
+        // 单点序列：没有任何相邻差 —— 两个方向都是 0 事件
+        List<SeriesPoint> single = List.of(new SeriesPoint(1, 42, true));
+        eq("单点序列：上升 0 次", 0, CurveMath.changeRiseEvents(single).count());
+        eq("单点序列：下降 0 次", 0, CurveMath.changeFallEvents(single).count());
     }
 
     private static void t22StoreResize() {
