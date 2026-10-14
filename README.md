@@ -52,6 +52,9 @@ gradlew.bat createLaunchScripts
 > （构建插件换成 `net.neoforged.moddev.legacyforge`，Java 17，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
 > 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
 > 通用 bugfix 默认进 master，再 cherry-pick 到 `mc-1.20.1`。
+>
+> **发布 tag 约定**：`<加载器>-<MC版本>-<模组版本>`（例：`neoforge-1.21.1-0.1.0`）；
+> 一个版本 = 一个 tag = 一个 GitHub Release，不把多个版本合并到同一个 tag。
 
 ---
 
