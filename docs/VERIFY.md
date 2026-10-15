@@ -1,9 +1,27 @@
-# LogiScope · 实机验证清单（当前版本 0.1.1-1.21.1）
+# LogiScope · 实机验证清单（当前版本 0.1.0-1.20.1）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④ 的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
 > [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md)；原理索引在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 > ★ = 优先项；编号沿用原轮次分组，便于与 [PROGRESS.md](PROGRESS.md) 对照。
+
+> **本文件是 1.20.1 分支的清单**（命令、产物名、运行目录都已按本分支改写）。
+> `VERIFY-HISTORY.md` 里的历轮结论来自 1.21.1 线 —— 那是"算法与交互已通过"的依据，
+> **不等于 1.20.1 线跑过**。1.20.1 线此前只做到"编译通过 + 产出 jar"，
+> 因此下面每一项都是**本分支的首次实机验收**，请按"新功能首次验"的心态跑（尤其 A 组）。
+>
+> 分支差异（详见 [`PORT-1.20.1.md`](PORT-1.20.1.md) §七 / §八）：
+>
+> | 项 | 本分支实际情况 |
+> |---|---|
+> | 运行目录 | **`1_20_1_neo/`**（`build.gradle` 的 `gameDirectory`），存档 / 日志 / config / mods 都在它下面，与主线的 `run/` 互不覆盖 |
+> | 配置界面入口 | **不存在**（NeoForge 的 `ConfigurationScreen` 是 20.4+ 才有）→ 只能改 `1_20_1_neo/config/logiscope-client.toml` |
+> | `/tick rate` | **不存在**（1.20.1 无 tickRateManager）→ 涉及它的项已改写，见 S2 |
+> | 假槽识别 | `Slot#isFake()` 在 1.20.1 不存在，只排除玩家背包 |
+> | 打包元数据 | 本分支必须带 `pack.mcmeta`（`pack_format 15`），否则 lang 全不加载、界面显示键名 |
+> | 测试实例模组 | `1_20_1_neo/mods/`：MEK `10.4.16.80`、AE2 `15.3.3`（Forge 版）；**Create 6.0.8 在 `mods-disabled/`** —— legacyforge dev 下靠 SRG-mixin 的 jar 必炸，只在正式整合包里测 |
+> | 由此不可直接跑的项 | **S8 涉及精妙存储**（未装）；**S2 依赖 `/tick rate`**；**N9 依赖配置界面** —— 三项均已按上表改写 |
+
 
 ## 怎么跑
 
@@ -33,13 +51,13 @@ build\moddev\runClient.cmd
 | # | 操作 | 期望 |
 |---|---|---|
 | ★S1 | 普通箱子挂探针（选 1~2 格）→ **界面开着**记录几秒 → 关掉界面 → 再记录几秒 | 读数**连续、无缺口、无跳变**；关界面**无任何提示**，值仍是同一条线 |
-| ★S2 | 同上，`/tick rate 200`，**界面开着**看图表页采样密度 | 仍是 **200 条/秒**（每 tick 一条）—— 证明界面开着时走的也是服务端 tick，而不是 20/s 的菜单观测 |
+| ★S2 | 同上，**界面开着**看图表页采样密度（本分支无 `/tick rate`，用 20 t/s 的稳态判断） | 密度**恒为 20 条/秒且界面开着时不掉**（先前菜单路径只有 20/s 的观测、且界面开着时口径不同）—— 判据是"开界面 / 关界面两条曲线的**点数相同**、无缺口" |
 | S3 | 「完成」后在图表页（界面仍开着）往箱子放 / 取物品 | 曲线**即时**跟变；无"卡一下"或断线 |
 | ★S4 | 开着 A 设备界面记录 → **不关界面，直接打开另一台设备 B 的界面**（把 A 顶掉） | 探针**不暂停**、读数照常。再关掉 B → 记录照常继续（无提示） |
 | S5 | 多人（可选，LAN 即可）：开界面记录 / 关界面 | 开界面能读（回退路径）；关界面 `no_data` —— 与旧行为一致 |
 | ★S6 | MEK 机器**不开 NBT 追踪**，直接物品探针选 **2 格相同物品**（如 2 格圆石） | 动作栏弹一次 **"槽位下标无法验证"警告**（旧判据从不弹；修正后才出现）。警告后读数可能不是你选的那几格（如实告知；要精确保真请改用 NBT 追踪） |
 | S7 | MEK 开 NBT 追踪（开关界面各试一次） | 与之前完全一致 |
-| S8 | 精妙存储箱子：选格 → 开关界面看读数 | 与之前一致（普通模组机器下标本就唯一，回退正确） |
+| S8 | **（本分支暂缺精妙存储，可跳过或改装后补测）** 精妙存储箱子：选格 → 开关界面看读数 | 与之前一致（普通模组机器下标本就唯一，回退正确）。1.20.1 侧可用 **MEK + AE2** 先覆盖同类路径（普通 ItemHandler 机器 / 无容器 BE） |
 | S9 | 把被监测的机器**挖掉** | 该线断开（`no_data`），不是一条假线（回归） |
 | S10 | 手动「暂停」一次再「继续」 | 跨暂停断开（gap），恢复后第一笔照算（回归） |
 
@@ -49,7 +67,7 @@ build\moddev\runClient.cmd
 
 | # | 操作 | 期望 |
 |---|---|---|
-| ★Q1 | 根页**按钮行**（与 New probe / Hide 同级） | 有「打开存储文件夹」；点击弹出系统文件管理器，定位 `run/logiscope/`（正式实例 = `.minecraft/logiscope/`）；目录不存在时自动创建 |
+| ★Q1 | 根页**按钮行**（与 New probe / Hide 同级） | 有「打开存储文件夹」；点击弹出系统文件管理器，定位 `1_20_1_neo/logiscope/`（正式实例 = `.minecraft/logiscope/`）；目录不存在时自动创建 |
 | ★Q2 | 选格页信息行 | 不再出现 "NBT slot-list, track by slot" 那句；只有**开着 NBT 追踪**时显示 `NBT tracking: ON (元素数)` |
 | Q3 | 选格页「NBT tracking: ON」 | 按钮文字为**黄色**；off 状态颜色不变 |
 | Q4 | 选格页按钮 | 「Probe data」在「Done」**左侧** |
@@ -99,8 +117,8 @@ build\moddev\runClient.cmd
 | N5 | 拖滑条到最左（`1t`）→ 再到中间（如 `10t`） | 档位文字实时跟手；NBT 文本刷新节奏随档位变化（20 次/秒 ←→ 2 次/秒） |
 | N6 | 拖到**最右**（`不刷新`） | 档位文字变琥珀色「不刷新」；NBT 文本**停止**自动刷新；「刷新」按钮仍能手动抓一次 |
 | N7 | 从「不刷新」拖回中间档 | 自动刷新**立刻**恢复（排期会拉回，不等旧节拍） |
-| ★N8 | 改完滑条后看 `config/logiscope-client.toml` | `[dataPage]` 下 `dataRefreshTicks = <新值>` 已落盘；重启游戏滑条停在同一档 |
-| N9 | 游戏内「模组列表 → LogiScope → 配置」把 `dataRefreshTicks` 改成别的值 | DATA 页节拍**立即**跟着变（滑条与 config 是同一个真值源） |
+| ★N8 | 改完滑条后看 `1_20_1_neo/config/logiscope-client.toml` | `[dataPage]` 下 `dataRefreshTicks = <新值>` 已落盘；重启游戏滑条停在同一档 |
+| N9 | **（本分支无配置界面入口）** 直接改 `1_20_1_neo/config/logiscope-client.toml` 里的 `dataRefreshTicks` → 重进世界 | DATA 页节拍按新值走；滑条档位与文件一致（滑条与 config 是同一个真值源） |
 
 ## D. 回放计算：上升 / 下降事件（第十七轮①）
 
@@ -125,11 +143,11 @@ build\moddev\runClient.cmd
 ```bat
 cd /d D:\dev\logiscope
 gradlew.bat build
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
+javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" -d build/dev-check dev-check/TestChart.java
+java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
+python verify-jar.py build/libs/logiscope-0.1.0-1.20.1.jar
 ```
 
 | # | 检查 | 期望 |
@@ -138,7 +156,7 @@ python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 | E2 | `TestChart` | **443 条**断言全过；lang 中英各 **176** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.0-1.20.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
 
 ## F. 回归抽查
 
@@ -155,6 +173,6 @@ python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 ## 报问题时的三件套
 
 1. **复现步骤**（哪台设备 / 哪条线 / 框了哪一段 / 面板上那几个数）；
-2. **`run/logs/latest.log`**；
+2. **`1_20_1_neo/logs/latest.log`**；
 3. **能对上的数字**：存量线的统计 vs IO 线的统计、或状态行（`ticks N  no-data M`）——
    数据层问题几乎都藏在"两个数对不上"或"该断没断"里。
