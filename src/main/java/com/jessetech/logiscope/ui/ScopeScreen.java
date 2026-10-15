@@ -440,6 +440,10 @@ public final class ScopeScreen extends Screen {
     private int scrollArchives;
     /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
     private List<Archives.Info> archiveList = List.of();
+    /** 存档筛选框的文字（第十八轮③）：非空时存档列表只显示名称/文件夹包含它的条目 */
+    private String archFilter = "";
+    /** 筛选框是否有键盘焦点（聚焦时按键进框；Esc 清空并收起，Enter 保留并收起） */
+    private boolean archFilterFocus;
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -1610,15 +1614,14 @@ public final class ScopeScreen extends Screen {
         int x = L.x();
         int y = L.archTop();
         List<Archives.Info> head = archiveList;
-        String colName = tr("logiscope.arch.col.name");
         String colDir = tr("logiscope.arch.col.dir");
         String colCnt = tr("logiscope.arch.col.count");
         int headNameW = Math.max(96, (L.w() - 16) * 44 / 100);
         int headNameX = x + 8;
         int headDirX = headNameX + headNameW + 6;
         int headCntX = x + L.w() - 8 - this.font.width(colCnt);
-        g.drawString(this.font, tr("logiscope.info.archives") + (head.isEmpty() ? "" : "  "), x + PAD, y,
-                0xE0B8E0, false);
+        // 标题行左侧 = 筛选输入框（第十八轮③）：空时显示原「存档」标题文字作占位符
+        renderArchiveFilter(g, L, mouseX, mouseY);
         if (!head.isEmpty()) {
             // 列名贴在标题行右侧，和下面的三列同位置 —— "名称-文件夹-样本数"一眼对上
             g.drawString(this.font, colDir, headDirX, y, 0x6A6A78, false);
@@ -1627,10 +1630,13 @@ public final class ScopeScreen extends Screen {
         if (L.archRows() <= 0) {
             return;
         }
-        List<Archives.Info> list = archiveList;
+        List<Archives.Info> list = filteredArchives();
         if (list.isEmpty()) {
-            g.drawString(this.font, tr("logiscope.hint.no_archives"), x + PAD + 4, y + ROW_H,
-                    0x8A8AA0, false);
+            // 区分"真没有存档"与"筛掉了" —— 后者别让用户以为数据丢了
+            String hint = head.isEmpty()
+                    ? tr("logiscope.hint.no_archives")
+                    : tr("logiscope.hint.arch_no_match");
+            g.drawString(this.font, hint, x + PAD + 4, y + ROW_H, 0x8A8AA0, false);
             return;
         }
         scrollArchives = Math.max(0, Math.min(scrollArchives, Math.max(0, list.size() - L.archRows())));
@@ -1668,6 +1674,66 @@ public final class ScopeScreen extends Screen {
             String more = (scrollArchives + L.archRows()) + " / " + list.size()
                     + "  " + tr("logiscope.hint.scroll");
             g.drawString(this.font, more, x + PAD, y + ROW_H + L.archRows() * ROW_H, 0xFF707070, false);
+        }
+    }
+
+    /**
+     * 筛选后要显示的存档清单（第十八轮③）。筛选串为空 = 全量原样返回。
+     * 匹配对象 = 列表里显示的**名称**（displayName，没有则退到文件夹名）+ **文件夹名**，
+     * 大小写不敏感。渲染 / 点击命中 / 滚动三处共用它，保证"看到的行 = 点的行"。
+     */
+    private List<Archives.Info> filteredArchives() {
+        String q = archFilter.trim().toLowerCase(Locale.ROOT);
+        if (q.isEmpty()) {
+            return archiveList;
+        }
+        List<Archives.Info> out = new ArrayList<>();
+        for (Archives.Info i : archiveList) {
+            String name = i.displayName().isBlank() ? i.dirName() : i.displayName();
+            if (name.toLowerCase(Locale.ROOT).contains(q)
+                    || i.dirName().toLowerCase(Locale.ROOT).contains(q)) {
+                out.add(i);
+            }
+        }
+        return out;
+    }
+
+    /** 筛选框矩形 [x, y, w, h]：占标题行左侧（与名称列同宽），右侧列名位置不动 */
+    private int[] archFilterRect(Layout L) {
+        int nameW = Math.max(96, (L.w() - 16) * 44 / 100);
+        return new int[]{L.x() + 4, L.archTop() - 1, nameW + 6, ROW_H - 1};
+    }
+
+    /** 点是否落在筛选框上（渲染与命中判定共用同一个矩形） */
+    private boolean inArchFilter(Layout L, int mx, int my) {
+        if (page != Page.ROOT) {
+            return false;
+        }
+        int[] r = archFilterRect(L);
+        return isIn(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
+    /** 存档筛选框（第十八轮③）：空时显示占位符（原标题文字），聚焦时闪光标 */
+    private void renderArchiveFilter(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int[] r = archFilterRect(L);
+        int x = r[0];
+        int y = r[1];
+        int w = r[2];
+        int h = r[3];
+        boolean over = isIn(mouseX, mouseY, x, y, w, h);
+        g.fill(x, y, x + w, y + h, 0xC0101018);
+        ring(g, x, y, w, h, archFilterFocus ? COLOR_ANALYZE
+                : over ? 0xFF6A6A7A : 0xFF3A3A46);
+        boolean empty = archFilter.isEmpty();
+        String text = empty ? tr("logiscope.info.archives") : archFilter;
+        int tx = x + 3;
+        int ty = y + 1;
+        int avail = w - 6;
+        String draw = this.font.width(text) <= avail ? text : cut(text, avail);
+        g.drawString(this.font, draw, tx, ty, empty ? 0xFF9A8AA8 : 0xFFE0E0EC, false);
+        if (archFilterFocus && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
+            int cx = tx + Math.min(this.font.width(text), avail);
+            g.fill(cx, ty, cx + 1, ty + 9, 0xFFE0E0EC);
         }
     }
 
@@ -2499,6 +2565,12 @@ public final class ScopeScreen extends Screen {
         int mx = (int) mouseX;
         int my = (int) mouseY;
 
+        // ★ 存档筛选框（第十八轮③）：左键点到框外 → 收起焦点（框内点击在下面 ROOT 段重新聚焦）★
+        // 放在一切命中判定之前：点任何别的控件都先让输入框失焦，"焦点跟着点击走"。
+        if (archFilterFocus && !inArchFilter(L, mx, my)) {
+            archFilterFocus = false;
+        }
+
         // 1) 右下角缩放把手（优先于标题栏，不然永远点不到）
         if (isIn(mx, my, L.x() + L.w() - RESIZE_GRIP, L.y() + L.h() - RESIZE_GRIP, RESIZE_GRIP, RESIZE_GRIP)) {
             resizing = true;
@@ -2602,17 +2674,22 @@ public final class ScopeScreen extends Screen {
 
         // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
         if (page == Page.ROOT) {
+            // 筛选框（第十八轮③）：点在框上 → 聚焦（吃掉这次点击，不触发别的）
+            if (inArchFilter(L, mx, my)) {
+                archFilterFocus = true;
+                return true;
+            }
             // 存档行（下半部分）先判：它几何上在探针列表之外
-            if (L.archRows() > 0 && !archiveList.isEmpty()) {
-                int shownFrom = scrollArchives;
+            List<Archives.Info> arch = filteredArchives();
+            if (L.archRows() > 0 && !arch.isEmpty()) {
                 for (int i = 0; i < L.archRows(); i++) {
-                    int idx = shownFrom + i;
-                    if (idx >= archiveList.size()) {
+                    int idx = scrollArchives + i;
+                    if (idx >= arch.size()) {
                         break;
                     }
                     int ry = L.archTop() + ROW_H + i * ROW_H;
                     if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8, ROW_H)) {
-                        openArchive(archiveList.get(idx));
+                        openArchive(arch.get(idx));
                         return true;
                     }
                 }
@@ -3677,6 +3754,13 @@ public final class ScopeScreen extends Screen {
             }
             return true;
         }
+        if (archFilterFocus && !Character.isISOControl(codePoint)) {
+            if (archFilter.length() < 48) {
+                archFilter += codePoint;
+                scrollArchives = 0;   // 筛选变化 → 回到列表顶部
+            }
+            return true;
+        }
         if (page == Page.DATA && dataFocus != 0 && !Character.isISOControl(codePoint)) {
             if (dataFocus == 1) {
                 if (dataPath.length() < 120) {
@@ -3700,6 +3784,10 @@ public final class ScopeScreen extends Screen {
         // （只有 Esc 能救）。这里按"页面还在不在"兜底清掉。
         if (renameFocus && page != Page.REPLAY) {
             renameFocus = false;
+        }
+        if (archFilterFocus && page != Page.ROOT) {
+            // 与重命名框同理：焦点别留在已经离开的页面上（否则键盘全被吃掉）
+            archFilterFocus = false;
         }
         if (renameFocus) {
             switch (keyCode) {
@@ -3733,6 +3821,34 @@ public final class ScopeScreen extends Screen {
                 }
             }
             return true;   // 输入框激活时吃掉所有按键，免得误触发别的交互
+        }
+        if (archFilterFocus) {
+            switch (keyCode) {
+                case 259 -> {   // Backspace
+                    archFilter = chop(archFilter);
+                    scrollArchives = 0;
+                    return true;
+                }
+                case 257, 335 -> {   // Enter / 小键盘 Enter → 确认：保留筛选、收起焦点
+                    archFilterFocus = false;
+                    return true;
+                }
+                case 256 -> {   // Esc → 取消：清空筛选并收起
+                    archFilterFocus = false;
+                    archFilter = "";
+                    scrollArchives = 0;
+                    return true;
+                }
+                case 86 -> {   // Ctrl+V
+                    if (hasControlDown()) {
+                        pasteIntoArchFilter();
+                        return true;
+                    }
+                }
+                default -> {
+                }
+            }
+            return true;   // 输入框激活时吃掉所有按键（与重命名框一致）
         }
         if (page == Page.DATA && dataFocus != 0) {
             switch (keyCode) {
@@ -3780,6 +3896,21 @@ public final class ScopeScreen extends Screen {
             }
         } catch (Exception ignored) {
             // 剪贴板不可用时静默（不该因为粘贴失败把界面搞崩）
+        }
+    }
+
+    /** 粘贴进存档筛选框（第十八轮③），同其他输入框：去首尾空白、限长 48 */
+    private void pasteIntoArchFilter() {
+        try {
+            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+            if (clip == null) {
+                return;
+            }
+            clip = clip.trim();
+            archFilter = clip.length() > 48 ? clip.substring(0, 48) : clip;
+            scrollArchives = 0;
+        } catch (Exception ignored) {
+            // 剪贴板不可用时静默
         }
     }
 

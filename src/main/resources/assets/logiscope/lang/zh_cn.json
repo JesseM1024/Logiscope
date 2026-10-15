@@ -90,6 +90,7 @@
   "logiscope.info.archives": "存档 · 读取分析数据",
   "logiscope.info.analyze": "分析 %s",
   "logiscope.hint.no_archives": "还没有存档 · 图表页点「存档并停止」生成",
+  "logiscope.hint.arch_no_match": "没有匹配的存档 · 清空上方筛选框恢复",
   "logiscope.legend.analyze": "分析",
   "logiscope.status.replay": "存档回放",
   "logiscope.flash.archived": "已导出存档 %s · 已停止记录",
