@@ -1,6 +1,6 @@
 # LogiScope · 实机验证清单（当前版本 0.1.1-1.21.1）
 
-> **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④ 的
+> **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①–⑤ 的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
 > [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md)；原理索引在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 > ★ = 优先项；编号沿用原轮次分组，便于与 [PROGRESS.md](PROGRESS.md) 对照。
@@ -102,6 +102,26 @@ build\moddev\runClient.cmd
 | ★N8 | 改完滑条后看 `config/logiscope-client.toml` | `[dataPage]` 下 `dataRefreshTicks = <新值>` 已落盘；重启游戏滑条停在同一档 |
 | N9 | 游戏内「模组列表 → LogiScope → 配置」把 `dataRefreshTicks` 改成别的值 | DATA 页节拍**立即**跟着变（滑条与 config 是同一个真值源） |
 
+### C-4. DATA 页右键强制数值（第十八轮⑤，自 1.20.1 线回流）
+
+> 值列表上**右键** = 强制把该值按数值量读取（用于"数值被模组存成字符串"的键，
+> 如 `"energy": "1000"`）。不可转换 → 采样照常记 `no_data`（宁缺毋假，不垫 0）。
+> 值格右上角**琥珀色**小点 = 当前是强制数值口径（名称格品红点语义不变）。
+> 原理：ARCHITECTURE CP26 的 C26-1（`asValForced` / `parseNumericText`）。
+
+**造一个字符串数值键**（没有现成设备时）：对着一只箱子执行
+`/data modify block <箱子坐标> CustomEnergy set value "1000"` —— 箱子 BE 的 NBT
+顶部会出现**字符串**键 `CustomEnergy`，DATA 页原文区可见 `"1000"`（带引号）。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★P1 | 对一个**字符串**值（原文带引号）**右键** | 提示"已标记：<路径> 按数值读取（不可转换 → no-data）"；路径填入；**值格右上角出现琥珀色点** |
+| ★P2 | 对 P1 的路径「确认添加」→ 采样 | 曲线正常出数（`"1000"` 被解析成数值 1000）；**不是** no-data |
+| P3 | 对一个**不可转换**的字符串（如 `"abc"`）右键 → 添加 | 采样全程 `no_data`（不伪造 0） |
+| P4 | 对一个**数值**值（无引号）右键 → 添加 | 结果与左键取值**完全一致**（数值标签照常读，强制只改变字符串的处理） |
+| P5 | 右键标记后，手动改动值路径（打字 / 粘贴 / 退格） | **琥珀色点消失**（回到自动口径）；再右键可重新标记 |
+| P6 | 左键点一个**数值**值 | 取路径且**不带**强制标记；左键点文字仍是"当名称"（品红点，回归） |
+
 ## D. 回放计算：上升 / 下降事件（第十七轮①）
 
 > 「运算」弹窗在「变更区间」之后新增 **上升事件 / 下降事件**（只数增加 / 只数减少）。
@@ -122,11 +142,15 @@ build\moddev\runClient.cmd
 
 ## E. 离线检查（不开游戏）
 
+> 一键版（推荐）：`cmd //c dev-check\offline-check.bat` → 末尾打印 `ALL_OK`。
+> 逐条版如下。**注意**：Git Bash 会把分号 classpath 拆坏（报"程序包不存在"而类已编译）——
+> 逐条跑请在 cmd 内执行，或直接用上面的 .bat。
+
 ```bat
 cd /d D:\dev\logiscope
 gradlew.bat build
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
+javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;dev-check/lib/guava-32.1.2-jre.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
+java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;dev-check/lib/guava-32.1.2-jre.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
 python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
@@ -135,7 +159,7 @@ python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build` | `BUILD SUCCESSFUL` |
-| E2 | `TestChart` | **443 条**断言全过；lang 中英各 **176** 键一致 |
+| E2 | `TestChart` | **461 条**断言全过；lang 中英各 **177** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
 | E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |

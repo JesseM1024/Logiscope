@@ -7,12 +7,12 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **443 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **176** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **177** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；0.1.0 同线；
   发布约定见 [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
-  **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①②③④ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
+  **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①–⑤ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
 
 ---
 
@@ -129,6 +129,31 @@ Esc 才是清空。
 离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
 （lang 176 键一致）。实机复测见 `VERIFY.md` 第十八轮④（N1–N9）。
 
+## 第十八轮⑤：DATA 页右键强制数值（自 1.20.1 线回流，2026-10-15）
+
+**需求**（用户原话归纳）："有的数值类型在 NBT 中被存储为字符串"；在 probe data 页新增
+**右键 = 强制把某个值按数值量读取**；原始值是字符串或无法转换为数值量的值 → 结果报 no data。
+功能先在 `1.20.1-neo` 线落地（[1.20.1] 轮次 4），随后回流本分支 —— 本提交 `f07ebad`
+（1.20.1 侧对应 `a6e701b`）。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/Val` | 新增 `parseNumericText`（纯逻辑）：trim → `Long.parseLong`（整数精确）→ 纯整数超 long **拒绝近似** → `Double.parseDouble`；NaN / ∞ / 任意文本 → null。与 `of(double)` 的两条诚实边界同一口径 |
+| `collect/DataProbe` | `readNumber` 按 `DataTarget.forceNumeric` 分流；新增 `asValForced`：数值标签照 `asVal`，字符串再试文本解析；List / Compound → null = 读不到 |
+| `bind/DataTarget` | record 新增第 9 个分量 `forceNumeric`（**不参与去重**）；工厂方法 / 普通构造器默认 false |
+| `ui/ScopeScreen` | 值列表**右键**从"用作文名称"改为"强制按数值读取"（原行为取消）；左键取值 / 手输 / 粘贴 / 退格回到自动口径；`drawEditCell` 的标记参数改为 marker 色值（强制 = 琥珀 `0xFFFFB040`，名称跟 NBT = 品红 `COLOR_ANALYZE`） |
+| lang | 新增 `flash.data_force`；`data.hint.pick` 改口径（中英 176 → **177** 键） |
+| `dev-check` | t40 断言 18 条（443 → **461**）；classpath 补 `guava-32.1.2-jre`（t40 的 `ListTag` 构造依赖）；新增 `offline-check.bat` 一键脚本（与 1.20.1 线同款） |
+
+**设计取舍**：
+- **"强制"是路径的属性，不是全局开关**：标记跟着这一次填进的值路径走（加进目标列表后
+  锁定，要换口径删掉重加）。
+- **不可转换 → no-data，不垫 0**：与"读不到 vs 空格子"的既有口径一致；宁缺毋假。
+- **左键语义不变**（数值 = 取值路径 / 文字 = 当名称）：右键是纯增量。
+
+离线：build / TestChart 461 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
+（lang 177 键一致）。实机复测见 `VERIFY.md` 第十八轮⑤（P1–P6）。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |
@@ -173,18 +198,10 @@ cd /d D:\dev\logiscope
 :: 1) 编译 + 打包（JDK 21 已由 gradle.properties 的 org.gradle.java.home 锁定）
 gradlew.bat build
 
-:: 2) 离线断言（不用开游戏）
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
+:: 2) 离线断言 + 渲染压测 + 产物验收（一键；逐条等价命令见 VERIFY.md §E）
+dev-check\offline-check.bat
 
-:: 2b) 渲染路径离线压测
-javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-
-:: 3) 产物验收（元数据 / 编码 / 占位符）
-python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
-
-:: 4) 进游戏（或用 build\moddev\runClient.cmd 脱离 Gradle 反复重启）
+:: 3) 进游戏（或用 build\moddev\runClient.cmd 脱离 Gradle 反复重启）
 gradlew.bat runClient
 ```
 

@@ -16,12 +16,13 @@
 | 发布标签 | `neoforge-1.21.1-0.1.0`、`neoforge-1.21.1-0.1.1`（一版一 tag 一 release） |
 | 历史工作标签 | `wip-round2/7/8-20260918`、`wip-g2-20260918`、`round7-verified-20260918`（书签性质，可不管） |
 | 工作区 | 以 `git status` 为准（本表不记具体提交号 —— 写死必然落后） |
-| 代码状态 | `BUILD SUCCESSFUL`；`TestChart` **443 条**；`BenchRender` 全过；`verify-jar.py` 全过 |
-| 实机状态 | 第十六轮④ 及更早全部通过；十六⑦⑨ / 十七① / 十八①-④ 待复测（清单在 `VERIFY.md`） |
+| 代码状态 | `BUILD SUCCESSFUL`；`TestChart` **461 条**；`BenchRender` 全过；`verify-jar.py` 全过 |
+| 实机状态 | 第十六轮④ 及更早全部通过；十六⑦⑨ / 十七① / 十八①-⑤ 待复测（清单在 `VERIFY.md`） |
 | 提交身份 | 仓库级配置（`git config user.name/email`）；如需公开署名，先改这里 |
 
 **最近完成的轮次**（详见 [`PROGRESS.md`](PROGRESS.md) / [`PROGRESS-HISTORY.md`](PROGRESS-HISTORY.md)）：
-第十八轮①②③④（采样统一服务端 / 删旧提示 / 存档筛选框 / DATA 页完成按钮与刷新滑条）。
+第十八轮①–⑤（采样统一服务端 / 删旧提示 / 存档筛选框 / DATA 页完成按钮与刷新滑条 /
+DATA 页右键强制数值·自 1.20.1 线回流）。
 
 ---
 
