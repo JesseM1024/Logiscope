@@ -29,7 +29,7 @@ import java.util.List;
  *                   只给 NBT 槽位锚点用：采样时拿它跟"现在那块地方是什么方块实体"比，
  *                   不一样就说明"这个 slot 号已经没有意义了"，该记 `no_data` 而不是记 0
  *                   （见 {@code DataProbe#readSlotAnchor} 与 ARCHITECTURE C24-10 的"读不到 vs 空格子"）。
- * @param forceNumeric **强制按数值读取**（DATA 页在值列表上**右键**标记的）：
+ * @param forceNumeric **强制按数值读取**（DATA 页在值列表上**右键填入值格**时标记的）：
  *                   读取时若标签是字符串，尝试把它解析成数值；不可转换照常记
  *                   {@code no_data}。用于"数值被模组存成字符串"的键
  *                   （如 {@code "energy": "1000"}）。只影响值的读取，不影响名称。
@@ -121,7 +121,8 @@ public record DataTarget(
      * | 普通路径 | valuePath 相同 | 一个路径一个数 |
      *
      * 普通路径的强制数值标记（{@code forceNumeric}）**不参与**去重 —— 同一路径
-     * 仍然只保留一个目标；要换口径（自动 ⇄ 强制）先删掉再加。
+     * 仍然只保留一个目标；换口径（自动 ⇄ 强制）或改名称走 DATA 页「确认添加」的
+     * 替换（{@code ProbeInstance#replaceDataTarget}）。
      */
     public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
         for (DataTarget d : list) {
