@@ -22,7 +22,7 @@
 
 **最近完成的轮次**（详见 [`PROGRESS.md`](PROGRESS.md) / [`PROGRESS-HISTORY.md`](PROGRESS-HISTORY.md)）：
 第十八轮①–⑤（采样统一服务端 / 删旧提示 / 存档筛选框 / DATA 页完成按钮与刷新滑条 /
-DATA 页右键强制数值·自 1.20.1 线回流）。
+DATA 页右键「按数值读取」·自 1.20.1 线回流，实机两轮反馈后定稿两步式）。
 
 ---
 
