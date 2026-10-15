@@ -7,7 +7,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * **NBT 自带槽位号**的容器布局（第十六轮）：MEK 那类机器把物品栏存成
+ * **NBT 自带槽位号**的容器布局：MEK 那类机器把物品栏存成
  * "一个列表 + 每个元素自带 {@code slot} 号"，例如
  *
  * <pre>{@code
@@ -28,7 +28,7 @@ import java.util.Locale;
  *   · **GUI 开不开都一样**（这一路完全不碰菜单），于是不存在"两条路径不一致"；
  *   · 元素不存在（格子空了）= 数量 0（这才是"这格是空的"的诚实表达）。
  *
- * 【拾取时的规则】见 {@link SlotAlign}（第十六轮④）—— 这里只提供它需要的原料：
+ * 【拾取时的规则】见 {@link SlotAlign}—— 这里只提供它需要的原料：
  * 按 slot 找元素（{@link #bySlot}）、按物品 id 反查（{@link #byItem}）。
  * **"点到的格子 ↔ 哪个 slot"这件事不在本类里定** —— 它靠"顺序 + 内容"对齐，
  * 因为"容器下标"这种做法在模组世界里会骗人（实测：Mekanism 每格都报 0）。
@@ -81,7 +81,7 @@ public final class NbtSlotLayout {
      *
      * 用来回答"这块地方的设备换掉了没有" —— 锚点建档时记下它，采样时跟方块实体现读的
      * 类型比一比：不一样就说明"这个 slot 号对现在这个方块已经没有意义了"，该记 no_data
-     * 而不是记 0（第十六轮⑤）。`data get block` 的输出带 {@code id}
+     * 而不是记 0。`data get block` 的输出带 {@code id}
      * （`BlockDataAccessor` 走 `saveWithFullMetadata` → `saveId`），所以建档时拿得到。
      */
     @Nullable
@@ -108,8 +108,7 @@ public final class NbtSlotLayout {
     /**
      * 按**物品 id**反查全部占用该物品的 slot（拾取时用）。
      *
-     * ★ 为什么按 id 而不是"id + 数量" ★
-     * 运行中的机器每秒都在改变数量（输入被消耗、产出被拿走），
+     * 为什么按 id 而不是"id + 数量" * 运行中的机器每秒都在改变数量（输入被消耗、产出被拿走），
      * 用数量匹配会因为"菜单快照"和"NBT 快照"读取时刻不同而**漏格**（实测踩过）。
      * 物品 id 在一次会话里稳定得多 —— 而且同种物品多格本来就该**加起来**，
      * 不需要区分是哪一格。
@@ -218,7 +217,7 @@ public final class NbtSlotLayout {
     /**
      * 找一个"整数"字段（名字在 keys 里，忽略大小写；数值可以是 byte/short/int/long）。
      * **装不进 int 或不是有限值就当作没有这个字段** —— 直接 `(int)` 窄化会把
-     * 超大值变成 MAX_VALUE、NaN 变成 0，然后当成真实的 slot 号/数量用（第十六轮⑤）。
+     * 超大值变成 MAX_VALUE、NaN 变成 0，然后当成真实的 slot 号/数量用。
      */
     @Nullable
     private static Integer intField(Snbt.Node compound, String[] keys) {

@@ -12,8 +12,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * ★★★ 本项目的技术基石 ★★★
- *
+ * 本项目的技术基石 *
  * 结论：容器内容【已经同步到客户端】了，纯客户端模组可以直接读。
  *
  * 原理：玩家打开任意容器时，服务端会通过
@@ -54,8 +53,7 @@ public final class ContainerAccess {
     /**
      * 这个槽位是不是**玩家自己背包**里的格子。
      *
-     * ★ 第九轮补的一个洞（原实现与文档不一致）★
-     * 旧文档（ARCHITECTURE.md CP1）写着 "ContainerAccess#snapshot 会把玩家自己的背包
+     * 一处实现与文档不一致的修正。文档（ARCHITECTURE.md CP1）称"ContainerAccess#snapshot 会把玩家自己的背包
      * 整体排除掉"，但代码只判了 "整个菜单 == inventoryMenu" 这一种情况 ——
      * 于是**打开箱子时**，列表里其实混着下面 36 格玩家背包。
      * 单格时代它只是"列表有点长"；多格监控 + 可视化选格开始之后，
@@ -87,8 +85,7 @@ public final class ContainerAccess {
     /**
      * 列出所有**设备槽位**的快照，供界面展示与选择。
      *
-     * ★ 只列「外部设备」的槽位 ★
-     *   · 没有外部容器界面时直接返回空（面板可以在关掉容器界面后单独打开，
+     * 只列「外部设备」的槽位 *   · 没有外部容器界面时直接返回空（面板可以在关掉容器界面后单独打开，
      *     那时 containerMenu 是玩家自己的背包，列出来会让人误以为那是机器）
      *   · 有外部容器界面时，跳过玩家背包那 36 格与模组的假槽位（见 isSelectable）
      */
@@ -120,7 +117,7 @@ public final class ContainerAccess {
         return toView(menu, slotIndex);
     }
 
-    /** 按容器内下标反查菜单槽；找不到返回 null（第九轮新增，给"无 GUI 建的探针"用不上，留给后续扩展） */
+    /** 按容器内下标反查菜单槽；找不到返回 null */
     public static SlotView findByContainerIndex(int containerSlotIndex) {
         AbstractContainerMenu menu = currentMenu();
         if (menu == null) {

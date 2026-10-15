@@ -35,14 +35,13 @@ import java.util.List;
  *   "markers": [2000, 2600],          ← G4 标注，随记录一起走
  *   "samples": [
  *     {"t": 1600, "i": "minecraft:iron_ingot", "n": 64},        ← 整数值（n = long）
- *     {"t": 1601, "i": "minecraft:water", "d": 5.5},            ← 小数值（第十六轮⑥）
+ *     {"t": 1601, "i": "minecraft:water", "d": 5.5},            ← 小数值
  *     {"t": 1605, "m": "no_data"},    ← 标记样本单独一个键，绝不写成 0
  *     {"t": 1610, "m": "gap"}
  *   ]
  * }}
  *
- * ★ 为什么手拼 {@link JsonObject} 而不用 Gson 的反射绑定 ★
- *   反射绑定对"字段改名/增删"很脆弱，而且旧 Gson 对 record 支持不一。
+ * 为什么手拼 {@link JsonObject} 而不用 Gson 的反射绑定 *   反射绑定对"字段改名/增删"很脆弱，而且旧 Gson 对 record 支持不一。
  *   显式读写每个字段 + 逐字段给默认值：**旧文件永远能被新代码读**，
  *   新增字段也不需要迁移（读取方忽略不认识的键）—— 这就是"可扩展"的落地形式。
  *
@@ -168,8 +167,7 @@ public final class ArchiveFormat {
     /**
      * 读头部（列表页扫描用）：只要小结，**不把几万条样本建成对象**。
      *
-     * ★ 第十六轮⑤ 改成流式读 ★
-     * 旧实现是 `JsonParser.parseString(Files.readString(...))` —— 先把整份文件读成字符串、
+     * 流式读 * 旧实现是 `JsonParser.parseString(Files.readString(...))` —— 先把整份文件读成字符串、
      * 再把**每一条样本都建成 JsonObject**，只为取几行头部。存档大时（几万样本）
      * 每次打开面板都要付这份代价，而注释一直写着"只读 JSON 头，几 KB 级"（名实不符）。
      * 现在用 {@link JsonReader} 顺着 token 走：认识的键取值，`samples` 整段

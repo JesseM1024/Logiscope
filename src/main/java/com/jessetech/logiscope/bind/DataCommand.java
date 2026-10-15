@@ -14,10 +14,9 @@ import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * 「Probe data」的取数通道（第十一轮③，④改为**直读优先**）。
+ * 「Probe data」的取数通道。
  *
- * ★ 直读（单人，无需任何权限）★
- *   单人下集成服务端就在同一个进程里：把"读方块实体 NBT"这个活**提交到服务端线程**
+ * 直读（单人，无需任何权限）*   单人下集成服务端就在同一个进程里：把"读方块实体 NBT"这个活**提交到服务端线程**
    （`server.execute(...)`，同 CP15 的"取样点放权威一侧"纪律），把 SNBT 文本带回来。
    不发命令、不碰聊天回执、不看权限 —— 这才是"实时显示 NBT"的正确姿势。
  *

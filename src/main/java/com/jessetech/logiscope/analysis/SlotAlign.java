@@ -8,10 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * 把"选格页点到的格子"翻译成"**数据里的 slot 号**"（第十六轮④）。
+ * 把"选格页点到的格子"翻译成"**数据里的 slot 号**"。
  *
  * 【为什么不能靠 {@code Slot#getContainerSlot()}】
- * 第十六轮③曾经把它当**最高优先级**判据（"容器下标恰好等于某个 NBT slot → 就选那一格"）。
+ * 曾把它当**最高优先级**判据（"容器下标恰好等于某个 NBT slot → 就选那一格"）。
  * 实机把它否了 —— 两条字节码事实：
  *   · NeoForge 的 {@code SlotItemHandler} 是 {@code super(emptyInventory, index, x, y)}，
  *     传进去的**就是 handler 下标**（正好等于 NBT 里的 {@code Slot}）→ 这条路对这类机器是对的；

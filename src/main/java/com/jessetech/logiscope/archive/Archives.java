@@ -99,7 +99,7 @@ public final class Archives {
                        int markerCount, int sampleCount, Path dir) {
     }
 
-    /** 自定义名称的文件名（第十三轮④）：有它就用它当"名称"，没有就退回探针名 / 目录名 */
+    /** 自定义名称的文件名：有它就用它当"名称"，没有就退回探针名 / 目录名 */
     public static final String NAME_FILE = "name.txt";
 
     /** 一个存档目录当前显示用的名称 */
@@ -119,7 +119,7 @@ public final class Archives {
     }
 
     /**
-     * 重命名一份存档（第十三轮④）：只写 {@link #NAME_FILE}，**不动 recording.json**。
+     * 重命名一份存档：只写 {@link #NAME_FILE}，**不动 recording.json**。
      * 这样旧存档天然兼容、改名也不需要重写几万个样本。
      * 传空串 = 清掉自定义名（回到探针名）。名称过长截到 48 字符。
      */

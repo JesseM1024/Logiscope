@@ -10,10 +10,9 @@ import net.minecraft.world.level.Level;
  *
  * | 用途 | 谁在用 | 为什么不能用客户端 `Level#getGameTime()` |
  * |---|---|---|
- * | 状态机的时间刻度（"世界有没有走 tick"） | `ProbeManager#tick` → `ProbeInstance#tick` | 客户端 gameTime 是**错拍阶梯**：客户端每客户端 tick 本地 +1，服务端每 20 个服务端 tick 才砸一次绝对值纠正。tick rate 20 时两者恰好重合（所以早期测不出来），tick rate ≠ 20 时采样节奏与数值全错（第八轮 N13） |
+ * | 状态机的时间刻度（"世界有没有走 tick"） | `ProbeManager#tick` → `ProbeInstance#tick` | 客户端 gameTime 是**错拍阶梯**：客户端每客户端 tick 本地 +1，服务端每 20 个服务端 tick 才砸一次绝对值纠正。tick rate 20 时两者恰好重合（所以早期测不出来），tick rate ≠ 20 时采样节奏与数值全错 |
  *
- * ★ 第十轮第四次修复：采样本身**不再用这只钟** ★
- *   单人下的样本时间戳直接取服务端 tick 那一刻的 `ServerLevel#getGameTime()`
+ * 采样本身**不再用这只钟** *   单人下的样本时间戳直接取服务端 tick 那一刻的 `ServerLevel#getGameTime()`
  *   （见 `ProbeInstance#sampleOnServerTick`）—— 那只钟是采样点自己的钟，
  *   比这里"异步读回来"的值更准。本类现在只服务**回退路径**
  *   （多人/无坐标时由客户端 tick 驱动的菜单采样）与状态机。

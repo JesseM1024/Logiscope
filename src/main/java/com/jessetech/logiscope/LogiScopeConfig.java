@@ -17,12 +17,10 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * | `maxItemKinds` | 256 | 1 ~ 4096 | 一个实例最多画多少种物品的数据线；超出的种类仍然记账（进统计），但**不画线**，面板上显示 `+N 未显示` |
  * | `dataRefreshTicks` | 20 | 0 ~ 40 | Probe data 页自动重发 `data get block` 的间隔（客户端 tick）；**0 = 不刷新**（只用页面的「刷新」按钮） |
  *
- * ★ 为什么缓冲按"样本条数"而不是"时长" ★
- *   采样节拍 = 世界流速（`/tick rate` 可改），按时长算的话容量会随流速漂移，
+ * 为什么缓冲按"样本条数"而不是"时长" *   采样节拍 = 世界流速（`/tick rate` 可改），按时长算的话容量会随流速漂移，
  *   而且环形缓冲的容量必须在创建时就定死。按条数最诚实：写满就覆盖最旧的。
  *
- * ★ 改动什么时候生效 ★
- *   · `bufferSamples`：**立刻**（`ProbeManager` 每客户端 tick 检查一次，变了就 resize，
+ * 改动什么时候生效 *   · `bufferSamples`：**立刻**（`ProbeManager` 每客户端 tick 检查一次，变了就 resize，
  *     保留最新的样本）。不用重启，也不用重建探针。
  *   · `maxProbes`：创建新探针时判定（已存在的实例不会被踢掉）。
  *   · `maxItemKinds`：下一次重算派生数据时生效（即立刻）。
