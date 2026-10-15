@@ -8,7 +8,7 @@
 ## 一句话现状
 
 - **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **177** 键一致。
+  `verify-jar.py` 全过；lang 中英各 **178** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；0.1.0 同线；
   发布约定见 [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
