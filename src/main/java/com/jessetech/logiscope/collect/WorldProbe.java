@@ -22,8 +22,7 @@ import java.util.List;
 /**
  * 采集层：从「方块实体」读真值的通道（界面关掉之后继续跟踪的唯一依靠）。
  *
- * ★ 第十轮第四次修复：这里**不再有异步管道** ★
- *   以前的做法是"客户端 tick 提交任务到服务端线程、结果丢进 volatile 缓存、
+ * 这里**不再有异步管道** *   以前的做法是"客户端 tick 提交任务到服务端线程、结果丢进 volatile 缓存、
  *   下一 tick 取用"。它能工作，但有两笔账：
  *     · 缓存会被复用（`maxAge` 允许），复用时贴上新 tick 标签 → 曲线上假的 1t 平台；
  *     · 客户端的观测节拍（20/s）与服务端的 tick 节拍（20/s 或更高）不锁相 →
@@ -37,8 +36,7 @@ import java.util.List;
  *     1. **下标映射验证**（模组机器的菜单槽下标不可信，见下）
  *     2. **一次同步读取**（{@link #readOnServer}，只能在服务端线程调）
  *
- * ★ 为什么只能单人用 ★
- *   多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
+ * 为什么只能单人用 *   多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
  *   根本不在客户端 —— 容器内容只会通过菜单包同步，界面一关就没了。
  *   所以多人下调用方会退化成记录 no_data（这是设计，不是 bug）。
  */
@@ -51,17 +49,17 @@ public final class WorldProbe {
     private volatile Mapping mapping;
 
     // ==================================================================
-    // 下标映射验证（第六轮 M4：MEK 等模组机器的槽位下标不可信）
+    // 下标映射验证
     // ==================================================================
 
     /**
      * 菜单槽下标 → 方块实体真实槽位下标 的映射状态。
      *
      * 为什么需要它：菜单槽的 {@code getContainerSlot()} 只有对 vanilla 才有
-     * "容器内下标"的保证。实测（javap 反查，第六轮）：Mekanism 的
+     * "容器内下标"的保证。实测（javap 反查）：Mekanism 的
      * InventoryContainerSlot 构造是 {@code super(emptyInventory, 0, x, y)} ——
      * **下标硬编码 0**，且它包装的 IInventorySlot 是单槽接口、不带位置信息，
-     * 客户端从槽位对象里**根本拿不到**真下标。用户实测：MEK 机器所有槽显示 #0，
+     * 客户端从槽位对象里**根本拿不到**真下标。实测：MEK 机器所有槽显示 #0，
      * 关界面后跟踪的全是别的格子。
      */
     public enum MappingStatus {
@@ -112,7 +110,7 @@ public final class WorldProbe {
         }
     }
 
-    /** ★ 必须在服务端线程执行 ★ */
+    /** 必须在服务端线程执行 */
     private static Mapping verifyNow(MinecraftServer server, ProbeTarget target,
                                      @Nullable List<ContainerAccess.SlotView> menuViews) {
         int n = target.slots().size();
@@ -223,12 +221,10 @@ public final class WorldProbe {
     // ==================================================================
 
     /**
-     * ★ 只能在**服务端线程**执行（由服务端 tick 事件驱动）★
-     *
+     * 只能在**服务端线程**执行（由服务端 tick 事件驱动）*
      * 返回与 {@code target.slots()} **同序**的快照；只要有一格读不到就整体返回 null。
      *
-     * ★ 为什么"有一格读不到就整体算读不到" ★
-     *   聚合值是"所有格子的和"。少读一格 → 和偏小 → 图上的总存量/总吞吐静默偏小，
+     * 为什么"有一格读不到就整体算读不到" *   聚合值是"所有格子的和"。少读一格 → 和偏小 → 图上的总存量/总吞吐静默偏小，
      *   而这种偏小在波形上完全看不出来（它看起来和正常的下降一模一样）。
      *   相比之下 no_data 是**看得出来**的断档。两害相权，宁可断档。
      */
@@ -238,7 +234,7 @@ public final class WorldProbe {
             return null;
         }
         if (!level.isLoaded(target.pos())) {
-            // 区块真卸载了才读不到。第十四轮试过更严的"方块 tick 范围"判据，用户判定
+            // 区块真卸载了才读不到。试过更严的"方块 tick 范围"判据，用户判定
             // **不需要**：那会让"走出模拟距离"也变成 no_data，而"关掉 GUI 继续采"
             // 才是要的行为 —— 已回退（见 PROGRESS 的对应小节）。
             return null;
@@ -271,11 +267,11 @@ public final class WorldProbe {
                 continue;
             }
             // ---- 路径 2：NeoForge 的物品 capability（模组机器的主通道）----
-            // 实测（javap 反查，第五轮）：Sophisticated Storage 的 StorageBlockEntity 与
+            // 实测（javap 反查）：Sophisticated Storage 的 StorageBlockEntity 与
             // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
             // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
             // 但为了能和漏斗/管道交互，模组机器几乎都会注册 ItemHandler.BLOCK 能力。
-            // 下标用 verifyIndex 验证过的（第六轮 M4）；验证不了时退回 getContainerSlot()。
+            // 下标用 verifyIndex 验证过的；验证不了时退回 getContainerSlot()。
             if (idx >= handler.getSlots()) {
                 return null;
             }

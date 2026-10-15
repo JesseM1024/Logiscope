@@ -55,13 +55,12 @@ import java.util.Set;
 /**
  * 呈现层：示波器面板。**三个页面共用一个浮层**。
  *
- * ★ 它是一个"可以拖动、可以缩放、不遮挡原界面"的浮层，不是一个全屏界面 ★
- *
+ * 它是一个"可以拖动、可以缩放、不遮挡原界面"的浮层，不是一个全屏界面 *
  * 实现方式是 NeoForge 的 GUI 图层栈：
  *   ClientHooks.pushGuiLayer(mc, this)   —— 把当前容器界面压进栈里当背景，自己当顶层
  *   ClientHooks.popGuiLayer(mc)          —— 弹回容器界面
  *
- * 核实要点（这一条在本项目文档里曾被写错，见 docs/ARCHITECTURE.md 第四节）：
+ * 核实要点（参见 docs/ARCHITECTURE.md CP8；勿与 HUD 图层系统混淆）：
  * ClientHooks 里的 guiLayers 是货真价实的 {@code Stack<Screen>}，
  * 源码注释写着 "Contains the *extra* GUI layers. The current top layer stays in
  * Minecraft#currentScreen, and the rest serve as a background for it."
@@ -69,7 +68,7 @@ import java.util.Set;
  * 再画最顶层 —— 所以被压住的容器界面**仍然会被完整绘制**，这才是"不覆盖"的来源。
  *
  * ==================================================================
- * 第九轮的三页结构（需求 1 / 2 / 3 直接落在这里）
+ * 页面结构（需求 1 / 2 / 3）
  * ==================================================================
  *
  * ```
@@ -103,7 +102,7 @@ import java.util.Set;
  */
 public final class ScopeScreen extends Screen {
 
-    /** 页面（REPLAY = 存档回放 G5；DATA = NBT 取数探针第十一轮③） */
+    /** 页面（REPLAY = 存档回放 G5；DATA = NBT 取数探针） */
     public enum Page {
         ROOT, PICKER, CHART, REPLAY, DATA
     }
@@ -179,15 +178,15 @@ public final class ScopeScreen extends Screen {
     private static final String SERIES_PREFIX = "series:";
     /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
     private static final int COLOR_ANALYZE = 0xFFE070D8;
-    /** NBT 原文悬浮高亮：黄（用户反馈淡紫在深底上难认；黄与深底对比最强） */
+    /** NBT 原文悬浮高亮：黄（实测反馈淡紫在深底上难认；黄与深底对比最强） */
     private static final int COLOR_HILIGHT = 0x80FFD24A;
-    /** QoL（第十六轮⑦）：「主界面」按钮淡绿 / 「回选格」淡蓝 —— 也用作顶栏光效的页色 */
+    /** QoL：「主界面」按钮淡绿 / 「回选格」淡蓝 —— 也用作顶栏光效的页色 */
     private static final int COLOR_MAINSCREEN = 0xFF90EE90;
     private static final int COLOR_BACKSLOT = 0xFF8FB8E8;
     private static final int COLOR_CHART_GLOW = 0xFFFFE08A;
     private static final int COLOR_CALC_GLOW = 0xFFC0A0F0;
     /**
-     * DATA 页刷新滑条的档位数（第十八轮④）：idx 0..39 = 每 1..40 t 抓一次，
+     * DATA 页刷新滑条的档位数：idx 0..39 = 每 1..40 t 抓一次，
      * idx 40（最右档）= 不刷新。档位值存 `LogiScopeConfig.dataRefreshTicks`
      * （整个游戏运行实例一份，不随探针隔离；滑条与 config 是同一个值）。
      */
@@ -205,8 +204,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 当前弹出菜单对应的物品（null = 没弹）。
      *
-     * ★ 第十轮⑥：IO 不再是图例条上独立的子格，而是**并入物品图例** ★
-     * 点物品图例 → 弹出「数量 / IO」两项的小菜单，两项分别控制存量线与 IO 线。
+     * IO 不再是图例条上独立的子格，而是**并入物品图例**。点物品图例 → 弹出「数量 / IO」两项的小菜单，两项分别控制存量线与 IO 线。
      * 为什么改成弹窗：图例条是流式换行的色块带，"父格 + IO 子格"成对出现
      * 让条目数翻倍（截图实测 9 种物品挤满 3 行上限），而且 IO 子格和物品格
      * 长得几乎一样，层级关系要靠猜。弹窗把"每个物品有两层开关"这件事
@@ -217,7 +215,7 @@ public final class ScopeScreen extends Screen {
     @Nullable
     private String legendPopup;
 
-    // ---- 存档回放（REPLAY 页，第十一轮 / G5）----
+    // ---- 存档回放（REPLAY 页， / G5）----
     /** 当前载入的存档；null = 没在回放。回放数据在打开面板期间驻留（存档读盘一次，之后全内存） */
     @Nullable
     private ArchiveData replayArchive;
@@ -227,14 +225,14 @@ public final class ScopeScreen extends Screen {
      * 回放页里被「分析」选中的曲线（可扩展点）。
      *
      * 需求原文：回放逻辑要有可扩展性，"例如我可能需要选中某一个曲线，
-     * 进行下一步的数学计算操作"。本轮只把**选中**这件事做出来（图例弹窗里的
+     * 进行下一步的数学计算操作"。本次只把**选中**这件事做出来（图例弹窗里的
      * 「分析」一项，选中后图例块描品红边），后续的数学运算（差值 / 滤波 / 对比）
      * 都挂在这个字段上往前叠，不用再动采集与存储层。
      */
     @Nullable
     private String replaySelectedItem;
 
-    // ---- 存档重命名（第十三轮④）----
+    // ---- 存档重命名----
     /** 当前打开存档的显示名（可被重命名覆盖）与目录名（身份标识，永不改） */
     private String replayName = "";
     private String replayDir = "";
@@ -242,7 +240,7 @@ public final class ScopeScreen extends Screen {
     private boolean renameFocus;
     private String renameBuf = "";
 
-    // ---- 悬浮详情（第十三轮⑤）：长列表用滚轮翻，避免"只有个 +N 看不出是啥" ----
+    // ---- 悬浮详情：长列表用滚轮翻，避免"只有个 +N 看不出是啥" ----
     private String tipTitle = "";
     private List<String> tipLines = List.of();
     private int tipScroll;
@@ -252,7 +250,7 @@ public final class ScopeScreen extends Screen {
     @Nullable
     private int[] tipRect;
 
-    // ---- NBT 槽位型容器（第十六轮）：slot 号写在 NBT 自己身上，按 slot 监测才准 ----
+    // ---- NBT 槽位型容器：slot 号写在 NBT 自己身上，按 slot 监测才准 ----
     /** 检测到"数据里带 slot 号的物品列表"（只决定按钮能不能点） */
     private boolean nbtSlotDetected;
     /** 用户**显式开启**了 NBT 追踪（默认关 —— 避免误判机械手这类设备） */
@@ -261,7 +259,7 @@ public final class ScopeScreen extends Screen {
     private String nbtSlotListPath = "";
     /** 检测到的元素（slot / 物品 / 数量），用于"按内容反查 slot 号" */
     private List<NbtSlotLayout.Entry> nbtSlotEntries = List.of();
-    /** AE 网络模式（第十六轮⑧）：菜单是 AE 的 ME 存储界面家族时启用 —— 点格 = 选"网络中的物品" */
+    /** AE 网络模式：菜单是 AE 的 ME 存储界面家族时启用 —— 点格 = 选"网络中的物品" */
     private boolean aeMode;
     /** AE 模式选中的物品 registry id（覆写语义：「完成」= 替换全部 AE 目标） */
     private final Set<String> selectedAeIds = new LinkedHashSet<>();
@@ -274,7 +272,7 @@ public final class ScopeScreen extends Screen {
      */
     private boolean nbtSeedPending;
 
-    // ---- 回放计算（第十一轮②）----
+    // ---- 回放计算----
     /** 运算选择（工具栏「运算」弹窗）。OP_* 常量见下 */
     private int analyzeOp = OP_NONE;
     /** 计算对象：false = 数量（存量线），true = IO（净流量线）。**一次只算一个** */
@@ -282,7 +280,7 @@ public final class ScopeScreen extends Screen {
     /** 「运算」弹窗是否开着 */
     private boolean opPopupOpen;
 
-    // ---- NBT 取数探针（第十一轮③ / DATA 页）----
+    // ---- NBT 取数探针----
     /** 这一页在读哪个探针的方块（来自选格页「Probe data」） */
     private int dataSrcProbeId = Integer.MIN_VALUE;
     /** 采样值路径（可手输，也可点下面的值填进来） */
@@ -307,7 +305,7 @@ public final class ScopeScreen extends Screen {
     private String dataParsedFrom = "";
     /** 自动刷新：下一次发命令的客户端 tick。速率 = `LogiScopeConfig.dataRefreshTicks`（0 = 不刷新） */
     private long dataNextRequestTick;
-    /** 刷新滑条是否正被拖动（第十八轮④）：按住后鼠标拖动改档位，松手结束 */
+    /** 刷新滑条是否正被拖动：按住后鼠标拖动改档位，松手结束 */
     private boolean dataSliderDrag;
     /** 命令原文按当前宽度折行后的结果（缓存：宽度或原文变了才重算） */
     private List<String> dataTextLines = List.of();
@@ -422,7 +420,7 @@ public final class ScopeScreen extends Screen {
      * 为什么要记：window() 在"数据还没铺满窗口"时会把窗口起点钳到第一个数据点
      * （否则刚接上探头时波形挤在右边一小条）。但用户**主动缩放**之后必须忠实反映
      * windowTicks —— 不然数据未铺满窗口时怎么缩都看不见变化，
-     * 这就是第七轮"多按几次才动"的根因。attach / 清空 / 全览时复位。
+     * 这就是早期"多按几次才动"的根因。attach / 清空 / 全览时复位。
      */
     private boolean userZoomed;
     @Nullable
@@ -446,7 +444,7 @@ public final class ScopeScreen extends Screen {
     private int scrollArchives;
     /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
     private List<Archives.Info> archiveList = List.of();
-    /** 存档筛选框的文字（第十八轮③）：非空时存档列表只显示名称/文件夹包含它的条目 */
+    /** 存档筛选框的文字：非空时存档列表只显示名称/文件夹包含它的条目 */
     private String archFilter = "";
     /** 筛选框是否有键盘焦点（聚焦时按键进框；Esc 清空并收起，Enter 保留并收起） */
     private boolean archFilterFocus;
@@ -471,8 +469,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 这一 tick 有没有"可探测的容器"（决定「＋ 创建探针」能不能点）。
      *
-     * ★ 为什么要缓存成字段，而不是在布局里现算 ★
-     *   `ProbeContext.current` 里要做方块实体查询 + 最多 7 次 capability 查找，
+     * 为什么要缓存成字段，而不是在布局里现算 *   `ProbeContext.current` 里要做方块实体查询 + 最多 7 次 capability 查找，
      *   而 `layout()` 每帧会被调用好几次（render 一次，鼠标事件各一次）。
      *   每 tick 算一次就够，反正创建探针是用户点按钮时才发生的。
      */
@@ -504,7 +501,7 @@ public final class ScopeScreen extends Screen {
     public static void openOverlay(Minecraft mc, Page page, int probeId) {
         ScopeScreen scope = new ScopeScreen(mc.screen, page, probeId);
         ClientHooks.pushGuiLayer(mc, scope);
-        // ★ pushGuiLayer 不会替你释放鼠标（那是 Minecraft#setScreen 干的活），
+        // pushGuiLayer 不会替你释放鼠标（那是 Minecraft#setScreen 干的活），
         //   不手动释放的话界面上根本看不到光标，面板就没法点、没法拖、没法框选。
         mc.mouseHandler.releaseMouse();
         KeyMapping.releaseAll();
@@ -557,8 +554,7 @@ public final class ScopeScreen extends Screen {
             panelX = Math.max(2, this.width - panelW - 6);
             panelY = 6;
         }
-        // ★ 每次打开都做一次"收回屏幕内"★
-        // 拖动/缩放时是允许把面板推出屏幕外的（大 GUI scale 下有用，见 clampDuringDrag），
+        // 每次打开都做一次"收回屏幕内"// 拖动/缩放时是允许把面板推出屏幕外的（大 GUI scale 下有用，见 clampDuringDrag），
         // 但那可能让它正好压在别的按钮底下再也点不到。所以收起再打开就是一次救援。
         snapInsideOnOpen();
 
@@ -581,8 +577,7 @@ public final class ScopeScreen extends Screen {
             }
         }
         refreshSnapshots();
-        // 存档清单每次**打开面板**扫一次。★ 注释修正（第十六轮⑤）★
-        // 旧注释写"只读各存档的 JSON 头，几 KB 级" —— 名实不符：readHeader 当时是整份
+        // 存档清单每次**打开面板**扫一次。注释修正// 旧注释写"只读各存档的 JSON 头，几 KB 级" —— 名实不符：readHeader 当时是整份
         // 解析（几万条样本全部建成对象）。现在它改成流式读（只取头部、samples 整段跳过），
         // 那句说法才真正成立。另外 vanilla 的 Screen#resize 只走 rebuildWidgets()、
         // **不会**重跑 init()，所以拖动窗口不会反复扫盘（原先担心的那条不成立）。
@@ -610,8 +605,7 @@ public final class ScopeScreen extends Screen {
             ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
             if (p != null && p.target().hasPersistentId()) {
                 ProbeSlots.request(p.target().dimension(), p.target().pos());
-                // ★ NBT 槽位型容器的检测（第十六轮）★
-                // 顺手把方块 NBT 抓一次（单人 = 服务端直读，不花权限），解析出
+                // NBT 槽位型容器的检测// 顺手把方块 NBT 抓一次（单人 = 服务端直读，不花权限），解析出
                 // "这个容器是不是把 slot 号写在 NBT 里"。是的话，选格就按 slot 走。
                 DataCommand.tick();
                 if (LogiScopeMod.probes().currentTick() >= nbtSlotNextRequest) {
@@ -680,16 +674,14 @@ public final class ScopeScreen extends Screen {
      * 进入选格页 —— **三个入口共用**（打开面板时落在选格页 / 根页点了一个还没选格的探针 /
      * 图表页点「选格」）。
      *
-     * ★ 第十轮修的 bug：只有前两条路会回填"已选格子" ★
-     * 用户实测反馈：选完格开始测量 → 退出界面 → 再打开面板 → 进选格页，
+     * 修的 bug：只有前两条路会回填"已选格子" * 实测反馈：选完格开始测量 → 退出界面 → 再打开面板 → 进选格页，
      * 显示的是"已选 0 格"。根因就是「图表页点选格」没走回填那条路。
      * 现在统一从这里进，回填的去重（{@link #seededForProbeId}）保证
      * 不会把用户正在改的选择冲掉。
      */
     private void enterPicker(ProbeInstance p) {
         pickerProbeId = p.id();
-        // ★ AE 模式检测必须在这里、每次进入都判（第十六轮⑧实测 A1 失败的根因）★
-        // 不能放进 seedSelectionOnce：createProbe 会**先**打上 seededForProbeId 预标记，
+        // AE 模式检测必须在这里、每次进入都判// 不能放进 seedSelectionOnce：createProbe 会**先**打上 seededForProbeId 预标记，
         // 首次进入时 seed 直接早退 —— 检测就永远不跑。
         // 判据 = 当前菜单 ∈ ME 存储家族；纯 AE 探针（无槽位 + 有 AE 目标）即使在
         // GUI 关闭的状态下回选格页，也保持 AE 模式（否则勾选状态无法显示）。
@@ -951,7 +943,7 @@ public final class ScopeScreen extends Screen {
     // DATA 页（NBT 取数探针）的几何
     // ------------------------------------------------------------------
 
-    /** DATA 页三段式：NBT 原文 / 值列表 / 追踪目标列表（第十一轮④②） */
+    /** DATA 页三段式：NBT 原文 / 值列表 / 追踪目标列表 */
     private record DataRects(int textTop, int textH, int listTop, int listRows,
                              int tgtTop, int tgtRows, int editTop, int cellW) {
     }
@@ -980,15 +972,14 @@ public final class ScopeScreen extends Screen {
                 ProbeManager mgr = LogiScopeMod.probes();
                 out.add(new Item("create", tr("logiscope.btn.create_probe"),
                         !mgr.isFull() && hasTarget));
-                // 第十六轮⑦修订：与 new probe / hide 同一行（原先浮在存档列表下，
+                // ⑦修订：与 new probe / hide 同一行（原先浮在存档列表下，
                 // 实测被 new probe 挡住）
                 out.add(new Item("open_folder", tr("logiscope.btn.open_folder"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
             case PICKER -> {
                 boolean menu = source == Source.MENU;
-                // ★ NBT 追踪是**显式开关**（第十六轮③）★
-                // 原因（用户原话）：错误地自动启用 NBT 追踪，会让"机械手"这类
+                // NBT 追踪是**显式开关**// 原因（需求原文）：错误地自动启用 NBT 追踪，会让"机械手"这类
                 // 形状相似但没有真正 slot 语义的设备**没法按常规路径追踪**。
                 // 所以默认关；只有检测到"数据里带 slot 号的物品列表"时才可点。
                 ProbeInstance pick = pickerProbe();
@@ -999,7 +990,7 @@ public final class ScopeScreen extends Screen {
                         cellMode ? tr("logiscope.btn.cell_mode_on") : tr("logiscope.btn.cell_mode"),
                         menu && !aeMode));
                 out.add(new Item("clear_cells", tr("logiscope.btn.clear_cells"), selectionCount() > 0));
-                // （第十六轮⑦：probe data 挪到 done 左侧）
+                // 
                 ProbeInstance pp = pickerProbe();
                 out.add(new Item("probe_data", tr("logiscope.btn.probe_data"),
                         pp != null && pp.target().hasPersistentId()));
@@ -1013,7 +1004,7 @@ public final class ScopeScreen extends Screen {
                 ProbeInstance p = currentProbe();
                 boolean running = p != null && (p.state() == ProbeInstance.State.RECORDING
                         || p.state() == ProbeInstance.State.FOLLOWING);
-                // 第十六轮⑦按用户指定顺序：pause → resume → clear → stop & archive
+                // ⑦按用户指定顺序：pause → resume → clear → stop & archive
                 //   → keep tracking… → back to slot（淡蓝）→ main screen（淡绿）
                 out.add(new Item("pause", tr("logiscope.btn.pause"), running));
                 out.add(new Item("resume", tr("logiscope.btn.resume"),
@@ -1038,8 +1029,7 @@ public final class ScopeScreen extends Screen {
                 // 确认添加：把当前 值/路径 + 名称 变成一个追踪目标（可以攒多个）
                 out.add(new Item("data_confirm", tr("logiscope.btn.data_confirm"),
                         dsrc != null && !dataPath.isBlank()));
-                // ★「完成」（第十八轮④）：与选格页的 done 同一个 id、同一条处理路径 ★
-                // 仅追 NBT 的探针不用"回选格再完成"了 —— 在这里直接提交并进图表页。
+                // 「完成」：与选格页的 done 同一个 id、同一条处理路径 // 仅追 NBT 的探针不用"回选格再完成"了 —— 在这里直接提交并进图表页。
                 // 置灰条件与选格页一致：选了格子、或已经攒了数据目标。
                 out.add(new Item("done", tr("logiscope.btn.done"),
                         dsrc != null && (selectionCount() > 0 || dsrc.isDataProbe())));
@@ -1059,7 +1049,7 @@ public final class ScopeScreen extends Screen {
             out.add(new Item("zoom_out", "-", true));
             out.add(new Item("zoom_in", "+", true));
             out.add(new Item("clear_sel", tr("logiscope.tool.clear_sel"), selection != null));
-            // 回放计算（第十一轮②）：对象开关 + 运算选择。没选中曲线时置灰
+            // 回放计算：对象开关 + 运算选择。没选中曲线时置灰
             boolean calcReady = replaySelectedItem != null;
             out.add(new Item("calc_obj", tr("logiscope.calc.obj") + " "
                     + (analyzeIo ? tr("logiscope.calc.io") : tr("logiscope.calc.quantity")), calcReady));
@@ -1075,7 +1065,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 图例条目：**一个物品一格**（第十轮⑥起）。
+     * 图例条目：**一个物品一格**。
      *
      * 点它弹出「数量 / IO」小菜单（见 {@link #legendPopup}），两级开关收进弹窗里；
      * (empty) 只有「数量」一项 —— 空格子没有进出可言，IO 对它没有意义。
@@ -1196,7 +1186,7 @@ public final class ScopeScreen extends Screen {
             return cellMode ? 0xFF3FE0A0 : 0;
         }
         if ("nbt_mode".equals(id)) {
-            // 第十六轮⑦：NBT tracking ON 时按钮文字转黄色
+            // ⑦：NBT tracking ON 时按钮文字转黄色
             return nbtSlotMode ? 0xFFFFD24A : 0;
         }
         if ("to_root".equals(id) || "list".equals(id) || "replay_back".equals(id)) {
@@ -1206,7 +1196,7 @@ public final class ScopeScreen extends Screen {
             return COLOR_BACKSLOT;     // 「回选格」淡蓝
         }
         if ("done".equals(id)) {
-            return 0xFFFFD24A;         // 「Done」黄色（第十六轮⑦续，与 NBT ON 同一黄）
+            return 0xFFFFD24A;         // 「Done」黄色
         }
         if ("archive".equals(id)) {
             return COLOR_CALC_GLOW;    // 「Stop & archive」淡紫（与计算页光效同色系）
@@ -1258,8 +1248,7 @@ public final class ScopeScreen extends Screen {
         // 先补画背景容器界面的 hover 高亮（原理见方法注释），并记下命中的槽位
         renderBackgroundHover(g, mouseX, mouseY, L);
 
-        // ★ 选格覆盖层必须画在面板**之前** ★
-        // 容器格子有可能落在面板底下（面板是半透明浮层，位置可以拖），
+        // 选格覆盖层必须画在面板**之前** // 容器格子有可能落在面板底下（面板是半透明浮层，位置可以拖），
         // 反过来的话选中框会画到面板上面去。
         renderCellOverlay(g, mouseX, mouseY);
 
@@ -1268,7 +1257,7 @@ public final class ScopeScreen extends Screen {
         g.fill(x - 1, y - 1, x + L.w() + 1, y + L.h() + 1, 0xFF5A5A68);
         g.fill(x, y, x + L.w(), y + L.h(), 0xF2101017);
 
-        // ★ 光效必须画在标题栏背景**之后**：renderTitle 会整条 fill 标题区，
+        // 光效必须画在标题栏背景**之后**：renderTitle 会整条 fill 标题区，
         //   先画就被完全盖住（实测踩过）
         renderTitle(g, L, mouseX, mouseY);
         renderTopGlow(g, L);
@@ -1319,7 +1308,7 @@ public final class ScopeScreen extends Screen {
         List<Long> markers = page == Page.REPLAY
                 ? replayMarkers
                 : currentProbe() != null ? currentProbe().markers().toList() : List.of();
-        // ★ 第十二轮④：选区基础信息只列**启用的线**（与十字线读数的 readable 同一规则）：
+        // ④：选区基础信息只列**启用的线**（与十字线读数的 readable 同一规则）：
         // 5 条线里 3 条 quantity/IO 全关，选区统计就不写这 3 条——写了只会把小框挤爆，
         // 还让人误以为"这条线在图上"。图例开关随时可变，所以过滤放在每帧的 View 组装处。
         return new ChartRenderer.View(start, end, hiddenItems, ioShown, sel, selecting,
@@ -1327,7 +1316,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 选区统计的可见过滤：只保留**启用的线**（第十二轮④）。
+     * 选区统计的可见过滤：只保留**启用的线**。
      * 规则与 {@code ChartRenderer#readable} 同源：存量线或 IO 线至少一个开着；
      * (empty) 没有 IO，只看存量。放在 View 组装处而不是统计缓存里，
      * 是因为图例开关随时可变，而统计只在框选完成时重算。
@@ -1364,7 +1353,7 @@ public final class ScopeScreen extends Screen {
         long end = live ? Math.max(chartData.lastTick(), chartData.firstTick()) : frozenEnd;
         long start = end - windowTicks;
         // 数据还不够铺满一个窗口时，从第一点开始画 —— 只在用户没主动缩放过时。
-        // 缩放后必须忠实反映 windowTicks，否则缩放没有反馈（第七轮 P5）。
+        // 缩放后必须忠实反映 windowTicks，否则缩放没有反馈。
         if (!userZoomed && chartData.firstTick() > start) {
             start = chartData.firstTick();
         }
@@ -1475,15 +1464,15 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, cut(head, L.w() - 2 * PAD), left, y, 0xBFBFBF, false);
                 y += ROW_H;
                 if (aeMode) {
-                    // AE 网络终端（第十六轮⑧）：这一页的语义完全不同。
-                    // 说明行改为**悬浮**在黄行上显示（第十六轮⑨，省一行空间）
+                    // AE 网络终端：这一页的语义完全不同。
+                    // 说明行改为**悬浮**在黄行上显示
                     String line = tr("logiscope.picker.ae_mode") + "  ·  "
                             + tr("logiscope.info.selected") + " " + selectionCount();
                     g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
                     break;
                 }
                 if (source == Source.WORLD && worldSlots.isEmpty()) {
-                    // 无容器方块实体（第十六轮⑨）：没有格子可选，但 NBT / 数据页仍可用。
+                    // 无容器方块实体：没有格子可选，但 NBT / 数据页仍可用。
                     // 相关按钮（选格/清空/可视化选格）本来就由 selectionCount/menu 驱动，已自动置灰。
                     String line = tr("logiscope.picker.no_cells");
                     if (nbtSlotMode) {
@@ -1500,7 +1489,7 @@ public final class ScopeScreen extends Screen {
                 };
                 String line = badge + " · " + tr("logiscope.info.selected") + " " + selectionCount();
                 if (nbtSlotMode) {
-                    // 第十六轮⑦：删掉"NBT slot-list, track by slot"那句（按钮本身已表达状态），
+                    // ⑦：删掉"NBT slot-list, track by slot"那句（按钮本身已表达状态），
                     // 只在追踪开着时显示 ON + 元素数
                     line += "  ·  " + tr("logiscope.btn.nbt_mode_on")
                             + " (" + nbtSlotEntries.size() + ")";
@@ -1524,7 +1513,7 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, counts, right - this.font.width(counts), y, 0x808088, false);
                 y += ROW_H;
 
-                // 第十三轮④：min/max/avg 删掉（要看统计就存档后做区间运算，那里更完整），
+                // ④：min/max/avg 删掉（要看统计就存档后做区间运算，那里更完整），
                 // 换成"实时样本条数 / 缓冲上限" —— 这才是实时页真正想知道的事。
                 String mm = tr("logiscope.info.samples") + " " + p.store().size()
                         + " / " + p.store().capacity();
@@ -1547,7 +1536,7 @@ public final class ScopeScreen extends Screen {
                 String line = tr("logiscope.data.src") + "  " + tr(DataCommand.statusKey());
                 g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y,
                         DataCommand.statusColor(), false);
-                // 刷新速率滑条（第十八轮④）：贴在 "status ok" 同一行右侧
+                // 刷新速率滑条：贴在 "status ok" 同一行右侧
                 renderDataRateSlider(g, L, mouseX, mouseY);
             }
             case REPLAY -> {
@@ -1576,8 +1565,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 面板上那行 "now"。RECORDING 直接读菜单，其余从最近一条样本取。
      *
-     * ★ 多格监控时这里会有**多条**（每个物品一条）★
-     * 最多显示 3 条，多的收成 "+N" —— 和十字线读数的处理一致，不把一行塞爆。
+     * 多格监控时这里会有**多条**（每个物品一条）* 最多显示 3 条，多的收成 "+N" —— 和十字线读数的处理一致，不把一行塞爆。
      */
     private String currentValueText(ProbeInstance p) {
         List<Aggregator.Totals> totals = p.liveTotals();
@@ -1633,7 +1621,7 @@ public final class ScopeScreen extends Screen {
         int headNameX = x + 8;
         int headDirX = headNameX + headNameW + 6;
         int headCntX = x + L.w() - 8 - this.font.width(colCnt);
-        // 标题行左侧 = 筛选输入框（第十八轮③）：空时显示原「存档」标题文字作占位符
+        // 标题行左侧 = 筛选输入框：空时显示原「存档」标题文字作占位符
         renderArchiveFilter(g, L, mouseX, mouseY);
         if (!head.isEmpty()) {
             // 列名贴在标题行右侧，和下面的三列同位置 —— "名称-文件夹-样本数"一眼对上
@@ -1645,7 +1633,7 @@ public final class ScopeScreen extends Screen {
         }
         List<Archives.Info> list = filteredArchives();
         if (list.isEmpty()) {
-            // 区分"真没有存档"与"筛掉了" —— 后者别让用户以为数据丢了
+            // 区分"真没有存档"与"筛掉了" —— 后者别让曾误以为数据丢了
             String hint = head.isEmpty()
                     ? tr("logiscope.hint.no_archives")
                     : tr("logiscope.hint.arch_no_match");
@@ -1691,7 +1679,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 筛选后要显示的存档清单（第十八轮③）。筛选串为空 = 全量原样返回。
+     * 筛选后要显示的存档清单。筛选串为空 = 全量原样返回。
      * 匹配对象 = 列表里显示的**名称**（displayName，没有则退到文件夹名）+ **文件夹名**，
      * 大小写不敏感。渲染 / 点击命中 / 滚动三处共用它，保证"看到的行 = 点的行"。
      */
@@ -1726,7 +1714,7 @@ public final class ScopeScreen extends Screen {
         return isIn(mx, my, r[0], r[1], r[2], r[3]);
     }
 
-    /** 存档筛选框（第十八轮③）：空时显示占位符（原标题文字），聚焦时闪光标 */
+    /** 存档筛选框：空时显示占位符（原标题文字），聚焦时闪光标 */
     private void renderArchiveFilter(GuiGraphics g, Layout L, int mouseX, int mouseY) {
         int[] r = archFilterRect(L);
         int x = r[0];
@@ -1750,7 +1738,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** 用系统文件管理器打开存档目录 {@code .minecraft/logiscope/}（第十六轮⑦） */
+    /** 用系统文件管理器打开存档目录 {@code .minecraft/logiscope/} */
     private void openStorageFolder() {
         try {
             Files.createDirectories(Archives.rootDir());
@@ -1793,7 +1781,7 @@ public final class ScopeScreen extends Screen {
                 g.fill(x + 4, ry - 1, x + 4 + 2, ry + ROW_H - 1, 0xFF3FE0A0);
             }
 
-            // 行首是**设备名**（用户要求：探针名称里前缀加方块名），然后是状态、槽位+坐标
+            // 行首是**设备名**（需求：探针名称里前缀加方块名），然后是状态、槽位+坐标
             String name = cut(p.name(), 92);
             g.drawString(this.font, name, x + 8, ry, active ? 0xFFF0F0FF : 0xFFC8C8D8, false);
             int stX = x + 8 + this.font.width(name) + 6;
@@ -1939,8 +1927,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 图例：一行一个色块 + 名字，点一下弹出「数量 / IO」小菜单（见 {@link #legendPopup}）。
      *
-     * ★ 图标分上下两半（第十一轮）★
-     * 一个物品有两层线（存量 / IO），只给一块色板表达不出来：
+     * 图标分上下两半：一个物品有两层线（存量 / IO），只给一块色板表达不出来：
      * 只开 IO 时整块都是暗的，用户会以为"这个物品关掉了"，其实 IO 线正开着。
      * 所以色板劈成上下两半：**上半 = 存量线颜色，下半 = IO 线颜色（浅一档）**，
      * 关掉的那层显示灰 —— 每一层开关的状态都直接写在图标上。
@@ -2023,7 +2010,7 @@ public final class ScopeScreen extends Screen {
 
     private void renderButtons(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
-            // ★ accent 在渲染时求值（不取构造时存的 c.accent()）：
+            // accent 在渲染时求值（不取构造时存的 c.accent()）：
             //   语义色（主界面淡绿 / 回选格淡蓝 / NBT ON 黄）依赖运行状态，
             //   而按钮行只在 rebuild 时重建 —— 每帧求值才不会滞后。
             //   之前两个 bug 都在这条链上：传 0 = 颜色全丢；构造时求值 = 状态切换后滞后。
@@ -2032,7 +2019,7 @@ public final class ScopeScreen extends Screen {
     }
 
     // ------------------------------------------------------------------
-    // 回放计算（第十一轮②）
+    // 回放计算
     // ------------------------------------------------------------------
 
     /**
@@ -2278,9 +2265,8 @@ public final class ScopeScreen extends Screen {
     /**
      * 面板上/下方的一句临时提示（"已清空"这类操作反馈）。
      *
-     * ★ 排版规则（第十六轮⑥，用户指定）★
-     * 内容宽度**定死为面板宽度**、自动换行、**最后一行贴着面板顶** ——
-     * 旧实现是"单行 + 按文字宽度居中"，提示一长（本轮的"超出可绘制范围"就是长句）
+     * 排版规则：内容宽度**定死为面板宽度**、自动换行、**最后一行贴着面板顶** ——
+     * 旧实现是"单行 + 按文字宽度居中"，提示一长（"超出可绘制范围"就是长句）
      * 就横着冒出面板。现在整块宽度 = panelW、逐字符折行（中文没有空格，按词折会失败），
      * 块的最后一行贴在面板顶上；顶上放不下（面板贴着屏幕顶）就把整块挪到面板下方，
      * 首行贴着面板底 —— 与旧逻辑的"挪下去"一致，只是从一行变成了整块。
@@ -2306,7 +2292,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 面板顶边的 2px 光效条（第十六轮⑦，用户指定）：
+     * 面板顶边的 2px 光效条：
      * 根页淡绿 / 选格页（含数据页）淡蓝 / 图表页淡黄 / 计算页淡紫。
      * 实现 = 静态底条 + 一个从左到右移动的亮斑（15 段梯形 alpha），每帧约 16 次 fill ——
      * 与面板背景同量级，渲染压力可忽略（用户口径：压力大才降级成呼吸光效，实测不需要）。
@@ -2383,8 +2369,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 自己给被压住的容器界面补 hover 高亮，并把命中的槽位记下来给 tooltip 用。
      *
-     * ★ 为什么必须自己画 ★
-     * 背景层是由 ClientHooks#drawScreen 渲染的，它给背景层传的鼠标坐标是
+     * 为什么必须自己画 * 背景层是由 ClientHooks#drawScreen 渲染的，它给背景层传的鼠标坐标是
      * Integer.MAX_VALUE（为了不让背景层的控件误高亮），而 AbstractContainerScreen
      * 恰恰是在 render 里用这两个坐标算出 hoveredSlot 的
      * → 背景层的 hoveredSlot 永远是 null，格子不会亮、悬浮提示也不出来。
@@ -2469,10 +2454,9 @@ public final class ScopeScreen extends Screen {
     /**
      * 自己把「鼠标手持的物品」画到真实鼠标位置上。
      *
-     * ★ 为什么必须自己画 ★
-     * 背景容器界面是用 `Integer.MAX_VALUE` 当鼠标坐标渲染的，
+     * 为什么必须自己画 * 背景容器界面是用 `Integer.MAX_VALUE` 当鼠标坐标渲染的，
      * 于是 `AbstractContainerScreen.render` 末尾那段"把 carried item 画在光标旁边"
-     * 的代码把它画到了屏幕外 —— 表现就是实机反馈的
+     * 的代码把它画到了屏幕外 —— 表现就是实测反馈的
      * "东西确实拿起来了，但跟着鼠标的图标和数字不见了"。
      *
      * 这段复刻 vanilla 的 `renderFloatingItem`（**它是 private，只能照着写**）：
@@ -2532,12 +2516,11 @@ public final class ScopeScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         Layout L = layout();
 
-        // ★ 面板之外一律让给被压住的容器界面 ★
-        // 这样"面板打开时机器还能操作"。可行性依据：AbstractContainerScreen#mouseClicked
+        // 面板之外一律让给被压住的容器界面 // 这样"面板打开时机器还能操作"。可行性依据：AbstractContainerScreen#mouseClicked
         // 内部用 findSlot(mouseX, mouseY) 现算坐标、**不依赖 hoveredSlot**
         // （而背景层的 hoveredSlot 恰好恒为 null），所以转发是有效的。
         //
-        // ★ 例外：选格模式。★ 需求要的是"光标禁用物品交互"，所以这一支什么都转交，
+        // 例外：选格模式。需求要的是"光标禁用物品交互"，所以这一支什么都转交，
         //   只用来做可视化选格（否则点一格就会顺手把物品拿起来）。
         if (!overPanel(mouseX, mouseY, L)) {
             if (cellMode) {
@@ -2548,8 +2531,7 @@ public final class ScopeScreen extends Screen {
             return bg != null && bg.mouseClicked(mouseX, mouseY, button);
         }
 
-        // ★ 右键在波形上 = 加 / 删标记（G4）★
-        // 需求原文是"左击打标记、双击删除"，但左键已经用于框选区间，双击又很难
+        // 右键在波形上 = 加 / 删标记（G4）// 需求原文是"左击打标记、双击删除"，但左键已经用于框选区间，双击又很难
         // 与两次单击区分 —— 用户自己提出改右键：右键空白处加标记，右键已有标记
         // （±3px）删掉，加与删是同一个动作，也不用和框选抢键位。
         if (button == 1 && (page == Page.CHART || page == Page.REPLAY) && L.hasChart()
@@ -2558,7 +2540,7 @@ public final class ScopeScreen extends Screen {
             return true;
         }
 
-        // QoL（第十六轮⑦）：计算页右键图例 = 按下该图例的「分析」。
+        // QoL：计算页右键图例 = 按下该图例的「分析」。
         // 左键仍是弹「数量 / IO / 分析」菜单；右键直达，省一次弹窗点击。
         if (button == 1 && page == Page.REPLAY) {
             for (Chip c : L.legend()) {
@@ -2578,8 +2560,7 @@ public final class ScopeScreen extends Screen {
         int mx = (int) mouseX;
         int my = (int) mouseY;
 
-        // ★ 存档筛选框（第十八轮③）：左键点到框外 → 收起焦点（框内点击在下面 ROOT 段重新聚焦）★
-        // 放在一切命中判定之前：点任何别的控件都先让输入框失焦，"焦点跟着点击走"。
+        // 存档筛选框：左键点到框外 → 收起焦点（框内点击在下面 ROOT 段重新聚焦）// 放在一切命中判定之前：点任何别的控件都先让输入框失焦，"焦点跟着点击走"。
         if (archFilterFocus && !inArchFilter(L, mx, my)) {
             archFilterFocus = false;
         }
@@ -2687,7 +2668,7 @@ public final class ScopeScreen extends Screen {
 
         // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
         if (page == Page.ROOT) {
-            // 筛选框（第十八轮③）：点在框上 → 聚焦（吃掉这次点击，不触发别的）
+            // 筛选框：点在框上 → 聚焦（吃掉这次点击，不触发别的）
             if (inArchFilter(L, mx, my)) {
                 archFilterFocus = true;
                 return true;
@@ -2774,7 +2755,7 @@ public final class ScopeScreen extends Screen {
     /** 选格页点了一行：切换这一格 */
     private void toggleRow(ContainerAccess.SlotView v) {
         if (aeMode) {
-            // AE 网络（第十六轮⑧）：只有网络列表的显示格（RepoSlot）能选 ——
+            // AE 网络：只有网络列表的显示格（RepoSlot）能选 ——
             // 背包/合成格里的东西不是"网络中的物品"，点了忽略（不弹错，误触不该有反馈负担）。
             if (v.empty()) {
                 return;
@@ -2825,8 +2806,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 拖过一串格子。
      *
-     * ★ 为什么要按线段采样、而不是只判当前位置 ★
-     *   鼠标事件是按帧来的，快速拖动时相邻两帧的坐标可能已经跨过两三个格子 ——
+     * 为什么要按线段采样、而不是只判当前位置 *   鼠标事件是按帧来的，快速拖动时相邻两帧的坐标可能已经跨过两三个格子 ——
      *   只判当前位置会**漏格**，而"划过的容器都被选中"是需求明写的。
      *   这里沿着上一帧到这一帧的线段每 4px 取一个采样点，逐点命中。
      */
@@ -2889,12 +2869,11 @@ public final class ScopeScreen extends Screen {
     }
 
     private void beginSelection(int mx) {
-        // ★ 必须先取窗口、再置 selecting ★
-        // window() 的第一分支就是"框选中 → 返回锁住的窗口"，
+        // 必须先取窗口、再置 selecting // window() 的第一分支就是"框选中 → 返回锁住的窗口"，
         // 先置位的话这里读到的是上一次的残留值（本会话首次是初始值 0,0）
         // → 窗口被锁成 [0,0] → 波形立刻变"这一区间没有数据"，
         //   且永远进不了冻结态（下游表现：M16 的"实时"按钮看起来点不动）。
-        // 这正是第六轮 M12/M13/M14/M16 四条的共同根因 ——
+        // 这正是四条框选失败用例的共同根因 ——
         // 教训：给"读状态的函数"加分支时，先查所有调用点有没有"边改状态边调它"。
         long[] win = window();
         selecting = true;
@@ -2928,8 +2907,7 @@ public final class ScopeScreen extends Screen {
             return;
         }
 
-        // ★ 建立选择就冻结视图 ★
-        // 否则波形会继续往前滚，刚框住的那段几秒后就跑出屏幕了。
+        // 建立选择就冻结视图 // 否则波形会继续往前滚，刚框住的那段几秒后就跑出屏幕了。
         // 想回到实时就点工具栏的「实时」（它会一并清掉选择）—— 规则只有这一条，好记。
         live = false;
         frozenEnd = selectWindowEnd;
@@ -2944,8 +2922,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 把选格页上的勾选变成探针目标并开始记录。
      *
-     * ★ 为什么"完成"这一步同时是"创建"那一步的终点，而不是在建实例时就把目标定死 ★
-     *   因为槽位是**在选格页里才选出来的**。实例只是个容器（放状态机和缓冲），
+     * 为什么"完成"这一步同时是"创建"那一步的终点，而不是在建实例时就把目标定死 *   因为槽位是**在选格页里才选出来的**。实例只是个容器（放状态机和缓冲），
      *   目标在点「完成」时才确定 —— 这样"点了创建探针又反悔"只需要把空实例删掉。
      */
     private void commitPicker() {
@@ -2956,8 +2933,7 @@ public final class ScopeScreen extends Screen {
             return;
         }
 
-        // ★ NBT 槽位型容器（第十六轮）★
-        // 这类机器（MEK 等）把槽位号写在 NBT 的 `slot` 字段里，菜单位置与容器下标都可能
+        // NBT 槽位型容器// 这类机器（MEK 等）把槽位号写在 NBT 的 `slot` 字段里，菜单位置与容器下标都可能
         // 对不上。所以**不组 SlotRef**，改成："把点到的格子按内容反查成 slot 号"，
         // 之后无论 GUI 开还是关，都只按 slot 号读 NBT —— 一条路，不会自相矛盾。
         if (aeMode) {
@@ -3021,8 +2997,8 @@ public final class ScopeScreen extends Screen {
      * NBT 槽位模式下的「完成」：把**这一刻勾选的格子**翻译成"数据里的 slot 号"，然后
      * **覆写**这个探针的全部槽位锚点。
      *
-     * ★ 两条语义（第十六轮④，都被实机推着改过一次）★
-     *   1. **覆写，不是追加**：界面上勾了几格，探针就只测那几格。第十六轮②的"追加"
+     * 两条语义：
+     *   1. **覆写，不是追加**：界面上勾了几格，探针就只测那几格 —— 追加语义会
      *      让用户永远删不掉不想要的格子（只能去数据页一格一格 ×）。
      *      **纯数据目标（数据页加的 FE / 流体）不受影响** —— 那是另一条线。
      *   2. **宁可不选，也不给一个错的 slot 号**：全部判据都要求"内容"对上，
@@ -3031,8 +3007,8 @@ public final class ScopeScreen extends Screen {
      * @see SlotAlign 为什么"顺序 + 内容"能定，而"容器下标"不能
      */
     /**
-     * AE 模式的「完成」（第十六轮⑧）：**覆写**全部 AE 网络目标 ——
-     * 界面上选了哪些物品，探针就只测哪些（与槽位锚点同一覆写语义，第十六轮④）。
+     * AE 模式的「完成」：**覆写**全部 AE 网络目标 ——
+     * 界面上选了哪些物品，探针就只测哪些（与槽位锚点同一覆写语义）。
      * DATA 页的纯路径目标与 NBT 槽位锚点保留；一个都没选 = 什么都不动
      * （"读不到数据" ≠ "用户想清空"，同一纪律）。
      */
@@ -3130,7 +3106,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 把"点到的这一格"翻译成"数据里的 slot 号"（第十六轮④）。
+     * 把"点到的这一格"翻译成"数据里的 slot 号"。
      * 判据链本体在纯类里（{@link SlotAlign#resolve}，离线有断言 t33），这里只做装配：
      * 空格子的 itemId 常被填成 {@code minecraft:air}，所以"空不空"必须用 {@code v.empty()} 判。
      */
@@ -3227,7 +3203,7 @@ public final class ScopeScreen extends Screen {
 
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
     private void leavePicker() {
-        nbtSlotMode = false;      // 每次进选格页都回到"默认关"（用户明确要求默认不启用）
+        nbtSlotMode = false;      // 每次进选格页都回到"默认关"（需求明确要求默认不启用）
         aeMode = false;           // AE 模式跟随菜单（重开时由 seedSelectionOnce 重新检测）
         nbtSeedPending = false;
         nbtSlotListPath = "";
@@ -3249,8 +3225,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 「存档并停止」：导出当前记录 → 停止记录并删除探针与缓存 → 直接进入回放页。
      *
-     * ★ 顺序有讲究 ★
-     * 1. 先写文件 —— **写失败就什么都不动**（探针与数据原地保留），绝不出现
+     * 顺序有讲究 * 1. 先写文件 —— **写失败就什么都不动**（探针与数据原地保留），绝不出现
      *    "探针删了、存档没写出来"的半途状态；
      * 2. 写成功才删探针（`remove` 会停止记录并清掉缓存）；
      * 3. 载入刚导出的数据进入 REPLAY 页 —— 用户要的"默认读取当前存档"就是这条直连路径。
@@ -3278,7 +3253,7 @@ public final class ScopeScreen extends Screen {
     private void openArchive(Archives.Info info) {
         try {
             loadReplay(Archives.load(info));
-            // 身份用目录名（永不改），显示名可用 name.txt 覆盖（第十三轮④）
+            // 身份用目录名（永不改），显示名可用 name.txt 覆盖
             replayDir = info.dirName();
             replayName = info.displayName().isBlank() ? info.dirName() : info.displayName();
             say(tr("logiscope.flash.replay_loaded").replace("%s", replayName));
@@ -3291,8 +3266,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 进入回放页：把存档数据一次性建好（ChartData / Summary / 标记 / 视图状态）。
      *
-     * ★ 回放复用图表页的全部机制 ★
-     * 数据塞进同一个 {@code chartData} 字段之后，窗口 / 框选 / 十字线 / 图例 /
+     * 回放复用图表页的全部机制 * 数据塞进同一个 {@code chartData} 字段之后，窗口 / 框选 / 十字线 / 图例 /
      * 缩放全都不用改 —— "数据是活的还是回放的"只对采集层有意义，
      * 呈现层拿到的都是 ChartData（这正是当初分层要买的 flexibility）。
      */
@@ -3395,8 +3369,7 @@ public final class ScopeScreen extends Screen {
             case "to_root" -> leavePicker();
             case "list" -> {
                 // 图表页的「列表」：回根页挑别的探针
-                // （第十轮修的 bug：按钮 id 是 "list"，而 onChip 里只写了 "to_root"，
-                //   于是这个按钮此前是**完全没反应**的 —— 用户 A 组实测反馈）
+                // 
                 cellMode = false;
                 cellDragButton = -1;
                 page = Page.ROOT;
@@ -3476,7 +3449,7 @@ public final class ScopeScreen extends Screen {
                 syncContainerSelection();
             }
             case "rename" -> {
-                // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 用户原话）
+                // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 需求原文）
                 renameFocus = true;
                 renameBuf = replayName;
             }
@@ -3536,8 +3509,7 @@ public final class ScopeScreen extends Screen {
             say(tr("logiscope.flash.too_many_probes"));
             return;
         }
-        // ★ MEK 设备（第十六轮⑨）：自动开启 NBT 追踪 + 提示 ★
-        // MEK 的机器没有可从外部列出的容器槽位（worldSlots 为空），槽位号写在 NBT 里 ——
+        // MEK 设备：自动开启 NBT 追踪 + 提示 // MEK 的机器没有可从外部列出的容器槽位（worldSlots 为空），槽位号写在 NBT 里 ——
         // 用户点名：创建这类设备的探针时直接开好，别让人手动按按钮再猜。
         // 判据 = 准星所指方块的注册命名空间（mekanism）；NBT 识别本身仍靠形状（CP24）。
         if (cand.hasAnchor() && mc.level != null && "mekanism".equals(
@@ -3570,7 +3542,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * 缩放（第七轮 P5 重做）。
+     * 缩放。
      *
      * @param factor  >1 放大（看更短时间），<1 缩小
      * @param anchorX 锚点像素。null = 实时态右端锚定 / 冻结态中心锚定；
@@ -3641,7 +3613,7 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
-        // 刷新滑条拖动（第十八轮④）：优先于面板外转交（拖出面板也继续跟手）
+        // 刷新滑条拖动：优先于面板外转交（拖出面板也继续跟手）
         if (dataSliderDrag && button == 0) {
             applyDataSlider((int) mouseX, layout());
             return true;
@@ -3716,7 +3688,7 @@ public final class ScopeScreen extends Screen {
             if (dir == 0) {
                 return true;
             }
-            // 悬浮详情框里的长列表：滚它（用户要求"文本过多时能上下翻"）
+            // 悬浮详情框里的长列表：滚它（需求"文本过多时能上下翻"）
             if (tipRect != null && !tipLines.isEmpty()
                     && isIn((int) mouseX, (int) mouseY, tipRect[0], tipRect[1], tipRect[2], tipRect[3])) {
                 tipScroll = Math.max(0, tipScroll - dir);
@@ -3747,7 +3719,7 @@ public final class ScopeScreen extends Screen {
                 return true;
             }
             if ((page == Page.CHART || page == Page.REPLAY) && L.hasChart()) {
-                // 滚轮 = 缩放（第七轮 P5 重做）：
+                // 滚轮 = 缩放：
                 //   实时态  右端锚定（最新数据必须一直在视野里）
                 //   冻结态  **光标锚定** —— 光标处的 t 值保持原位、两侧缩放
                 double factor = Math.pow(WHEEL_ZOOM_FACTOR, scrollY);
@@ -3798,8 +3770,7 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
-        // ★ 焦点别留在已经离开的页面上 ★（第十六轮⑤）
-        // 重命名框只活在回放页；用户点了「重命名」再点「返回列表」时，输入框不再绘制
+        // 焦点别留在已经离开的页面上 // 重命名框只活在回放页；用户点了「重命名」再点「返回列表」时，输入框不再绘制
         // （renderRenameBox 的前置条件），但 renameFocus 还是 true → 下面那条
         // "输入框激活时吃掉所有按键"会把**整个键盘**吃掉，表现就是"键盘突然坏了"
         // （只有 Esc 能救）。这里按"页面还在不在"兜底清掉。
@@ -3920,7 +3891,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** 粘贴进存档筛选框（第十八轮③），同其他输入框：去首尾空白、限长 48 */
+    /** 粘贴进存档筛选框，同其他输入框：去首尾空白、限长 48 */
     private void pasteIntoArchFilter() {
         try {
             String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
@@ -3936,7 +3907,7 @@ public final class ScopeScreen extends Screen {
     }
 
     // ==================================================================
-    // 存档重命名（第十三轮④）
+    // 存档重命名
     // ==================================================================
 
     /** 提交重命名：只写 name.txt（不动 recording.json），然后刷新列表与标题 */
@@ -3992,11 +3963,11 @@ public final class ScopeScreen extends Screen {
     }
 
     // ==================================================================
-    // 悬浮详情（第十三轮⑤）：+N / data xN / 槽列表 —— 鼠标悬浮出完整列表
+    // 悬浮详情：+N / data xN / 槽列表 —— 鼠标悬浮出完整列表
     // ==================================================================
 
     /**
-     * 解析抓起到的 NBT，判断这是不是"NBT 自带 slot 号"的容器（第十六轮）。
+     * 解析抓起到的 NBT，判断这是不是"NBT 自带 slot 号"的容器。
      * 判定纯逻辑在 {@link NbtSlotLayout}（离线有断言），这里只做缓存与状态更新。
      */
     private void parseNbtSlotLayout() {
@@ -4095,7 +4066,7 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // --- 2.5) AE 模式第二行（黄色提示行）→ 悬浮显示说明（第十六轮⑨）---
+        // --- 2.5) AE 模式第二行（黄色提示行）→ 悬浮显示说明---
         if (page == Page.PICKER && aeMode
                 && mouseY >= L.infoTop() + ROW_H && mouseY < L.infoTop() + 2 * ROW_H) {
             wantTip(4, tr("logiscope.picker.ae_mode"),
@@ -4166,7 +4137,7 @@ public final class ScopeScreen extends Screen {
     }
 
     // ==================================================================
-    // NBT 取数探针（第十一轮③ / DATA 页）
+    // NBT 取数探针
     // ==================================================================
 
     /** 「Probe data」：进入这一页，开始实时抓 `data get block` */
@@ -4193,7 +4164,7 @@ public final class ScopeScreen extends Screen {
         page = Page.DATA;
         DataCommand.request(p.target().dimension(), p.target().pos());
         // 进页面立刻抓一次（"不刷新"档也抓 —— 不刷新只表示**不自动重发**）。
-        // 之后的自动刷新间隔 = 全局配置档位（第十八轮④）
+        // 之后的自动刷新间隔 = 全局配置档位
         int rate = LogiScopeConfig.dataRefreshTicks();
         dataNextRequestTick = rate > 0
                 ? LogiScopeMod.probes().currentTick() + rate
@@ -4235,8 +4206,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 命令原文变了就重新解析成"路径 = 值"（解析失败 → 空表，界面会说明）。
      *
-     * ★ 第十二轮①修：重解析**不动滚动位置** ★
-     * NBT 里的数值（能量 / 流体量）几乎每秒都在变 → 原文每秒都"变了"；
+     * ①修：重解析**不动滚动位置** * NBT 里的数值（能量 / 流体量）几乎每秒都在变 → 原文每秒都"变了"；
      * 原先这里顺手把两个滚动位置归零，等于"每秒弹回顶部"，
      * 用户根本没机会点到列表下方的值。滚动只在**进页**时归零（enterDataPage），
      * 之后完全交给用户；选中（dataPath / dataNamePath）按**路径**匹配，
@@ -4284,7 +4254,7 @@ public final class ScopeScreen extends Screen {
     }
 
     // ------------------------------------------------------------------
-    // DATA 页的刷新速率滑条（第十八轮④）
+    // DATA 页的刷新速率滑条
     // ------------------------------------------------------------------
 
     /**
@@ -4524,7 +4494,7 @@ public final class ScopeScreen extends Screen {
 
     /** DATA 页的鼠标点击：值列表（左键取值路径 / 右键用它的文字作名称）+ 两个编辑格 */
     private boolean handleDataClick(int mx, int my, Layout L, int button) {
-        // 刷新滑条（第十八轮④）：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
+        // 刷新滑条：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
         int[] sl = dataSliderRect(L);
         if (button == 0 && sl[2] >= 24 && isIn(mx, my, sl[0], sl[1], sl[2], sl[3])) {
             dataFocus = 0;   // 与"点信息/原文区收起编辑焦点"同一惯例
@@ -4548,7 +4518,7 @@ public final class ScopeScreen extends Screen {
         }
 
         // 值列表：**只吃列表行带内的点击**。
-        // ★ 第十一轮④修的 bug：原先写的是 `my >= R.listTop()` —— 把列表以下
+        // 修的 bug：原先写的是 `my >= R.listTop()` —— 把列表以下
         //   的一切（包括底部的「开始采样」按钮）全部吞掉，按钮永远点不到。
         int listBottom = R.listTop() + R.listRows() * ROW_H;
         if (my >= R.listTop() && my < listBottom) {
@@ -4610,7 +4580,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 「确认添加」：把当前选的 值/路径 + 名称 作为**一个追踪目标**加进探针。
      *
-     * ★ 与第十一轮③的区别 ★ 原先是"立即建一个纯数据探针开始采样"，一次只能追一个值；
+     * 与的区别 原先是"立即建一个纯数据探针开始采样"，一次只能追一个值；
      * 现在目标攒在**这个探针**的列表里（可以加好几个），回选格点「完成」后与
      * 容器格的物品监测**一起**开始。目标加进列表后值与名称就锁定了 —— 要改就删掉重加
      * （"配置"和"正在跑的记录"必须分开，改配置不碰数据）。
@@ -4633,8 +4603,7 @@ public final class ScopeScreen extends Screen {
             dataName = "";
             dataNamePath = null;
             String msg = tr("logiscope.flash.data_added").replace("%s", path);
-            // ★ 值装不下就当场说清楚 ★（第十六轮⑤）
-            // 样本存储是 int（±21 亿）。追一个 2^63 的值（创造能量立方这类）时，
+            // 值装不下就当场说清楚 // 样本存储是 int（±21 亿）。追一个 2^63 的值（创造能量立方这类）时，
             // 图上会一条线都没有、只有 no-data 在涨 —— 与其让用户对着空图猜原因，
             // 不如在添加的那一刻把数值和上限都摆出来（只提醒、不拦着：值可能以后落回范围内）。
             String warn = outOfRangeHint(path);

@@ -25,7 +25,7 @@ import org.jetbrains.annotations.Nullable;
 import java.lang.reflect.Method;
 
 /**
- * 绑定层：**当前"可探测的容器"是什么**（第九轮新增）。
+ * 绑定层：**当前"可探测的容器"是什么**。
  *
  * 需求里的第 3 条把这件事讲得很清楚：没有容器界面时按快捷键，先看准星。
  * 于是"探针要接在哪台设备上"有了三个来源，本类负责把它们统一成一个答案：
@@ -37,9 +37,8 @@ import java.lang.reflect.Method;
  * | 准星指着**无 GUI** 的容器方块 | 只有维度+坐标，槽位清单得问服务端 | ❌ 只能按下标列表选 |
  * | 都没有 | 没有候选 —— 界面就只显示"已创建的探针列表" | — |
  *
- * ★ "有没有 GUI" 不能用静态判据，要用**实际结果**（第十轮实测教训）★
- *
- * 第一版用 `BlockState#getMenuProvider` 判定，结果实测翻车：
+ * "有没有 GUI" 不能用静态判据，要用**实际结果***
+ * 第一版用 `BlockState#getMenuProvider` 判定，结果实测不成立：
  * **空手对着精妙存储箱子、MEK 熔炼工厂按快捷键，界面没打开，反而进了"无 GUI"分支。**
  * 原因（javap 反查核实）：
  *
@@ -55,8 +54,7 @@ import java.lang.reflect.Method;
  * 这是所有容器方块为了做客户端预测都必须回答的问题，比 `getMenuProvider` 可靠得多。
  * `getMenuProvider` 保留为**快速肯定判据**（非空就直接算"有界面"，省一次预测）。
  *
- * ★ "是不是容器方块实体" 的判定是 `Container` 或 ItemHandler 能力 ★
- *   和采集层 {@code WorldProbe#readNow} 的两条读取路径严格对齐：
+ * "是不是容器方块实体" 的判定是 `Container` 或 ItemHandler 能力 *   和采集层 {@code WorldProbe#readNow} 的两条读取路径严格对齐：
  *   能读到值的方块，才算"可探测的容器"。这样不会出现"界面说能探测、实际读不到"。
  */
 public final class ProbeContext {
@@ -109,7 +107,7 @@ public final class ProbeContext {
             return null;
         }
         BlockPos pos = hit.getBlockPos();
-        // 第十六轮⑨：探测资格放宽到"有方块实体"（无容器的 BE 走"无容器格，可监测 NBT"）
+        // 探测资格放宽到"有方块实体"（无容器的 BE 走"无容器格，可监测 NBT"）
         if (!isProbeTarget(mc.level, pos)) {
             return null;
         }
@@ -133,7 +131,7 @@ public final class ProbeContext {
      * （BlockState 继承 BlockBehaviour.BlockStateBase，那一层把 protected 的
      * `BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 包成了 public）。
      *
-     * ⚠️ **它只对原版箱子这类方块有效**：原版熔炉/木桶和几乎所有模组机器都不覆写它。
+     * **它只对原版箱子这类方块有效**：原版熔炉/木桶和几乎所有模组机器都不覆写它。
      * 所以本方法**只能当"非空 ⇒ 一定有界面"来用**，返回 false 不代表没界面 ——
      * 那一步要问 {@link #wouldConsumeClick}。
      */
@@ -144,8 +142,7 @@ public final class ProbeContext {
     }
 
     /**
-     * ★ "这个方块会不会消费一次右键"的直接问法 —— 判断有没有界面的主判据 ★
-     *
+     * "这个方块会不会消费一次右键"的直接问法 —— 判断有没有界面的主判据 *
      * 做法：直接在客户端调一次 `BlockState#useWithoutItem(Level, Player, BlockHitResult)`。
      * 所有容器方块都必须实现它（客户端返回 SUCCESS 以做预测，服务端才真的开菜单），
      * 所以它比任何静态判据都准：
@@ -157,8 +154,7 @@ public final class ProbeContext {
      * | Mekanism 机器 | 有 `HasGui` 属性 → `SUCCESS`；没有 → `PASS`（javap 核实） |
      * | 真的没有界面的机器 | `PASS` |
      *
-     * ★ 为什么是"直接调"而不是"发一次右键再看结果" ★
-     * `MultiPlayerGameMode#useItemOn` 会在**方块 use 返回 PASS 之后**继续走到
+     * 为什么是"直接调"而不是"发一次右键再看结果" * `MultiPlayerGameMode#useItemOn` 会在**方块 use 返回 PASS 之后**继续走到
      * `itemstack.useOn(...)` —— 玩家手里拿着扳手对着"没有界面的机器"按快捷键时，
      * 那一步会**真的改动机器**（用户 T15 的顾虑）。直接问一次不会发任何包，
      * 所以"判定为无界面"这条路**完全不碰物品逻辑**。
@@ -179,7 +175,7 @@ public final class ProbeContext {
     }
 
     /**
-     * 这个方块是不是**可探测目标**（第十六轮⑨放宽：**有方块实体即可**）。
+     * 这个方块是不是**可探测目标**。
      *
      * 旧判据（{@code Container} / ItemHandler 能力）会把 MEK 管道这类方块挡在门外 ——
      * 实测：终极加压管道 `data get block` 明明有数据，按 F9 却没反应。原因：
@@ -197,8 +193,7 @@ public final class ProbeContext {
     /**
      * 这个方块是不是"能读到物品的容器"（原版 Container 或 NeoForge ItemHandler 能力）。
      *
-     * ★ 第十六轮⑨起它只回答一个问题："值不值得**模拟右键**开 GUI"★
-     *   探测资格见 {@link #isProbeTarget}（放宽到有 BE 即可）。两者分离的原因：
+     * 起它只回答一个问题："值不值得**模拟右键**开 GUI"*   探测资格见 {@link #isProbeTarget}（放宽到有 BE 即可）。两者分离的原因：
      *   有 BE 但没有容器的方块（床、告示牌、MEK 管道…）如果也走"模拟右键"，
      *   对床按 F9 会真的触发睡觉 —— 右键模拟必须只对真容器做。
      */
@@ -236,8 +231,7 @@ public final class ProbeContext {
      * `ClientboundOpenScreenPacket`）。纯客户端模组没有别的合法通道，
      * 而 `MultiPlayerGameMode#useItemOn` 正是 vanilla 右键走的同一条路。
      *
-     * ★ 用一个保守的前置条件把副作用挡掉 ★
-     *   `performUseItemOn` 里的顺序是：`RightClickBlock 事件` → **`itemstack.onItemUseFirst`**
+     * 用一个保守的前置条件把副作用挡掉 *   `performUseItemOn` 里的顺序是：`RightClickBlock 事件` → **`itemstack.onItemUseFirst`**
      *   → 方块 use → 物品 use。第一条是"物品抢在方块前面"，任何装了扳手/工具类物品的玩家
      *   在对着箱子按快捷键时都会被那条抢走（工具被用掉/机器被改设置）。
      *   所以这里先确认"手上的物品没有覆写 onItemUseFirst"：

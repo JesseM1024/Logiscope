@@ -8,11 +8,10 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * SNBT 解析（第十一轮③）：把 {@code data get block} 打印出来的那段 NBT 文本
+ * SNBT 解析：把 {@code data get block} 打印出来的那段 NBT 文本
  * 变成一棵可以点、可以选、可以按路径取值的树。
  *
- * ★ 为什么是"通用解析"而不是按模组硬编码键名 ★
- *   模组机器的 NBT 键名千奇百怪（Mekanism 的流体、化学、能量各有各的结构，
+ * 为什么是"通用解析"而不是按模组硬编码键名 *   模组机器的 NBT 键名千奇百怪（Mekanism 的流体、化学、能量各有各的结构，
  *   每个版本还可能改名）。所以这里只做三件事：**解析 → 摊平成"路径 = 值"的列表 →
  *   让用户点**。用户点中的那条路径就是采样路径，与模组、版本都无关。
  *
@@ -53,7 +52,7 @@ public final class Snbt {
         private final double number;
         private final boolean numeric;
         /**
-         * 这个节点在**源文本**里的区间 [start, end)（第十一轮④②）。
+         * 这个节点在**源文本**里的区间 [start, end)。
          * 界面拿它做"鼠标悬浮值列表 ↔ 高亮 NBT 原文"的联动：偏移是相对
          * 传给 {@link #parse} 的整段文本的（含命令回复的前缀），
          * 与原文折行时的偏移同源，所以直接能用。
@@ -284,7 +283,7 @@ public final class Snbt {
     /**
      * 数字（含 SNBT 后缀 b/s/l/f/d）；不是数字返回 null。
      *
-     * ★ 只认**有限**值 ★（第十六轮⑤）：SNBT 语法里根本没有 `NaN` / `Infinity` 这两个字面量，
+     * 只认**有限**值 ：SNBT 语法里根本没有 `NaN` / `Infinity` 这两个字面量，
      * 而 `Double.parseDouble` 会照收 —— 收进来就会顺着 {@code numeric() == true} 一路
      * 变成采样值，再被 `(int)` 变成 0 或 MAX_VALUE（错值当真值）。
      * 现在它们按普通文本处理（走 STRING 分支），与"这不是数字"一致。

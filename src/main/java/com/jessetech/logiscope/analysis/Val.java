@@ -3,14 +3,14 @@ package com.jessetech.logiscope.analysis;
 import org.jetbrains.annotations.Nullable;
 
 /**
- * 采样值（第十六轮⑥）：**能精确用整数表示就用整数（long），小数 / 超长整数用 double** —— 自适应。
+ * 采样值：**能精确用整数表示就用整数（long），小数 / 超长整数用 double** —— 自适应。
  *
  * 【为什么要有它】
  * 旧实现的样本值是 {@code int}（±21 亿），两个后果：
  *   · 能量类读数（FE / J，MEK 创造能量立方是 2^63）装不下，{@code (int)} 截断会**回绕成负数**
  *     —— 图上画出一根贴在 -1 的假线；
  *   · 浮点量（流体 mB/t、温度、AE2 的 double 能量）没法表达。
- * 但也不能一改成 double 了事：**整数读数必须保持精确**（用户要求：只有纵轴可以用科学计数法），
+ * 但也不能一改成 double 了事：**整数读数必须保持精确**（需求：只有纵轴可以用科学计数法），
  * 而 {@code long → double} 在 2^53 以上会丢精度（2^53+1 会变 2^53）。
  *
  * 所以自适应的规则是：**同一个值，装得进 long 就以 long 保存（integral = true），
@@ -18,8 +18,7 @@ import org.jetbrains.annotations.Nullable;
  * 画图/统计一律走 {@link #asDouble()}（够用、零分配），读数在 integral 时走
  * {@link #i} 精确打印。
  *
- * ★ 纯逻辑（不引用任何游戏类），离线可断言（TestChart t37）★
- *
+ * 纯逻辑（不引用任何游戏类），离线可断言（TestChart t37）*
  * 【两条诚实边界】
  *   · **求和溢出**：long 求和溢出时回退成 double 并把结果标成非整数
  *     —— 宁可丢精度，不回绕成负数；
@@ -81,7 +80,7 @@ public record Val(boolean integral, long i, double d) implements Comparable<Val>
                 return new Val(true, r, (double) r);
             }
         }
-        // ★ 溢出回退必须是"非整数形式"★：不能走 of(double)——它的规范化会把
+        // 溢出回退必须是"非整数形式"：不能走 of(double)——它的规范化会把
         // 2^63 折回 Long.MAX_VALUE，等于把溢出悄悄抹掉
         return new Val(false, 0L, asDouble() + o.asDouble());
     }

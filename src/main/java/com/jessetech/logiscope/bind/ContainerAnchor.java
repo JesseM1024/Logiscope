@@ -68,8 +68,7 @@ public final class ContainerAnchor {
      * 由 ScreenEvent.Init.Post 调用：容器界面刚初始化完，把 pending 提升为 active。
      * 这时的 pending 就是"玩家为了打开这个界面而右键的那个方块"。
      *
-     * ★ 幂等保护 ★
-     * Screen#rebuildWidgets 也会发 Init.Post（例如原版背包界面切配方书时会重建成控件）。
+     * 幂等保护 * Screen#rebuildWidgets 也会发 Init.Post（例如原版背包界面切配方书时会重建成控件）。
      * 那种情况下 pending 是空的，若无脑覆盖就会把已经拿到的锚点抹掉。
      * 所以"容器 ID 没变"时保留原有锚点。
      */

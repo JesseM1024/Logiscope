@@ -37,11 +37,10 @@ import java.util.List;
  *     │                       │        │
  *     └──clearSlots()─────────┴────────┴──► PAUSED
  *
- * ★★ 采样时钟 = 世界 tick 本身（第十轮第四次修复）★★
- *   这一版把采样的驱动**从客户端 tick 搬到了服务端 tick**，根因层面解决
+ * 采样时钟 = 世界 tick 本身。采样驱动挂在**服务端 tick** 上，根因层面解决
  *   "跨过去"和"1t 假平台"：
  *
- *   | | 旧做法（客户端 tick 驱动 + 异步读） | 现在（服务端 tick 驱动 + 同步读） |
+ *   | | 客户端 tick 驱动 + 异步读（已否决） | 服务端 tick 驱动 + 同步读（现行） |
  *   |---|---|---|
  *   | 采样节拍 | 客户端 20 次/秒，与服务端 tick **不锁相** | **服务端 tick 本身** |
  *   | 时间戳 | 异步读回来的 world tick（会跳 0 / 跳 2） | 那一刻 `ServerLevel#getGameTime()`，**一个 tick 一条** |
@@ -52,15 +51,15 @@ import java.util.List;
  *   读到的就是这一 tick 结束时的状态），由 {@link ProbeManager} 转给
  *   {@link #sampleOnServerTick}。
  *
- * 【两种采样来源：服务端为主，菜单只兜底】（★ 第十八轮改口径 ★）
+ * 【两种采样来源：服务端为主，菜单只兜底】
  *
  * | 场景 | 来源 | 为什么 |
  * |---|---|---|
  * | 单人 + 有坐标 + 设备有可读容器 | **服务端 tick**（每 tick 一条真值） | 最准：直接读方块实体。**界面开着时也一样** —— 菜单读数只是服务端同步下来的副本（还带一个网络往返的延迟），方块实体里的才是真值 |
  * | 服务端读不到：多人 / 无坐标 / 无容器能力（UNAVAILABLE） | 界面开着 → 客户端菜单（`ContainerAccess`）；关着 → 记 `no_data` | 方块实体不在客户端手里（多人），或它根本没有物品栏（不再猜） |
  *
- * 旧口径（直到第十七轮）把"界面开着"当作菜单路的主导条件（那时菜单槽 = 用户点的那一格，
- * 是唯一能确定"读哪一格"的通道）。第十八轮起服务端是**唯一主路径**，界面开不开关都一样；
+ * 此前的口径把"界面开着"当作菜单路的主导条件（那时菜单槽 = 实际点选的那一格，
+ * 是唯一能确定"读哪一格"的通道）。服务端优先后，它是**唯一主路径**，界面开不开关都一样；
  * 菜单路径降为"服务端读不到"时的兜底。下标可信度交给 {@code verifyIndex} 的既有机制
  * （验证过的用验证下标，没验证的按既有回退）—— 与"关界面后继续跟踪"的行为完全一致。
  *
@@ -102,14 +101,14 @@ public final class ProbeInstance {
     private final SampleStore store = new SampleStore(LogiScopeConfig.bufferSamples());
     private final WorldProbe probe = new WorldProbe();
     /**
-     * 波形标记（G4）。★ 独立于环形缓冲 ★ —— 缓冲写满滚动时标记不会被覆盖掉
+     * 波形标记（G4）。独立于环形缓冲 —— 缓冲写满滚动时标记不会被覆盖掉
      * （用户标记"这里开始出问题"，十分钟后标记必须还在）。随探针实例走：
      * 重新选格（configure）/ 清空记录（clearData）/ 删除实例（dispose）时一并清空。
      */
     private final MarkerList markers = new MarkerList();
 
     /**
-     * 数据探针的目标（第十一轮③）：**非 null = 这是一个"从 NBT 取数"的探针**。
+     * 数据探针的目标：**非 null = 这是一个"从 NBT 取数"的探针**。
      *
      * 与物品探针共用同一套状态机、缓冲、标记与导出 —— 区别只在"值从哪来"：
      *   · 物品探针：菜单槽 / 方块实体的 `ItemHandler` 能力（按槽位读）
@@ -191,7 +190,7 @@ public final class ProbeInstance {
     /**
      * 添加一个数据追踪目标（DATA 页的「确认添加」）。
      *
-     * ★ 与物品槽位共存 ★ 同一个探针可以"既监测容器格里的物品，又追 NBT 里的
+     * 与物品槽位共存 同一个探针可以"既监测容器格里的物品，又追 NBT 里的
      * 能量 / 流体 / 化学品"—— 它们写进同一条扁平时间轴（物品按物品名、数据按
      * 追踪名），图表 / 框选 / 存档 / 计算对它们一视同仁。
      *
@@ -217,10 +216,9 @@ public final class ProbeInstance {
     }
 
     /**
-     * **用"这一刻选中的格子"替换掉全部 NBT 槽位锚点**（第十六轮④，覆写语义）。
+     * **用"这一刻选中的格子"替换掉全部 NBT 槽位锚点**。
      *
-     * ★ 与 {@link #addDataTarget} 的差别就是这个函数的全部意义 ★
-     * 第十六轮②定的是"追加/更新"，用户实机推翻：**回选格页再点「完成」应当是覆写** ——
+     * 与 {@link #addDataTarget} 的差别就是这个函数的全部意义 * 覆写语义：**回选格页再点「完成」应当是覆写** ——
      * 界面上看到勾了几格，探针就该只测那几格；否则用户永远删不掉自己不想要的格子
      * （只能一格一格去目标表里 ×）。
      *
@@ -254,17 +252,14 @@ public final class ProbeInstance {
     }
 
     /**
-     * 目标去重规则（第十六轮⑧抽到 {@link DataTarget#isDuplicate}：三条路各有各的
-     * 身份键 —— 锚点 (路径, slot)、AE 物品 id、普通路径；AE 目标的 valuePath 全是
-     * {@code ae:network}，绝不能拿它去重）。
+     * 目标去重规则。
      */
     private static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
         return DataTarget.isDuplicate(list, t);
     }
 
     /**
-     * **用"这一刻选中的物品"替换掉全部 AE 网络目标**（第十六轮⑧，覆写语义，
-     * 与 {@link #replaceSlotAnchors} 同一条用户规则：界面上看到选了哪些，就只测哪些）。
+     * **用"这一刻选中的物品"替换掉全部 AE 网络目标**。
      *
      * 只换 AE 目标：**DATA 页的纯路径目标（FE / 流体）与 NBT 槽位锚点原样保留**。
      *
@@ -333,7 +328,7 @@ public final class ProbeInstance {
     /**
      * 列表页显示用的名字：**这台设备（方块）的名字**。
      *
-     * 用户实测反馈：原来只有"槽 0,1 · overworld 10,64,10"，机器一多就分不清谁是谁。
+     * 实测反馈：原来只有"槽 0,1 · overworld 10,64,10"，机器一多就分不清谁是谁。
      * 设备名是在建实例 / 选格完成时从方块状态里取的（{@code ProbeContext#blockName}）。
      * 拿不到（例如异常路径）就退回一个通用名 —— 坐标永远在描述里，不会真的认不出来。
      */
@@ -367,7 +362,7 @@ public final class ProbeInstance {
      * 用"选格页点完成"的结果配置这个实例并开始记录。
      *
      * @param verifyViews 与 {@code target.slots()} 同序的菜单快照；无菜单路径时传 null。
-     *                    只用于在服务端做下标指纹验证（第六轮 M4）。
+     *                    只用于在服务端做下标指纹验证。
      */
     /** 客户端手上有集成服务端（单人）—— 只有这种局面下才读得到方块实体 */
     private static boolean integratedServerUp() {
@@ -517,8 +512,7 @@ public final class ProbeInstance {
         if (state == State.ARMED || target.slots().isEmpty()) {
             return;
         }
-        // ★ 下标不可信警告（第十八轮从 tickFollowing 挪来）★
-        // 现在 RECORDING（界面开着）也用服务端读数了（旧口径只有"关界面后"才读），
+        // 下标不可信警告：RECORDING（界面开着）也用服务端读数了（旧口径只有"关界面后"才读），
         // 提示必须跟着提前 —— 否则用户会把"界面内读数"当成准的。
         warnIfIndexUnverified();
         switch (state) {
@@ -542,8 +536,7 @@ public final class ProbeInstance {
             return;
         }
 
-        // ★ 第十八轮：单人 + 有坐标 → 服务端 tick 是唯一采样源 ★
-        // 界面开着、甚至换成别的界面，都不影响它 —— 菜单路径只在服务端不可用时兜底
+        // 单人 + 有坐标 → 服务端 tick 是唯一采样源；界面开着、甚至换成别的界面，都不影响它 —— 菜单路径只在服务端不可用时兜底
         // （见 serverSideSampling）。检查必须放在"换设备"之前：服务端采样与界面无关，
         // 旧行为"RECORDING 下切到别的容器就 pauseAuto"是菜单路才需要的判定。
         if (serverSideSampling()) {
@@ -595,7 +588,7 @@ public final class ProbeInstance {
     }
 
     /**
-     * "下标不可信"警告（第十八轮）：单人下服务端读取是主路径 —— 只要映射没验证出来
+     * "下标不可信"警告：单人下服务端读取是主路径 —— 只要映射没验证出来
      * （内容指纹有歧义），并且"容器下标"又不能当身份用（同一清单里重复 ⇒ 回退会读到同一格），
      * 服务端读数就可能不是你选的格子，必须让用户知道。
      *
@@ -603,14 +596,12 @@ public final class ProbeInstance {
      * |---|---|---|---|
      * | 原版箱子 / 熔炉 | VERIFIED | 唯一 | 不弹（读数正确） |
      * | NeoForge `SlotItemHandler` 的模组机器 | UNVERIFIED（内容有歧义时） | 唯一（就是 handler 下标） | 不弹（回退恰好正确） |
-     * | Mekanism（下标硬编码 0，javap 实锤） | UNVERIFIED | 重复 | **弹**（回退会把两格读成同一格） |
+     * | Mekanism（下标硬编码 0，javap 核实） | UNVERIFIED | 重复 | **弹**（回退会把两格读成同一格） |
      *
-     * ★ 判据为什么是 containerSlotIndex ★
-     *   javap 实锤：Mekanism 的 `InventoryContainerSlot` 构造是
+     * 判据为什么是 containerSlotIndex *   javap 核实：Mekanism 的 `InventoryContainerSlot` 构造是
      *   `super(emptyInventory, 0, x, y)` —— `getContainerSlot()` 恒为 **0**，
      *   "全是 #0"的是**容器下标**（containerSlotIndex）。旧版检查 menuSlotIndex（菜单里
-     *   的位置，天然唯一）⇒ 这条警告从未按设计弹过（第十四轮引入时的注释写的正是
-     *   "MEK 那类全是 #0"，字段却选错了）。现在改成检查 containerSlotIndex 重复 ——
+     *   的位置，天然唯一）⇒ 这条警告从未按设计弹过。现在改成检查 containerSlotIndex 重复 ——
      *   判据与 `SlotAlign.containerIndexReliable` 同一不变式：**同清单内重复的下标不是身份**。
      *
      * 每个探头只提示一次（force 绕过去抖 —— 这条警告不允许被任何提示窗口吞掉）。
@@ -665,8 +656,7 @@ public final class ProbeInstance {
     // ------------------------------------------------------------------
 
     /**
-     * ★ 由服务端 tick 事件调用（**服务端线程**）★
-     *
+     * 由服务端 tick 事件调用（**服务端线程**）*
      * 每世界 tick 调一次。它同时是"时间戳"和"取值时机"的答案：
      * 时间戳取那一刻的 `ServerLevel#getGameTime()`，值取那一刻方块实体里的真值 ——
      * 两者同源，所以既不会漏观测也不会把旧值当新值。
@@ -687,8 +677,7 @@ public final class ProbeInstance {
             return false;
         }
         synchronized (sampleLock) {
-            // ★ 锁内复查状态 + 重取目标 ★（第十六轮⑤）
-            // 只复查 state 是不够的：`configure()`（换设备 / 改选格）在另一条线程上改
+            // 锁内复查状态 + 重取目标 // 只复查 state 是不够的：`configure()`（换设备 / 改选格）在另一条线程上改
             // target 与 dataTargets、还会 store.clear()。若这里继续用锁外那份旧快照，
             // 就会**用旧设备的值写进刚清空的新会话**（新会话第一格出现上一台机器的数）。
             State now = state;
@@ -698,8 +687,7 @@ public final class ProbeInstance {
             ProbeTarget t = target;
             List<DataTarget> dts = dataTargets;
             boolean hasData = !dts.isEmpty();
-            // ★ 第十八轮：RECORDING（界面开着）与 FOLLOWING 同一条路 ★
-            // 只排除"服务端结构性读不到"的设备（UNAVAILABLE —— 让位给菜单路），
+            // RECORDING（界面开着）与 FOLLOWING 走同一条路；只排除"服务端结构性读不到"的设备（UNAVAILABLE —— 让位给菜单路），
             // 不再要求 VERIFIED：验证过的用验证下标、没验证的按既有回退（与 FOLLOWING 一致），
             // 可能读错格的情形有 warnIfIndexUnverified 兜底告知。
             boolean itemsReady = !t.slots().isEmpty() && t.hasPersistentId()
@@ -726,10 +714,9 @@ public final class ProbeInstance {
             // ---- 数据那半边（守卫：lastDataTick，独立于物品——两条路的节拍不锁相）----
             if (hasData && lastDataTick != gameTime) {
                 lastDataTick = gameTime;
-                // ★ 先攒齐、再按名称合并（第十二轮③修）★
-                // 两个目标解析出同一个名字（同一物品装了两罐：Items[0].id == Items[1].id）
+                // 先攒齐、再按名称合并// 两个目标解析出同一个名字（同一物品装了两罐：Items[0].id == Items[1].id）
                 // 时必须**求和**成一条样本 —— 否则同 tick 同名两条样本，图表会在
-                // 两个值之间来回画（用户实测的"震荡"）。与物品路径的 writeTick 同规。
+                // 两个值之间来回画（实测的"震荡"）。与物品路径的 writeTick 同规。
                 // 读不到的目标这一 tick **留空**（它的线断开，不写 0 连累别的目标）；
                 // 一个都没读到才写整 tick 的 no_data。
                 int want = dts.size();
@@ -742,7 +729,7 @@ public final class ProbeInstance {
                 int got = 0;
                 for (DataTarget dt : dts) {
                     if (dt.isAeNetwork()) {
-                        // ★ AE 网络目标（第十六轮⑧）★：读"这台 AE 设备所在网络中该物品
+                        // AE 网络目标：读"这台 AE 设备所在网络中该物品
                         // 的可用数量"—— 与菜单/GUI 状态无关（终端关掉照读）。
                         // null = 设备读不到（不是 AE 节点 / 断电）→ 留空走 no_data；
                         // 0 = 网络在线但没这物品（真值，不是 no_data）。
@@ -756,7 +743,7 @@ public final class ProbeInstance {
                         continue;
                     }
                     if (dt.isSlotAnchor()) {
-                        // ★ NBT 槽位目标（第十六轮）★：只认 NBT 里的 slot 号，
+                        // NBT 槽位目标：只认 NBT 里的 slot 号，
                         // 与菜单/GUI 状态无关 —— 于是不会再有"开界面 2 个、关界面 8 个"
                         NbtSlotLayout.Entry e = dataProbe.readSlotAnchor(level, dt);
                         if (e == null) {
@@ -770,7 +757,7 @@ public final class ProbeInstance {
                         got++;
                         continue;
                     }
-                    // ★ 值是自适应的（第十六轮⑥）★：NBT 整数走 long（2^63 也能精确画），
+                    // 值是自适应的：NBT 整数走 long（2^63 也能精确画），
                     // 小数走 double；非有限（NaN/∞）在 Val.of 里返回 null → 留空。
                     Val v = dataProbe.readNumber(level, dt);
                     if (v == null) {
@@ -794,7 +781,7 @@ public final class ProbeInstance {
     }
 
     /**
-     * 采样该不该走服务端 tick 这条主路径（★ 第十八轮：物品探针的"服务端优先"总开关 ★）。
+     * 采样该不该走服务端 tick 这条主路径（：物品探针的"服务端优先"总开关 ）。
      *
      * | 条件 | 说明 |
      * |---|---|
@@ -803,9 +790,9 @@ public final class ProbeInstance {
      * | 设备有可读的容器 | 挂探头时验证过：既不是 `Container` 也没有 ItemHandler 的方块
      *   （UNAVAILABLE）服务端拿不到值，只能让菜单路兜底 |
      *
-     * ★ 与旧口径（第十六轮⑤）的差别：去掉 `state != RECORDING || VERIFIED` ★
-     *   旧口径把"界面开着"当作菜单路的主导条件（那时菜单槽 = 用户点的那一格，
-     *   是唯一能确定"读哪一格"的通道）；新口径里**服务端是唯一主路径** ——
+     * 与此前口径的差别：去掉了 `state != RECORDING || VERIFIED` 这一条。旧口径把
+     *   "界面开着"当作菜单路的主导条件（那时菜单槽 = 实际点选的那一格，是唯一能确定
+     *   "读哪一格"的通道）；现口径里**服务端是唯一主路径** ——
      *   菜单读数只是服务端同步下来的副本（还带一个网络往返的延迟），方块实体里
      *   的才是真值（数据保真）。界面开着不再"让位"，菜单只在服务端读不到时兜底：
      *   · 多人（方块实体不在本进程）
@@ -844,8 +831,7 @@ public final class ProbeInstance {
     /**
      * 这一 tick 这条线叫什么名字。
      *
-     * ★ 为什么名称要每 tick 解析 ★
-     *   可变物品（流体罐、化学品罐）里装的东西会换：名称来自 NBT 的某个路径时，
+     * 为什么名称要每 tick 解析 *   可变物品（流体罐、化学品罐）里装的东西会换：名称来自 NBT 的某个路径时，
      *   换了东西 → 名字变了 → 图上就是**换了一条线**。这正是我们要的语义
      *   （比"同一条线忽然变成另一种物质"诚实得多）。
      */
@@ -862,8 +848,8 @@ public final class ProbeInstance {
     /**
      * 转入 FOLLOWING（界面关着的跟踪态）。
      *
-     * ★ 第十八轮②：不再发"界面已关，转为坐标跟踪"提示 ★ ——
-     *   采样统一走服务端后（第十八轮①），界面开/关不对读数路径产生任何切换，
+     * ②：不再发"界面已关，转为坐标跟踪"提示 ——
+     *   采样统一走服务端后，界面开/关不对读数路径产生任何切换，
      *   这条提示在描述一件没发生的事（它是旧口径的残余：关界面 = 从菜单读切成坐标读）。
      */
     private void enterFollowing() {
@@ -889,8 +875,7 @@ public final class ProbeInstance {
      * 但语义是对的，而且一定落在这段空白里，画图时能把线剪在该剪的地方。
      */
     private void writeGapMarker() {
-        // ★ 两条采样路各有自己的水位，取最靠后的那个 ★（第十六轮⑤）
-        // `lastSampledGameTime` 只在**物品**路径的 advanceTick 里更新；纯数据探针
+        // 两条采样路各有自己的水位，取最靠后的那个 // `lastSampledGameTime` 只在**物品**路径的 advanceTick 里更新；纯数据探针
         // （只有 NBT 目标、没有槽位）永远走不到那里 → 恒为 MIN_VALUE → 暂停时
         // 什么都不写 → 恢复后画图会把暂停前后连成一条（正是 gap 标记要防的"编造连续数据"）。
         long last = Math.max(lastSampledGameTime, lastDataTick);
@@ -905,8 +890,8 @@ public final class ProbeInstance {
      *
      * 加 2 秒去抖：状态在边界附近来回跳时（例如玩家反复开关界面），
      * 不该把动作栏刷成跑马灯。**force = 重要警告，绕过去抖**
-     * （历史：第七轮 N3 —— "下标不可信"警告曾紧跟另一条提示、落进去抖窗口被吞，
-     * 故加了 force 通道；第十八轮②删掉"界面已关"提示后，force 的语义不变）。
+     * （历史："下标不可信"警告曾紧跟另一条提示、落进去抖窗口被吞，
+     * 故加了 force 通道；②删掉"界面已关"提示后，force 的语义不变）。
      */
     private void notifyPlayer(String key) {
         notifyPlayer(key, false);
@@ -961,15 +946,14 @@ public final class ProbeInstance {
     }
 
     /**
-     * 界面对着容器时的一次读取：**按菜单位置读**（第十五轮的"按身份读"已回退，见下）。
-     * 第十八轮起这是**兜底路径** —— 只在服务端读不到时执行（多人 / 无坐标 / 无容器能力，
+     * 界面对着容器时的一次读取：**按菜单位置读**。
+     * 起这是**兜底路径** —— 只在服务端读不到时执行（多人 / 无坐标 / 无容器能力，
      * 见 {@link #serverSideSampling}）。
      *
-     * ★ 为什么按位置读 ★
-     * 用户实测：MEK 熔炉里输入格确实只有 **2** 个圆石，而按**容器内下标**读到的
+     * 为什么按位置读 * 实测：MEK 熔炉里输入格确实只有 **2** 个圆石，而按**容器内下标**读到的
      * 是 **8**（另一格）。也就是说 —— **菜单位置是准的，容器下标对这类机器反而错**
      * （模组自写槽位类里 `getContainerSlot()` 的语义与能力(handler)的下标序不一致）。
-     * 第十五轮把菜单路径也改成按身份读，等于"把错的统一到了两条路径上"；
+     * 曾把菜单路径也改成按身份读，等于"把错的统一到了两条路径上"；
      * 现在回退成按位置读，**界面内的读数恢复正确**。
      *
      * 与主路径（服务端）的关系：{@code verifyIndex} 验证过映射时两条路指向同一批格子；
@@ -1016,7 +1000,7 @@ public final class ProbeInstance {
     /**
      * 把一组槽位快照变成**这个 tick 的样本**写进环形缓冲。
      *
-     * ★ 一个 tick 可能写多条 ★（多格监控时每个出现的物品一条，见 Aggregator）
+     * 一个 tick 可能写多条 （多格监控时每个出现的物品一条，见 Aggregator）
      * 它们共用同一个 tick 值 —— 时间轴仍然是"每世界 tick 一段"，
      * 只是这一段里可以有好几条不同物品的样本。
      * 断点判定因此是 per-series（见 {@code ChartData#build}）。

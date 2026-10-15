@@ -15,7 +15,7 @@ import java.lang.reflect.Method;
 import java.util.Optional;
 
 /**
- * **AE2 网络读值器**（第十六轮⑧，用户点名的特例覆盖）。
+ * **AE2 网络读值器**。
  *
  * 【为什么是特例】AE 终端的"格子"不是容器内容 —— 它是**网络存储列表的显示窗口**
  * （客户端从同步包拿到的 repo），点击它选中的是"一个物品"，不是"一个槽位"。
@@ -27,9 +27,9 @@ import java.util.Optional;
  * BlockEntity
  *   → GridHelper.getNodeHost(level, pos)        → IInWorldGridNodeHost（null = 不是 AE 设备）
  *   → getGridNode(dir) 遍历 6 个面取第一个非 null
- *       ★ 不能只试一个方向：CableBusBlockEntity（终端挂在电缆上）的 default 实现
+ *       不能只试一个方向：CableBusBlockEntity（终端挂在电缆上）的 default 实现
  *         会检查 isExposedOnSide(dir) —— 节点被其它部件遮住的面返回 null。
- *       ★ 也不能用 getActionableNode()：CableBus 不实现 IActionHost（字节码核实过）。
+ *       也不能用 getActionableNode()：CableBus 不实现 IActionHost（字节码核实过）。
  *   → node.isActive()（false = 网络没供电 / 未成型 → no_data）
  *   → node.getGrid() → IGrid.getStorageService() → IStorageService.getInventory()
  *   → MEStorage.getAvailableStacks() → KeyCounter
@@ -148,8 +148,7 @@ public final class AeNetworkReader {
     /**
      * 菜单是不是 AE 的 ME 存储界面家族（终端 / 合成终端 / 单元仓…，字节码核实过继承链）。
      *
-     * ★ 判定方式 = 沿父类链比对**类名**，不用 {@code Class.forName} ★
-     *   模组环境里每个模组在自己的类加载器里，{@code Class.forName("appeng.…")} 用的是
+     * 判定方式 = 沿父类链比对**类名**，不用 {@code Class.forName} *   模组环境里每个模组在自己的类加载器里，{@code Class.forName("appeng.…")} 用的是
      *   **调用方**的加载器 —— 在 NeoForge 的分模块加载下不一定能看到 AE2（实测 A1 失败
      *   正是死在这里）。而 {@code menu.getClass()} 是运行时的真实对象，沿
      *   {@code getSuperclass()} 往上走总能拿到 AE2 那个类，比对名字即可 —— 零加载、

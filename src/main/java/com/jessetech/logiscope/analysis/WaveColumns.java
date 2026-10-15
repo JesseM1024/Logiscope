@@ -4,7 +4,7 @@ import java.util.function.DoubleToIntFunction;
 import java.util.List;
 
 /**
- * 波形列聚合器（第十三轮）：把一条线的采样点铺成**像素列的竖条矩形**。
+ * 波形列聚合器：把一条线的采样点铺成**像素列的竖条矩形**。
  * 纯逻辑（不引用任何游戏类），所以离线就能断言与压测（TestChart t29 / BenchRender）。
  *
  * 【为什么单独成一个类】
@@ -23,7 +23,7 @@ import java.util.List;
  *   · **相邻列值不同 → 一条竖直连接线**（台阶数据的跳变）；
  *   · **中间隔着空列 → 逐列线性插值**（采样稀疏时折线不断成孤立点）。
  *
- * 【值是 double（第十六轮⑥）】采样值本身是自适应的（{@link Val}：整数 long 精确 / 小数
+ * 【值是 double】采样值本身是自适应的（{@link Val}：整数 long 精确 / 小数
  * double），但**画图只需要浮点** —— 这里一律走 {@code value.asDouble()}：
  *   · 列缓冲保持 {@code double[]}，逐列聚合零分配（{@code Val} 是不可变 record，
  *     逐列新建对象就是每帧几百次分配，禁止）；

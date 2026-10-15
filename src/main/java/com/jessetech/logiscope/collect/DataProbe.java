@@ -21,15 +21,14 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 
 /**
- * 服务端侧的取值器（第十一轮③）：**直接读方块实体的 NBT**，按路径取出那个数。
+ * 服务端侧的取值器：**直接读方块实体的 NBT**，按路径取出那个数。
  *
- * ★ 采样不走命令 ★
- *   `data get block` 只在"看一眼有什么"时用（界面上的实时显示，见 {@code DataCommand}）。
+ * 采样不走命令 *   `data get block` 只在"看一眼有什么"时用（界面上的实时显示，见 {@code DataCommand}）。
  *   真正的逐 tick 采样是**服务端线程直接读方块实体**：
  *     · 不发命令、不依赖权限（单人下这是硬需求）
  *     · 没有聊天回执那一路的异步与丢包问题（值和时间戳天然同源，同 CP15 的做法）
  *   "只取需要的那个子标签、别把整个 NBT 都构建出来"是**已知的优化方向**（记录在
- *   PROGRESS.md），本轮先做成"整份 NBT → 按路径取"的直白版本。
+ *   PROGRESS.md），先做成"整份 NBT → 按路径取"的直白版本。
  *
  * 路径语法与界面里点出来的一致：{@code a.b} / {@code a[0].b}（见 {@link Snbt#parsePath}）。
  */
@@ -46,11 +45,10 @@ public final class DataProbe {
     }
 
     /**
-     * **NBT 槽位目标**的读数（第十六轮）：读方块本体 NBT → 解析 →
+     * **NBT 槽位目标**的读数：读方块本体 NBT → 解析 →
      * 在 {@code valuePath} 那个列表里找 {@code slot == nbtSlot} 的元素。
      *
-     * ★ 元素不在有两种原因，不能混成一件 ★（第十六轮⑤）
-     *   · **还是同一台设备** → 这一格空了 ⇒ `count = 0`
+     * 元素不在有两种原因，不能混成一件 *   · **还是同一台设备** → 这一格空了 ⇒ `count = 0`
      *     （"这格是空的"就该是 0，不是 no_data —— 设备本身读得到）；
      *   · **这地方换了设备**（换成别的机器 / 箱子 / 空气）→ 那个 slot 号已经**没有意义**了
      *     ⇒ 返回 null 走上层 no_data。
@@ -107,7 +105,7 @@ public final class DataProbe {
      */
     @Nullable
     private CompoundTag readRoot(ServerLevel level, BlockPos pos) {
-        // 第十四轮的"方块 tick 判据"已回退（用户判定不需要）：仍按原样读；
+        // 曾试过的"方块 tick 判据"已回退：仍按原样读；
         // 区块真卸载时 getBlockEntity 拿不到方块实体 → 返回 null。
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
@@ -141,7 +139,7 @@ public final class DataProbe {
     }
 
     /**
-     * 数值标签 → 自适应值。★ 整数标签走 long（精确）★：
+     * 数值标签 → 自适应值。整数标签走 long（精确）：
      * 2^63 的能量读数经 double 会丢精度（2^53 以上），所以必须按标签类型分流，
      * 这正是"追踪创造能量立方"那条实测需求的根。
      */

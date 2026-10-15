@@ -20,8 +20,7 @@ import java.util.Set;
 /**
  * 呈现层：波形渲染器。
  *
- * ★ 它为什么是独立的一个类 ★
- * 上一版的"火花线"是往 ScopeScreen 里塞了几十行。现在要画坐标轴、多条数据线、
+ * 它为什么是独立的一个类 * 上一版的"火花线"是往 ScopeScreen 里塞了几十行。现在要画坐标轴、多条数据线、
  * 自动缩放、框选、十字线读数，再塞进去那个 800 行的界面类就没法读了。
  * 这里只负责"把 ChartData 画到一块矩形里"，不认识 Sampler，也不改任何状态。
  *
@@ -49,11 +48,10 @@ public final class ChartRenderer {
      * 所以颜色是稳定的：某条线不会因为"又冒出一个新物品"而突然换色。
      * 挑色的标准是"在深色底上互相分得开"，而不是好看 —— 观测工具优先看辨得清。
      *
-     * ★ 每个颜色都必须带 0xFF 的 alpha 位 ★
-     * GuiGraphics#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
+     * 每个颜色都必须带 0xFF 的 alpha 位 * GuiGraphics#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
      * 它不像 drawString 那样有 adjustColor 兜底（Font.java:172：alpha 位为 0 就补 0xFF）。
-     * 第五轮实机"图里没有任何线"就是这里：调色板写成 0x5DCAA5，alpha=0，线全被画没了。
-     * 这个坑从第一轮的火花线（0x9BE1CB）就存在，只是当时没人盯着火花线看。
+     * 曾出现"图里没有任何线"，根因：调色板写成 0x5DCAA5，alpha=0，线全被画没了。
+     * 这个坑从的火花线（0x9BE1CB）就存在，只是当时没人盯着火花线看。
      */
     private static final int[] PALETTE = {
             0xFF5DCAA5, // 青绿
@@ -78,8 +76,7 @@ public final class ChartRenderer {
     /**
      * 左侧留给纵轴数字的宽度。
      *
-     * ★ 第十轮加宽（34 → 46），第十轮第三次修复又靠"压缩步长"彻底解决溢出 ★
-     * 实测反馈：测"单格堆叠"这种大数量的容器时，刻度数字（如 16000000）长到
+     * 轴宽 34 → 46；再以"压缩步长"彻底解决溢出 * 实测反馈：测"单格堆叠"这种大数量的容器时，刻度数字（如 16000000）长到
      * 画到 GUI 外面去了。修法：刻度改用科学计数法（见 {@link #fmtAxis}），
      * 最长的标签形如 `-9.999E8`（8 字符 ≈ 44px）。
      */
@@ -110,7 +107,7 @@ public final class ChartRenderer {
     // ------------------------------------------------------------------
 
     /**
-     * 列聚合 + 游程合并（第十三轮优化后搬进了纯类，见 {@link WaveColumns}）。
+     * 列聚合 + 游程合并。
      * 这里只留一个实例复用它的列缓冲与代际标记。
      */
     private final WaveColumns cols = new WaveColumns();
@@ -314,7 +311,7 @@ public final class ChartRenderer {
             // 窗口里没有采样点（暂停中、刚接上探头、或最近一段全是 no_data）。
             // 时间轴还是要画，否则玩家看到一块纯黑，分不清"没数据"和"面板坏了"。
             //
-            // ★ 三种"没线"要分开说（第十六轮⑤）★：
+            // 三种"没线"要分开说：
             //   · 有线但全被图例关掉 → "all series hidden by the legend"（怪用户的操作，没毛病）；
             //   · 有线但这段窗口没样本 → "no data in window"；
             //   · **一条线都没有**（从没记录到 / 每个样本都读不到 —— 例如数值超出
@@ -326,7 +323,7 @@ public final class ChartRenderer {
             centered(g, font, msg,
                     plotX + plotW / 2, plotY + plotH / 2 - 4, COLOR_LABEL);
             // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
-            // 第五轮 N8 就是这么全部失败的（用户以为框选坏了，其实是没数据 + 没反馈）
+            // 曾有"框选无反馈"的误判：没数据 + 没反馈
             if (view.selection() != null) {
                 drawSelection(g, font, view.selection(), List.of(), data);
             }
@@ -341,8 +338,7 @@ public final class ChartRenderer {
         // 存量永远 ≥ 0，所以底边贴 0 更好看；但 **IO 线可以是负的**，
         // 那时就不能把下界钳到 0（负值会被切到图外）。
         boolean clampZero = vLo >= 0;
-        // ★ 刻度必须"读得出来"：相邻两个标签不能是同一个字符串 ★
-        // 大数量 + 小窗口时科学计数法只有 3 位小数，步长太小就会印出
+        // 刻度必须"读得出来"：相邻两个标签不能是同一个字符串 // 大数量 + 小窗口时科学计数法只有 3 位小数，步长太小就会印出
         // 一排一模一样的 `1.79E6`（实测反馈的截图里就是这样）。
         // 解不出更多有效数字时（轴的宽度就 46px），就把步长顶上去 ——
         // 宁可刻度稀疏，也不要一排看不懂的数字。
@@ -422,7 +418,7 @@ public final class ChartRenderer {
             double v = lo + k * step;
             int yy = yOf(v);
             g.fill(plotX + 1, yy, plotR - 1, yy + 1, COLOR_GRID);
-            // 只有**纵轴**用科学计数法（用户要求）：它要容纳 8 位数量级的刻度，
+            // 只有**纵轴**用科学计数法（需求）：它要容纳 8 位数量级的刻度，
             // 而读数（十字线、框选统计、面板数字）一律给精确值（见 fmtExact）。
             String lb = fmtAxis(v);
             g.drawString(font, lb, plotX - 3 - font.width(lb), yy - 3, COLOR_LABEL, false);
@@ -456,7 +452,7 @@ public final class ChartRenderer {
     // ------------------------------------------------------------------
 
     /**
-     * 画一条线。**第十三轮重写了这条路径**（性能），改动都是像素等价的：
+     * 画一条线。**此路径已按性能重写**（性能），改动都是像素等价的：
      *
      * 1. **代际标记代替满数组清零**：不再每帧 `Arrays.fill` 两个 plotW 长数组；
      * 2. **只扫"有数据的列"**（cMin..cMax），而不是 0..plotW 全程 ——
@@ -518,8 +514,8 @@ public final class ChartRenderer {
                 continue;
             }
             String name = label(data.indexOf(r.itemId()), r.itemId());
-            // 框选统计 = 读数，用**准确整数**（用户要求：只有纵轴用科学计数法）
-            // ★ 第十轮⑥删掉了 in/out：区间读数已经有 Δ（首尾之差），
+            // 框选统计 = 读数，用**准确整数**（需求：只有纵轴用科学计数法）
+            // 已删除 in/out：区间读数已经有 Δ（首尾之差），
             //   in+out 是表达同一件事的第二份数字，只会把统计块挤宽。
             rows[n] = name + " " + fmtExact(r.first()) + "→" + fmtExact(r.last())
                     + "  Δ" + signedExact(r.delta())
@@ -662,7 +658,7 @@ public final class ChartRenderer {
         sb.append("t ").append(t).append("  ").append(fmtSecs(t - start));
 
         // 先数一遍"这一格有东西可报"的线（两遍小循环，免得每帧分配列表）。
-        // ★ 第十轮⑥：只开 IO 线（存量线关掉）的物品也要报 ——
+        // 只开 IO 线（存量线关掉）的物品也要报 ——
         //   之前这批物品在十字线读数里彻底消失，用户盯着 IO 曲线却不知道读数。
         int visible = 0;
         for (Series s : data.series()) {
@@ -721,7 +717,7 @@ public final class ChartRenderer {
         if (tick - p.tick() > tolerance) {
             return "-";
         }
-        // 十字线读数 = 读数，用**精确值**（用户要求：只有纵轴用科学计数法）。
+        // 十字线读数 = 读数，用**精确值**（需求：只有纵轴用科学计数法）。
         // 整数（含 2^63 的能量读数）保持精确整数；小数用短格式。
         return fmtExact(p.value());
     }
@@ -855,8 +851,7 @@ public final class ChartRenderer {
     /**
      * **纵轴刻度专用**：数量 → 给人看的短标签（科学计数法）。
      *
-     * ★ 为什么大数要用科学计数法（第十轮实测反馈）★
-     * 用户测"单格堆叠"这类大数量的容器时，纵轴刻度是 16000000 这种 8 位数，
+     * 为什么大数要用科学计数法：实测"单格堆叠"这类大数量的容器时，纵轴刻度是 16000000 这种 8 位数，
      * 直接画到 GUI 外面去了。改成 {@code 1.6E7} 之后 7 个字符就够，
      * 配合 {@link #AXIS_LEFT} 的 46px 怎么都不会溢出。
      *
@@ -867,15 +862,15 @@ public final class ChartRenderer {
      * | 0 … 9999 | 原样整数（`0` / `64` / `9999`） |
      * | ≥ 10000 | 科学计数法，**固定 3 位小数**、去掉多余的 0（`1E4` / `1.5E5` / `1.786E6`） |
      *
-     * 固定 3 位小数（而不是"最多 2 位"）是第十轮第三次修复的改动：
+     * 固定 3 位小数（而不是"最多 2 位"）是
      * 尾数少一位，`1786000` 和 `1786500` 会印成同一个 `1.79E6`，
-     * 用户实测就撞上了"一整条轴上 5 个刻度全是 1.79E6"。
+     * 实测就撞上了"一整条轴上 5 个刻度全是 1.79E6"。
      * 精度顶到头之后仍可能重复（那说明窗口窄得像放大镜），
      * 由调用方把**步长**顶上去解决（见 {@code render} 里的刻度去重）。
      *
      * 用整数运算做尾数，避免 {@code 9999999} 被浮点四舍五入成 {@code 1.0E7} 那种假精度。
      *
-     * ★ 只给纵轴用 ★ 读数（十字线 / 框选统计 / 面板数字）一律用 {@link #fmtExact}，
+     * 只给纵轴用 读数（十字线 / 框选统计 / 面板数字）一律用 {@link #fmtExact}，
      * 因为那几处要的是**准确整数**，不是"看得出来大概多少"。
      */
     public static String fmtAxis(double v) {
@@ -936,7 +931,7 @@ public final class ChartRenderer {
     /**
      * **读数专用**：原样整数，一位不省。
      *
-     * 用户要求（第十轮第三次修复）：只有纵轴用科学计数法，
+     * 需求：只有纵轴用科学计数法，
      * 框选统计、十字线读数要的是**准确整数数值** ——
      * 一个物流示波器报出 `1.79E6` 是没有意义的，用户要知道到底是几个。
      */
@@ -996,7 +991,7 @@ public final class ChartRenderer {
         return String.format(Locale.ROOT, "%.1fs", ticks / ticksPerSecond());
     }
 
-    /** 速率单位是 **n per tick**（第七轮 N12：横轴是世界 tick，速率也按 tick 算才对得上） */
+    /** 速率单位是 **n per tick** */
     private static String fmtRate(Val delta, long spanTicks) {
         return String.format(Locale.ROOT, "%.3f/t", delta.asDouble() / Math.max(1L, spanTicks));
     }

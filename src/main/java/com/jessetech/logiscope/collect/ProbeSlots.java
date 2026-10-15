@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * 采集层：**无 GUI 的容器**的槽位清单（第九轮新增）。
+ * 采集层：**无 GUI 的容器**的槽位清单。
  *
  * 【为什么需要它】
  * 可视化选格依赖"菜单槽在屏幕上的位置"，而菜单只在界面开着时存在。
@@ -124,7 +124,7 @@ public final class ProbeSlots {
         queriedPos = null;
     }
 
-    /** ★ 必须在服务端线程执行 ★；null = 这个方块不含物品栏 */
+    /** 必须在服务端线程执行 ；null = 这个方块不含物品栏 */
     @Nullable
     private static List<ContainerAccess.SlotView> readNow(net.minecraft.server.MinecraftServer server,
                                                           ResourceKey<Level> dim, BlockPos pos) {

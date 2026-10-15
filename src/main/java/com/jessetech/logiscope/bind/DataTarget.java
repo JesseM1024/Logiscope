@@ -8,7 +8,7 @@ import org.jetbrains.annotations.Nullable;
 import java.util.List;
 
 /**
- * 数据探针的目标（第十一轮③）：**从方块实体的 NBT 里按路径取一个数** ——
+ * 数据探针的目标：**从方块实体的 NBT 里按路径取一个数** ——
  * 用来追踪物品之外的东西：FE 能量、流体量、化学品的量，以及任何能在 NBT 里
  * 找到的数字（"物品"这个概念套不住它们，所以走独立的一条采样路）。
  *
@@ -28,7 +28,7 @@ import java.util.List;
  * @param beType     建档时那台**方块实体的类型 id**（如 {@code mekanism:factory}，可空）。
  *                   只给 NBT 槽位锚点用：采样时拿它跟"现在那块地方是什么方块实体"比，
  *                   不一样就说明"这个 slot 号已经没有意义了"，该记 `no_data` 而不是记 0
- *                   （见 {@code DataProbe#readSlotAnchor} 与第六节的"读不到 vs 空格子"）。
+ *                   （见 {@code DataProbe#readSlotAnchor} 与 ARCHITECTURE C24-10 的"读不到 vs 空格子"）。
  */
 public record DataTarget(
         String valuePath,
@@ -40,14 +40,14 @@ public record DataTarget(
         int nbtSlot,
         @Nullable String beType) {
 
-    /** 普通路径目标（第十一轮③那套） */
+    /** 普通路径目标 */
     public DataTarget(String valuePath, @Nullable String namePath, String literalName,
                       String blockLabel, ResourceKey<Level> dimension, BlockPos pos) {
         this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null);
     }
 
     // ------------------------------------------------------------------
-    // AE 网络目标（第十六轮⑧，用户点名的特例覆盖）
+    // AE 网络目标
     // ------------------------------------------------------------------
 
     /**
@@ -74,7 +74,7 @@ public record DataTarget(
     }
 
     /**
-     * **NBT 槽位目标**（第十六轮）：{@code valuePath} = 物品列表在 NBT 里的路径
+     * **NBT 槽位目标**：{@code valuePath} = 物品列表在 NBT 里的路径
      * （如 {@code items}），{@code nbtSlot} = 元素自带 {@code slot} 号。
      * 读数 = "列表里 slot == nbtSlot 的元素的 Item.Count"。
      *
@@ -107,12 +107,12 @@ public record DataTarget(
     }
 
     /**
-     * **目标去重规则**（第十六轮⑧抽成纯静态：离线可断言，三条路各自的关键不同）。
+     * **目标去重规则**。
      *
      * | 目标类型 | 重复判据 | 为什么 |
      * |---|---|---|
      * | NBT 槽位锚点（{@code isSlotAnchor}） | (列表路径, slot 号) 相同 | 同一 slot 只该有一条 |
-     * | **AE 网络** | {@code literalName}（物品 registry id）相同 | 读的是"网络中该物品"，名字就是身份；★ valuePath 全是 {@code ae:network}，**绝不能拿它去重**（不然所有 AE 目标互判重复） |
+     * | **AE 网络** | {@code literalName}（物品 registry id）相同 | 读的是"网络中该物品"，名字就是身份；valuePath 全是 {@code ae:network}，**绝不能拿它去重**（不然所有 AE 目标互判重复） |
      * | 普通路径 | valuePath 相同 | 一个路径一个数 |
      */
     public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
@@ -140,9 +140,8 @@ public record DataTarget(
 
     /**
      * 目标列表里那一行的"值"部分：锚点带上它自己的 slot 号。
-     * ★ 只影响**显示**（以及用户按格删改），采样用的名字仍是物品 id —— 所以
-     * "同种物品多格求和"不受这个后缀影响（用户要求：聚合计算不要被后缀干扰）。★
-     */
+     * 只影响**显示**（以及用户按格删改），采样用的名字仍是物品 id —— 所以
+     * "同种物品多格求和"不受这个后缀影响（需求：聚合计算不要被后缀干扰）。*/
     public String displayValue() {
         if (isAeNetwork()) {
             return "ae:network[" + fallbackName() + "]";

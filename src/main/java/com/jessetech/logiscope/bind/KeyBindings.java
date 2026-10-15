@@ -22,8 +22,7 @@ import org.jetbrains.annotations.Nullable;
 /**
  * 绑定层：把「按键」翻译成「打开/收起示波器面板的意图」。
  *
- * ★ 关键逻辑路径 CP2 ★
- * vanilla 的 KeyMapping 只在【没有界面打开】时才会被 tick 消费。
+ * 关键逻辑路径 CP2 * vanilla 的 KeyMapping 只在【没有界面打开】时才会被 tick 消费。
  * 而本模组的核心场景恰恰是「玩家的容器界面开着」——
  * 此时按键被当前 Screen 吃掉，KeyMapping 完全收不到。
  *
@@ -31,8 +30,7 @@ import org.jetbrains.annotations.Nullable;
  * 这个事件在 Screen 处理按键【之前】触发，且可以 cancel，
  * 因此我们既能拿到按键，又能阻止它被原界面继续处理。
  *
- * ★★ 两个必须记住的坑 ★★
- *
+ * 两个必须记住的坑 *
  * 坑 1：不要在输入框里抢键。
  *   玩家在 JEI 搜索框里打 "hopper"，那个 'o' 一样会走到这个事件里来。
  *   所以先判断"当前是不是有文本输入被聚焦"，是就完全不响应。
@@ -42,8 +40,7 @@ import org.jetbrains.annotations.Nullable;
  *   所以把快捷键设成 Ctrl+O 毫无意义 —— 单独按 o 一样命中。
  *   真正的出路是换一个**根本不产生字符**的键（本项目最终用 F9）+ 上面的三层守卫。
  *
- * ★ 第九轮：打开面板的入口从 1 条变成 3 条（需求第 3 条）★
- *
+ * 早期：打开面板的入口从 1 条变成 3 条（需求第 3 条）*
  * ```
  * 按下 F9
  *   ├─ 面板已经开着            → 收起
@@ -59,8 +56,7 @@ import org.jetbrains.annotations.Nullable;
  * 目的很直白：**指着哪台设备按快捷键，就是在说"我要探测这一台"**，
  * 不用先右键开界面、再按快捷键、再在列表里找。
  *
- * ★ 第十轮实测修正：不能用 `getMenuProvider` 判有没有界面 ★
- *   那条判据连**原版熔炉**都判不出来（它不覆写 `getMenuProvider`），
+ * 不能用 `getMenuProvider` 判有没有界面 *   那条判据连**原版熔炉**都判不出来（它不覆写 `getMenuProvider`），
  *   于是空手对着精妙存储 / MEK 熔炼工厂按 F9 会错进"无 GUI"分支。
  *   现在改成问"这个方块会不会消费一次右键"（`ProbeContext#wouldConsumeClick`），
  *   而且**判定为无界面时不发交互** —— 于是手里拿着扳手也绝不会误触工具。
@@ -95,8 +91,7 @@ public final class KeyBindings {
     /**
      * 默认键位：`F9`。
      *
-     * ★ 为什么最后选了功能键，而不是符号键 ★
-     * 一路试过 `O` → `]`，两次都被"打字"问题咬到：
+     * 为什么最后选了功能键，而不是符号键 * 候选的 `O`、`]` 都曾与输入框冲突：
      *   · `O`：在 JEI 搜索框里打 `hopper`，那个 `o` 直接弹面板
      *   · `]`：三层守卫能挡住大部分情况，但"在搜索框里打完字 → 点外面失焦 → 再按 `]`"
      *          这条路上仍然会多拦一次（守卫第 3 层的固有代价）
@@ -107,7 +102,7 @@ public final class KeyBindings {
      *   1. 用户自己把快捷键改回字母/符号键
      *   2. 某些模组的输入框会把所有按键都吃掉（连 F 键也不放过）
      *
-     * ⚠️ 改这个默认值**不会**影响已经存过的老绑定 —— 按键绑定会被写进
+     * 改这个默认值**不会**影响已经存过的老绑定 —— 按键绑定会被写进
      *   `run/options.txt`（形如 `key_logiscope.key.open_scope:key.keyboard.right.bracket`），
      *   那份存档优先。所以换了默认值之后，要么删掉 options.txt 里那一行，
      *   要么在「选项 → 控制」里手动重绑。
@@ -131,12 +126,10 @@ public final class KeyBindings {
     }
 
     /**
-     * ★ 关键逻辑路径 CP2 的实现 ★
-     *
+     * 关键逻辑路径 CP2 的实现 *
      * 必须是 public：主类在另一个包，要用方法引用注册到事件总线。
      *
-     * ★ 为什么要做去抖 ★
-     * 这个事件对「按下」和「长按连发」都会触发（KeyboardHandler 里 action==1 || action==2
+     * 为什么要做去抖 * 这个事件对「按下」和「长按连发」都会触发（KeyboardHandler 里 action==1 || action==2
      * 都走 screen 这条分支），而且事件本身不带 action 信息。
      * 不去抖的话，按住快捷键会以每秒 ~30 次的频率把面板开了又关。
      */
@@ -159,8 +152,7 @@ public final class KeyBindings {
 
         Screen screen = event.getScreen();
 
-        // ★ 正在打字就别抢键 ★
-        // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）
+        // 正在打字就别抢键 // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）
         if (TextInputGuard.isTypingNow(screen)) {
             return;
         }
@@ -194,8 +186,7 @@ public final class KeyBindings {
      * 按键这时才走标准的 KeyMapping 路径（Minecraft#handleKeybinds 只在 screen == null 时跑）。
      * 所以想"关掉容器界面之后还能按快捷键把面板叫出来看波形"，必须在这里补一条。
      *
-     * ★ 无论有没有界面打开都要把点击队列排空 ★
-     * 否则界面开着时攒下的点击会在面板关掉的那一刻集中兑现，把面板又立刻弹回来。
+     * 无论有没有界面打开都要把点击队列排空 * 否则界面开着时攒下的点击会在面板关掉的那一刻集中兑现，把面板又立刻弹回来。
      * 排空之后只有在"当前没有界面"时才真的响应。
      */
     public static void onClientTick(ClientTickEvent.Post event) {
@@ -242,7 +233,7 @@ public final class KeyBindings {
 
         BlockPos pos = hit.getBlockPos();
 
-        // ★ 探测资格（第十六轮⑨放宽）：有方块实体即可 —— 无容器的 BE 走
+        // 探测资格：有方块实体即可 —— 无容器的 BE 走
         //   "无容器格，可监测 NBT"。不是目标就**绝对不发交互**：
         //   非目标方块（拉杆、门、按钮……普通非 BE 方块）一个包都不发。
         if (!ProbeContext.isProbeTarget(mc.level, pos)) {
@@ -252,10 +243,8 @@ public final class KeyBindings {
 
         String name = ProbeContext.blockName(mc.level, pos);
 
-        // ★ "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）★
-        //   ★ 但模拟右键只对**真容器**做（isContainerLike = Container/ItemHandler）★
-        //   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
-        //   真的触发睡觉 —— 右键模拟的资格必须比探测资格更严（第十六轮⑨）。
+        // "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）//   但模拟右键只对**真容器**做（isContainerLike = Container/ItemHandler）//   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
+        //   真的触发睡觉 —— 右键模拟的资格必须比探测资格更严。
         boolean containerLike = ProbeContext.isContainerLike(mc.level, pos);
         boolean hasGui = containerLike && (ProbeContext.hasMenuProvider(mc.level, pos)
                 || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player));
@@ -296,7 +285,7 @@ public final class KeyBindings {
         if (mc.screen != null || mc.level == null) {
             return;
         }
-        // 第十六轮⑨：探测资格已放宽到"有 BE" —— 这里同步放宽（模拟右键误判
+        // 探测资格已放宽到"有 BE" —— 这里同步放宽（模拟右键误判
         // 超时兜底也该对无容器 BE 生效）
         if (ProbeContext.isProbeTarget(mc.level, p.pos())) {
             ScopeScreen.openWorldCreate(mc, p.dim(), p.pos(), p.name());
