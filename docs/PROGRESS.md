@@ -977,3 +977,32 @@ MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasG
 提醒，与界面无关；`warnIfIndexUnverified` 的强制警告（force 通道照旧）。
 
 离线：build / TestChart 443 条 / verify-jar 全过。
+
+
+## 第十八轮③：根页存档列表带筛选框（2026-10-15）
+
+**需求**（用户原话）："主界面的 Archives 那里改成文本框，默认状态下显示原本的
+Archives analysis data，输入文字时可用于筛选已存档数据名称。"
+
+标题行左侧的「存档 · 读取分析数据」改为**输入框**：空 = 显示原标题文字（占位符）；
+点入后可输入，存档列表**实时筛选**。
+
+| 件 | 内容 |
+|---|---|
+| `ui/ScopeScreen#renderArchiveFilter` | 标题位置画输入框（与名称列同宽）：空时以占位色显示 `logiscope.info.archives`（= 原标题），聚焦亮环 + 闪烁光标（风格同重命名框），悬停变亮 |
+| `ui/ScopeScreen#filteredArchives` | 筛选函数：大小写不敏感，匹配**名称**（displayName，空则退到文件夹名）**或文件夹名**；空串 = 全量原样返回 |
+| `ui/ScopeScreen`（命中/滚动） | 点击命中与滚轮翻页都改用筛选后的列表；"n / m" 计数 = 筛选后数量 |
+| `ui/ScopeScreen`（输入通道） | `charTyped` / `keyPressed` 加第三个焦点通道（与重命名框、数据框并列）：Backspace 删字、Enter 确认（**保留筛选**、收起）、**Esc 取消（清空筛选并收起）**、Ctrl+V 粘贴（限长 48）；离开根页自动清焦点；左键点到框外先失焦（"焦点跟着点击走"） |
+| 空态 | 区分"真没有存档"（原 `no_archives` 提示）与"筛掉了"（新 `logiscope.hint.arch_no_match`）—— 后者别让用户以为数据丢了 |
+| lang | 新增 `arch_no_match`（中英 174 → **175** 键，仍一致） |
+
+**一条值得归档的纪律**：筛选页的"渲染 / 命中 / 滚动"必须**共用同一个列表函数** ——
+两套列表（显示的用筛选后、点击的用全量）就是"点 A 行打开 B 存档"的经典错位源；
+共用一个函数 = 结构上不可能错位（同 CP9 之三"顺序 + 内容对齐"的思路）。
+
+**行为细节（写清免得被当 bug）**：筛选变化（打字 / 删除 / 粘贴 / 清空）→ 回到列表顶部；
+持久化 = 无（关界面重开回到全量）；Enter 保留筛选（先筛出来再逐个点开的用法），
+Esc 才是清空。
+
+离线：build / TestChart 443 条 / verify-jar 全过（lang 175 键一致）。
+实机复测见 `VERIFY.md` 第十八轮③（F1–F8）。

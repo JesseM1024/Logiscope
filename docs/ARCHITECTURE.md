@@ -1236,6 +1236,11 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
 根页存档列表 → Archives.load(info) → 同一条 loadReplay 路径（跨存档读取）
 ```
 
+> **第十八轮③ 补充：根页存档列表带筛选框**。标题行左侧是输入框（空时显示原「存档」标题
+> 作占位符），打字即筛（匹配名称 / 文件夹名，大小写不敏感）。关键纪律：
+> **渲染、点击命中、滚动三处共用同一个 `filteredArchives()`** —— 任何"显示的列表"
+> 与"点的列表"分家，都会造成"点 A 行打开了 B 存档"这类错位。
+
 **关键契约**：
 
 - **C19-1 回放复用呈现层**：回放数据塞进 `ScopeScreen#chartData`（与活数据同一个字段），

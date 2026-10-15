@@ -90,6 +90,7 @@
   "logiscope.info.archives": "Archives · analysis data",
   "logiscope.info.analyze": "analyzing %s",
   "logiscope.hint.no_archives": "No archives yet · use Stop & archive in chart view",
+  "logiscope.hint.arch_no_match": "No matching archives · clear the filter above to reset",
   "logiscope.legend.analyze": "Analyze",
   "logiscope.status.replay": "Replaying",
   "logiscope.flash.archived": "Archived %s · probe stopped",
