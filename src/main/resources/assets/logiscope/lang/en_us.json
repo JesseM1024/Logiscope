@@ -79,7 +79,6 @@
   "logiscope.flash.live": "Back to live scrolling",
   "logiscope.flash.fit": "Showing the whole recording",
   "logiscope.flash.sel_cleared": "Selection cleared",
-  "logiscope.msg.following": "LogiScope: GUI closed, tracking by position",
   "logiscope.msg.paused_auto": "LogiScope: data source lost, paused",
   "logiscope.msg.index_unverified": "LogiScope: WARNING - slot index could not be verified; tracking may read a different slot",
   "logiscope.label.probe": "Probe",
