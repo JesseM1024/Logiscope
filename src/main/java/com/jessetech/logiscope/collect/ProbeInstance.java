@@ -4,6 +4,7 @@ import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
+import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.DataTarget;
 import com.jessetech.logiscope.bind.ProbeTarget;
@@ -51,13 +52,17 @@ import java.util.List;
  *   读到的就是这一 tick 结束时的状态），由 {@link ProbeManager} 转给
  *   {@link #sampleOnServerTick}。
  *
- * 【两种采样来源，按"哪条路更准"选】
+ * 【两种采样来源：服务端为主，菜单只兜底】（★ 第十八轮改口径 ★）
  *
  * | 场景 | 来源 | 为什么 |
  * |---|---|---|
- * | 单人 + 有坐标 + （下标已验证 或 界面关着） | **服务端 tick**（每 tick 一条真值） | 最准：直接读方块实体 |
- * | 界面开着、但下标映射没验证出来（模组机器歧义） | 客户端菜单（`ContainerAccess`） | 菜单槽**就是用户点的那一格**；服务端那侧只能靠猜（MEK 的下标硬编码 0） |
- * | 多人 | 客户端菜单 / 记 `no_data` | 方块实体不在客户端手里 |
+ * | 单人 + 有坐标 + 设备有可读容器 | **服务端 tick**（每 tick 一条真值） | 最准：直接读方块实体。**界面开着时也一样** —— 菜单读数只是服务端同步下来的副本（还带一个网络往返的延迟），方块实体里的才是真值 |
+ * | 服务端读不到：多人 / 无坐标 / 无容器能力（UNAVAILABLE） | 界面开着 → 客户端菜单（`ContainerAccess`）；关着 → 记 `no_data` | 方块实体不在客户端手里（多人），或它根本没有物品栏（不再猜） |
+ *
+ * 旧口径（直到第十七轮）把"界面开着"当作菜单路的主导条件（那时菜单槽 = 用户点的那一格，
+ * 是唯一能确定"读哪一格"的通道）。第十八轮起服务端是**唯一主路径**，界面开不开关都一样；
+ * 菜单路径降为"服务端读不到"时的兜底。下标可信度交给 {@code verifyIndex} 的既有机制
+ * （验证过的用验证下标，没验证的按既有回退）—— 与"关界面后继续跟踪"的行为完全一致。
  *
  * 【多格监控：一台设备上可以同时监控好几格，记录是聚合的】
  *   每 tick 把各格内容**按物品求和**（规则见 {@link Aggregator}），
@@ -115,9 +120,10 @@ public final class ProbeInstance {
     private volatile List<DataTarget> dataTargets = List.of();
     private final DataProbe dataProbe = new DataProbe();
 
-    /** 数据采样的独立节拍守卫（与物品的 {@link #lastSampledGameTime} 分开：
-     *  界面开着且下标未验证时，物品走菜单路（客户端节拍）、数据走服务端 tick，
-     *  两者要在同一个世界里各写各的，不能共用一把锁） */
+    /** 数据采样的独立节拍守卫（与物品的 {@link #lastSampledGameTime} 分开）：
+     *  两条路的"这一 tick 写没写过"各记各的 —— 一条读不到（或不需要写）时，
+     *  不能把另一条的节拍也挡住。单人下两者都在服务端 tick 上跑；
+     *  服务端读不到时物品退到菜单兜底（多人）。 */
     private volatile long lastDataTick = Long.MIN_VALUE;
 
     /** 采样互斥：客户端线程（菜单路径）与服务端线程（tick 路径）都可能写样本 */
@@ -495,7 +501,7 @@ public final class ProbeInstance {
     }
 
     // ------------------------------------------------------------------
-    // 采样①：客户端 tick（状态机 + 菜单路径 / 多人的回退）
+    // 采样①：客户端 tick（状态机 + 服务端不可用时的菜单回退）
     // ------------------------------------------------------------------
 
     /** 由 {@link ProbeManager} 每客户端 tick 调一次（渲染线程） */
@@ -511,6 +517,10 @@ public final class ProbeInstance {
         if (state == State.ARMED || target.slots().isEmpty()) {
             return;
         }
+        // ★ 下标不可信警告（第十八轮从 tickFollowing 挪来）★
+        // 现在 RECORDING（界面开着）也用服务端读数了（旧口径只有"关界面后"才读），
+        // 提示必须跟着提前 —— 否则用户会把"界面内读数"当成准的。
+        warnIfIndexUnverified();
         switch (state) {
             case RECORDING -> tickRecording(gameTime);
             case FOLLOWING -> tickFollowing(gameTime);
@@ -532,14 +542,18 @@ public final class ProbeInstance {
             return;
         }
 
-        if (ContainerAccess.currentContainerId() != watchedContainerId && !tryRebind()) {
-            // 换了另一台设备，且认不出是我们跟踪的那台
-            pauseAuto();
+        // ★ 第十八轮：单人 + 有坐标 → 服务端 tick 是唯一采样源 ★
+        // 界面开着、甚至换成别的界面，都不影响它 —— 菜单路径只在服务端不可用时兜底
+        // （见 serverSideSampling）。检查必须放在"换设备"之前：服务端采样与界面无关，
+        // 旧行为"RECORDING 下切到别的容器就 pauseAuto"是菜单路才需要的判定。
+        if (serverSideSampling()) {
             return;
         }
 
-        if (serverSideSampling()) {
-            return;   // 服务端 tick 钩子在采（更准、每 tick 一条），这里不插手
+        if (ContainerAccess.currentContainerId() != watchedContainerId && !tryRebind()) {
+            // 换了另一台设备，且认不出是我们跟踪的那台（此时服务端路不可用，界面是唯一数据源）
+            pauseAuto();
+            return;
         }
 
         List<ContainerAccess.SlotView> views = readMenuSlots();
@@ -556,40 +570,8 @@ public final class ProbeInstance {
         }
     }
 
-    /**
-     * 选中的槽位里 menuSlotIndex 是否有重复。
-     * 有重复 = 光看下标无法区分是哪一格（MEK 这类"全是 #0"的容器）→ 提示；
-     * 无重复 = 下标与格子一一对应，采样结果本来就正确 → 不提示。
-     */
-    private static boolean hasDuplicateMenuIndex(ProbeTarget t) {
-        List<ProbeTarget.SlotRef> slots = t.slots();
-        for (int i = 0; i < slots.size(); i++) {
-            for (int j = i + 1; j < slots.size(); j++) {
-                if (slots.get(i).menuSlotIndex() == slots.get(j).menuSlotIndex()) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     /** 界面关着 */
     private void tickFollowing(long gameTime) {
-        // ★ 下标映射不可信的机器（MEK 这类自写槽位类的模组），必须明说 ★
-        // 验证是挂探头那 1~2 tick 内在服务端做的（内容指纹匹配），
-        // 匹配有歧义（例如对着空格子挂探头）就到此为止 —— 不瞎猜，让用户知道。
-        // force：警告紧跟"转为坐标跟踪"，普通去抖会把它吞掉（第七轮 N3）。
-        // 第十三轮②：只在"序号有重复"时提示 ——
-        // MEK 那类容器每格的 menuSlotIndex 都是 0（自写槽位类），映射必然有歧义，
-        // 必须让用户知道；普通容器序号互不相同，按下标就能唯一对上、采样本来是对的，
-        // 这时再弹"下标不可信"就是误报（用户实测：点不同序号的空格子也会看到它）。
-        if (!warnedUnverifiedIndex
-                && probe.mappingStatus(target) == WorldProbe.MappingStatus.UNVERIFIED
-                && hasDuplicateMenuIndex(target)) {
-            warnedUnverifiedIndex = true;
-            notifyPlayer("logiscope.msg.index_unverified", true);
-        }
-
         if (ContainerAccess.hasForeignContainerOpen()) {
             // 玩家又把界面打开了 —— 优先回到最准的那条路径
             if (ContainerAccess.currentContainerId() == watchedContainerId || tryRebind()) {
@@ -610,6 +592,57 @@ public final class ProbeInstance {
             }
             store.add(Sample.noData(gameTime));
         }
+    }
+
+    /**
+     * "下标不可信"警告（第十八轮）：单人下服务端读取是主路径 —— 只要映射没验证出来
+     * （内容指纹有歧义），并且"容器下标"又不能当身份用（同一清单里重复 ⇒ 回退会读到同一格），
+     * 服务端读数就可能不是你选的格子，必须让用户知道。
+     *
+     * | 机器 | 指纹验证 | 容器下标 | 提示？ |
+     * |---|---|---|---|
+     * | 原版箱子 / 熔炉 | VERIFIED | 唯一 | 不弹（读数正确） |
+     * | NeoForge `SlotItemHandler` 的模组机器 | UNVERIFIED（内容有歧义时） | 唯一（就是 handler 下标） | 不弹（回退恰好正确） |
+     * | Mekanism（下标硬编码 0，javap 实锤） | UNVERIFIED | 重复 | **弹**（回退会把两格读成同一格） |
+     *
+     * ★ 判据为什么是 containerSlotIndex ★
+     *   javap 实锤：Mekanism 的 `InventoryContainerSlot` 构造是
+     *   `super(emptyInventory, 0, x, y)` —— `getContainerSlot()` 恒为 **0**，
+     *   "全是 #0"的是**容器下标**（containerSlotIndex）。旧版检查 menuSlotIndex（菜单里
+     *   的位置，天然唯一）⇒ 这条警告从未按设计弹过（第十四轮引入时的注释写的正是
+     *   "MEK 那类全是 #0"，字段却选错了）。现在改成检查 containerSlotIndex 重复 ——
+     *   判据与 `SlotAlign.containerIndexReliable` 同一不变式：**同清单内重复的下标不是身份**。
+     *
+     * 每个探头只提示一次（force 绕过去抖 —— 不能让"转为坐标跟踪"的去抖把它吞掉）。
+     */
+    private void warnIfIndexUnverified() {
+        if (warnedUnverifiedIndex) {
+            return;
+        }
+        if (state != State.RECORDING && state != State.FOLLOWING) {
+            return;
+        }
+        ProbeTarget t = target;
+        if (!t.hasPersistentId()) {
+            return;   // 没有服务端路径：读数走菜单（界面开着）或 no_data，谈不上"服务端读错格"
+        }
+        if (probe.mappingStatus(t) != WorldProbe.MappingStatus.UNVERIFIED) {
+            return;
+        }
+        if (!hasDuplicateContainerIndex(t)) {
+            return;
+        }
+        warnedUnverifiedIndex = true;
+        notifyPlayer("logiscope.msg.index_unverified", true);
+    }
+
+    /** 选中的格子里"容器下标"是否有重复（判据本体在 {@link SlotAlign#containerIndexReliable}，离线有断言） */
+    private static boolean hasDuplicateContainerIndex(ProbeTarget t) {
+        List<Integer> idx = new ArrayList<>(t.slots().size());
+        for (ProbeTarget.SlotRef s : t.slots()) {
+            idx.add(s.containerSlotIndex());
+        }
+        return !SlotAlign.containerIndexReliable(idx);
     }
 
     /** 暂停中：只有"自动暂停"才允许数据源自己回来时恢复 */
@@ -649,7 +682,7 @@ public final class ProbeInstance {
         ProbeTarget t0 = target;
         List<DataTarget> dts0 = dataTargets;
         boolean itemsReady0 = !t0.slots().isEmpty() && t0.hasPersistentId()
-                && (st == State.FOLLOWING || probe.mappingStatus(t0) == WorldProbe.MappingStatus.VERIFIED);
+                && probe.mappingStatus(t0) != WorldProbe.MappingStatus.UNAVAILABLE;
         if (dts0.isEmpty() && !itemsReady0) {
             return false;
         }
@@ -665,8 +698,12 @@ public final class ProbeInstance {
             ProbeTarget t = target;
             List<DataTarget> dts = dataTargets;
             boolean hasData = !dts.isEmpty();
+            // ★ 第十八轮：RECORDING（界面开着）与 FOLLOWING 同一条路 ★
+            // 只排除"服务端结构性读不到"的设备（UNAVAILABLE —— 让位给菜单路），
+            // 不再要求 VERIFIED：验证过的用验证下标、没验证的按既有回退（与 FOLLOWING 一致），
+            // 可能读错格的情形有 warnIfIndexUnverified 兜底告知。
             boolean itemsReady = !t.slots().isEmpty() && t.hasPersistentId()
-                    && (now == State.FOLLOWING || probe.mappingStatus(t) == WorldProbe.MappingStatus.VERIFIED);
+                    && probe.mappingStatus(t) != WorldProbe.MappingStatus.UNAVAILABLE;
             if (!hasData && !itemsReady) {
                 return false;
             }
@@ -757,25 +794,37 @@ public final class ProbeInstance {
     }
 
     /**
-     * 采样该不该走服务端 tick 这条主路径。
+     * 采样该不该走服务端 tick 这条主路径（★ 第十八轮：物品探针的"服务端优先"总开关 ★）。
      *
      * | 条件 | 说明 |
      * |---|---|
      * | 有坐标 | 服务端才能按"维度+坐标"读到那台设备 |
      * | 是单人 | 多人下方块实体不在客户端进程里（集成服务端才有） |
-     * | 界面关着 **或** 下标已验证 | 界面开着但映射没验证时，菜单槽才是用户点的那一格 —— 宁可留观测空档，也不要读错格子 |
+     * | 设备有可读的容器 | 挂探头时验证过：既不是 `Container` 也没有 ItemHandler 的方块
+     *   （UNAVAILABLE）服务端拿不到值，只能让菜单路兜底 |
+     *
+     * ★ 与旧口径（第十六轮⑤）的差别：去掉 `state != RECORDING || VERIFIED` ★
+     *   旧口径把"界面开着"当作菜单路的主导条件（那时菜单槽 = 用户点的那一格，
+     *   是唯一能确定"读哪一格"的通道）；新口径里**服务端是唯一主路径** ——
+     *   菜单读数只是服务端同步下来的副本（还带一个网络往返的延迟），方块实体里
+     *   的才是真值（数据保真）。界面开着不再"让位"，菜单只在服务端读不到时兜底：
+     *   · 多人（方块实体不在本进程）
+     *   · 无坐标（vanilla 菜单不存方块坐标、modded GUI 推不出来）
+     *   · 无容器能力（UNAVAILABLE —— 服务端结构性读不到）
+     *
+     * 下标可信度不再在这里把关：验证过的用验证下标、没验证的按既有回退
+     * （与 FOLLOWING 完全一致，两条路不会自相矛盾）；回退可能读错格的情形由
+     * {@link #warnIfIndexUnverified} 告知用户。
      */
     private boolean serverSideSampling() {
         ProbeTarget t = target;
         if (!t.hasPersistentId()) {
             return false;
         }
-        Minecraft mc = Minecraft.getInstance();
-        if (!mc.isLocalServer() || mc.getSingleplayerServer() == null) {
+        if (!integratedServerUp()) {
             return false;
         }
-        return state != State.RECORDING
-                || probe.mappingStatus(t) == WorldProbe.MappingStatus.VERIFIED;
+        return probe.mappingStatus(t) != WorldProbe.MappingStatus.UNAVAILABLE;
     }
 
     /**
@@ -907,18 +956,19 @@ public final class ProbeInstance {
     }
 
     /**
-     * 界面开着时的一次读取：**按菜单位置读**（第十五轮的"按身份读"已回退，见下）。
+     * 界面对着容器时的一次读取：**按菜单位置读**（第十五轮的"按身份读"已回退，见下）。
+     * 第十八轮起这是**兜底路径** —— 只在服务端读不到时执行（多人 / 无坐标 / 无容器能力，
+     * 见 {@link #serverSideSampling}）。
      *
-     * ★ 为什么回退 ★
+     * ★ 为什么按位置读 ★
      * 用户实测：MEK 熔炉里输入格确实只有 **2** 个圆石，而按**容器内下标**读到的
      * 是 **8**（另一格）。也就是说 —— **菜单位置是准的，容器下标对这类机器反而错**
      * （模组自写槽位类里 `getContainerSlot()` 的语义与能力(handler)的下标序不一致）。
      * 第十五轮把菜单路径也改成按身份读，等于"把错的统一到了两条路径上"；
      * 现在回退成按位置读，**界面内的读数恢复正确**。
      *
-     * 残留问题（已记在案，本轮不动）：关掉界面走坐标路径时，仍按容器下标读那一格。
-     * 根治要么等下标映射被内容指纹验证过（`verifyIndex`），要么在**未验证时不猜** ——
-     * 记 `no_data`，而不是写一个可能是别格的数。
+     * 与主路径（服务端）的关系：{@code verifyIndex} 验证过映射时两条路指向同一批格子；
+     * 未验证时服务端按既有回退读（可能读错格，由 {@link #warnIfIndexUnverified} 告知用户）。
      */
     private List<ContainerAccess.SlotView> readMenuSlots() {
         List<ProbeTarget.SlotRef> refs = target.slots();

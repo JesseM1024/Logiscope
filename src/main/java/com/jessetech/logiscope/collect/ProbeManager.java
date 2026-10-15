@@ -20,12 +20,12 @@ import java.util.concurrent.CopyOnWriteArrayList;
  *   · {@link ProbeInstance}：**一个**探针的状态机、缓冲、世界侧读取
  *   · 本类：实例表、创建 / 删除、活跃指针（界面当前在看哪一个）、每 tick 驱动所有人
  *
- * 【两个驱动点，分工明确】（第十轮第四次修复）
+ * 【两个驱动点，分工明确】（第十轮第四次修复；第十八轮更新口径）
  *
  * | 驱动 | 线程 | 干什么 |
  * |---|---|---|
- * | {@link #onClientTick} | 渲染线程 | 推进时钟、跑**状态机**（界面开没开 / 源还在不在）、多人/无坐标时读菜单 |
- * | {@link #onServerTick} | **服务端线程** | 单人下**采样**：一个世界 tick 一条真值（见 `ProbeInstance#sampleOnServerTick`） |
+ * | {@link #onClientTick} | 渲染线程 | 推进时钟、跑**状态机**（界面开没开 / 源还在不在）、**服务端读不到时**读菜单兜底（多人 / 无坐标 / 无容器能力） |
+ * | {@link #onServerTick} | **服务端线程** | 单人下**采样**：一个世界 tick 一条真值（见 `ProbeInstance#sampleOnServerTick`）。第十八轮起界面开着时也由它采 —— 菜单读数只是服务端同步的副本 |
  *
  * 为什么采样要搬到服务端 tick：客户端每秒只能观测 20 次，而服务端每秒要走 20 tick
  * （`/tick rate` 还能更快），两者的节拍**不锁相** —— 从客户端看过去必然偶尔漏一格。

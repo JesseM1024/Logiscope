@@ -248,6 +248,8 @@ FML 报 `MalformedInputException` —— 报错完全不提编码）。
 
 **仍然保留的边界**：多人、以及"界面开着但下标没验证出来"的模组机器走菜单路径
 （宁可有观测空档，也不要读错格子）；回退路径的空档由第三轮的断线规则兜着。
+> **第十八轮①更新**：口径已改 —— 服务端成为唯一主路径（界面开着也一样），
+> 菜单只在服务端读不到时兜底；"下标没验证出来"不再让位菜单，改为**记录期间直接警告**。
 
 ---
 
@@ -622,7 +624,7 @@ javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/T
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" TestChart
 
 :: 3) 产物验收（元数据 / 编码 / 占位符）
-python verify-jar.py build/libs/logiscope-0.1.0.jar
+python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 
 :: 4) 进游戏（或用 build\moddev\runClient.cmd 脱离 Gradle 反复重启）
 gradlew.bat runClient
@@ -911,4 +913,47 @@ MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasG
   （同一份 Δ 只有正负两种去向）；IO 侧同式。
 
 离线：build / TestChart 443 条 / verify-jar / BenchRender（台阶 99.3%・混合 63.8%，
-与第十三轮一致）全过。实机复测见 `VERIFY.md` 第十七轮①。
+与第十三轮一致）全过。**版本号 0.1.0 → 0.1.1**（按约定带 MC 后缀，发布版本
+`0.1.1-1.21.1`；`gradle.properties` / README / GOALS / VERIFY / 本文件的命令同步，
+1.20.1 分支的 `0.1.0-1.20.1` 按约定不动）。实机复测见 `VERIFY.md` 第十七轮①。
+
+**发布 tag 约定（2026-10-14 确定）**：`<加载器>-<MC版本>-<模组版本>`，
+例 `neoforge-1.21.1-0.1.0`；一个版本 = 一个 tag = 一个 GitHub Release
+（不把多个版本合并到同一个 tag）。0.1.0 / 0.1.1 两个 tag 已在本地建好
+（分别指向 `c00c545` / `a609019`），由作者推送后完成旧 release 换绑
+（`0_1_0-neo-1_21_1` → `neoforge-1.21.1-0.1.0`）与新 release 发布。
+
+
+## 第十八轮①：物品探针采样统一到服务端（菜单降为兜底，2026-10-15）
+
+**需求**（用户原话归纳）：把"打开 GUI 读菜单 / 关闭 GUI 读服务端"两种采样逻辑统一成
+**直接读服务端世界数据**（数据保真）；保留服务端读取的检测逻辑，**读不到时**
+（例如多人）才用"打开 GUI 的读取方法"。MEK 等 NBT 路径不动；FOLLOWING 的既有行为不改。
+
+| 件 | 内容 |
+|---|---|
+| `collect/ProbeInstance#serverSideSampling` | 条件从 `state != RECORDING \|\| VERIFIED` 改为 **有坐标 && 单人 && 映射 != UNAVAILABLE** —— 界面开着也让位服务端；UNAVAILABLE（挂探头时验证出既非 Container 也无 ItemHandler）保留给菜单兜底 |
+| `collect/ProbeInstance#tickRecording` | `serverSideSampling()` 检查**提前到"换设备检测"之前**：服务端采样与界面无关，"RECORDING 下切到别的容器就 pauseAuto"是菜单路才需要的判定（单人下不再打断） |
+| `collect/ProbeInstance#sampleOnServerTick` | `itemsReady` 去掉 `now == FOLLOWING \|\| VERIFIED`，改为 **有坐标 && != UNAVAILABLE** —— RECORDING 与 FOLLOWING 走同一条路：验证过的用验证下标、没验证的按既有回退 |
+| `collect/ProbeInstance`（警告） | `warnIfIndexUnverified` 从 `tickFollowing` 挪到 `tick()`（RECORDING 也要提示），判据从 `menuSlotIndex` 修正为 **`containerSlotIndex` 重复**（复用 `SlotAlign.containerIndexReliable` 的不变式）—— 旧判据查的是菜单位置（天然唯一）⇒ 该警告**从未按设计弹过**；javap 实锤 MEK 的 `getContainerSlot()` 恒 0 |
+| lang | `msg.index_unverified` 去掉"关界面后"的过时限定（中英一致）；README 采样描述同步 |
+
+**为什么旧警告判据是错的**（写下来免得下次又选错字段）：第十四轮加"只在序号有重复时提示"
+时注释写的是"MEK 那类全是 #0"，但"全是 #0"的是 **`Slot#getContainerSlot()`（容器下标）**；
+菜单位置（`menuSlotIndex`）天然唯一。javap 复核 `InventoryContainerSlot` 构造 =
+`super(emptyInventory, 0, x, y)` → 容器下标恒 0。修正后各机器自洽：
+原版箱子 / `SlotItemHandler` 机器不弹（回退恰好正确）、MEK 弹（回退会把两格读成同一格）。
+
+**行为矩阵（物品探针）**：
+
+| 局面 | 采样来源 |
+|---|---|
+| 单人 + 有坐标 + 非 UNAVAILABLE（**界面开/关都一样**） | **服务端 tick**（每世界 tick 一条真值） |
+| 服务端不可用 + 界面开着（多人 / 无坐标 / UNAVAILABLE） | 菜单（回退，按菜单位置读） |
+| 服务端不可用 + 界面关着 | no_data |
+
+**不改的**：MEK / NBT 锚点采样（本来就是服务端读，CP24）；FOLLOWING 的既有行为；
+数据探针与 AE 目标；`verifyIndex` 检测体系本身（它继续决定"用验证下标还是回退"）。
+
+离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过。
+实机复测见 `VERIFY.md` 第十八轮①。
