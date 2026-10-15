@@ -7,12 +7,12 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **443 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **176** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **177** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；0.1.0 同线；
   发布约定见 [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
-  **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①②③④ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
+  **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①–⑤ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
 
 > 以上是 **1.21.1 主线（main）** 的现状。**1.20.1 分支（`1.20.1-neo`）** 的现状与移植记录见
 > 紧随其后的「[1.20.1] 线」一节；两条线的 API 差异与限制统一记在
@@ -22,19 +22,21 @@
 
 ## [1.20.1] 线：现状与移植记录
 
-**现状（2026-10-15）**：功能已与 main **对齐到第十八轮④**（第十七轮① + 第十八轮①–④ 全部搬运到位），
-离线全过；dev 启动问题已定位并处理（AE2 的 SRG-mixin 缺陷 → `mods-disabled/`，外部实例渠道打通并完成
-兼容性审计，见「轮次 2」）；版本号提至 `0.1.1-1.20.1-alpha` 并装配 NeoForge 测试实例（见「轮次 3」）；
-**首次实机验收待做**（dev 清单 = 本分支 [`VERIFY.md`](VERIFY.md)；AE / 精妙存储项在 `1.20.1-NeoForge` 实例验证）。
+**现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，
+**轮次 4 的 DATA 右键强制数值已回流 main（`f07ebad`）**；F9 判据为 1.20.1 专属收紧（main 无需，
+差异记 [PORT-1.20.1](PORT-1.20.1.md) §4.3）。dev 启动问题已定位并处理（AE2 的 SRG-mixin 缺陷 →
+`mods-disabled/`，外部实例渠道打通并完成兼容性审计，见「轮次 2」）；版本号提至 `0.1.1-1.20.1-alpha`
+并装配 NeoForge 测试实例（见「轮次 3」）；**首次实机验收待做**（dev 清单 = 本分支
+[`VERIFY.md`](VERIFY.md)，含轮次 4 的 C-4 / Q14–Q16；AE / 精妙存储项在 `1.20.1-NeoForge` 实例验证）。
 
 | 项 | 值 |
 |---|---|
 | 构建 | `gradlew.bat build --offline` 通过（代理关闭时；代理在跑可直接联网构建）；产物 `build/libs/logiscope-0.1.1-1.20.1-alpha.jar`（reobf） |
-| 离线 | TestChart **443 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **176** 键 |
+| 离线 | TestChart **461 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **178** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
 | 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.1-1.20.1-alpha` |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
-| 未做 | 实机验收（重点 A 组采样保真） |
+| 未做 | 实机验收（重点 A 组采样保真 + C-4 右键强制数值 + Q14–Q16 F9 判据） |
 
 ### [1.20.1] 轮次 1：同步 main 第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15）
 
@@ -96,6 +98,35 @@ pipez `1.20.1-1.2.5`；本 jar 已装入其 `mods/`。
 `NoSuchMethodError: 'net.minecraft.Util.m_137492_(String, ResourceLocation)'`（该 SRG 名在本版映射
 中对应 `Util.makeDescriptionId`）；根因未收敛，排查按用户要求暂停，转外部实例测试。
 dev `runClient` 若需可用，可先将 MEK 移入 `mods-disabled/`（与 AE2 / Create 同处）。
+
+---
+
+### [1.20.1] 轮次 4：DATA 页右键强制数值 + F9 判据收紧（2026-10-15）
+
+**背景（用户实测）**：① 有的数值类型在 NBT 里被模组存成**字符串**，需要"强制按数值读取"
+的口径；② 对准 Create 机械手按 F9 会**先发生一次真实交互**（手取放了物品），光标移开后
+面板才出现 —— 1.21.1 线无此问题。
+
+**① DATA 页右键 = 强制数值**（提交 `a6e701b`）：值列表右键把路径按"强制数值"标记
+（`DataTarget.forceNumeric`，不参与去重）；读取走 `DataProbe.asValForced`（数值标签照常，
+字符串再试 `Val.parseNumericText`：整数优先 long、纯整数超 long 拒绝近似）；不可转换 →
+`no_data`。左键取值 / 手输 / 粘贴 / 退格均回到自动口径；值格**琥珀色点**标记该状态
+（名称格品红点语义不变）。**已回流 main（`f07ebad`，同功能 + 1.21.1 平台适配）。**
+
+**② F9 判据收紧（第三代）**（提交 `6ff713b`）：1.20.1 的 `use()` 把方块交互与物品交互
+合并 —— "会不会消费右键"无法区分"有界面的机器"与"会动作的设备"（机械手空手右键真的
+存取物品）。改为**只认标准界面通道**（`ProbeContext.hasMenuChannel`：方块级
+`getMenuProvider` 或方块实体级 `MenuProvider`）；其余容器型方块一律**不发交互**直接创建，
+会消费右键时以 `flash.maybe_gui` 提示手动路径。取舍（用户选定"严格判据 + 提示"）：
+MEK / AE2 / 精妙存储 / Create 不再自动开界面。顺带修复 `hand_blocks_use` 路径的
+`flashOnOpen` 时序（晚设会拖到下一次打开才显示）。
+
+**离线**：TestChart **461 条**全过（新增 t40 断言 18 条）、BenchRender（台阶 99.3%・
+混合 63.8%）、verify-jar 全过、lang 中英 **178** 键；dev-check classpath 补
+`guava-31.1-jre`（t40 的 `ListTag` 构造依赖）。
+
+**实机验收项**：VERIFY.md 的 **C-4**（右键强制数值，含用 `data modify` 造字符串键的方法）
+与 **Q14–Q16**（F9 对机械手 / 标准界面方块 / 自建通道机器）。
 
 ---
 

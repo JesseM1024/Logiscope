@@ -4506,7 +4506,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** DATA 页的鼠标点击：值列表（左键取值路径 / 右键用它的文字作名称）+ 两个编辑格 */
+    /** DATA 页的鼠标点击：值列表（左键 数值 = 取值路径 / 左键 文字 = 当名称 / 右键 = 强制按数值读取）+ 两个编辑格 */
     private boolean handleDataClick(int mx, int my, Layout L, int button) {
         // 刷新滑条：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
         int[] sl = dataSliderRect(L);

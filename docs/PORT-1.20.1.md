@@ -100,7 +100,7 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 | `LogiScopeMod` / `collect/ProbeManager` | `event.tick.ServerTickEvent`（Pre / Post） | `TickEvent.ServerTickEvent` + `phase == Phase.END`；采样点挂权威事件的结构不变 |
 | `LogiScopeMod` / `bind/KeyBindings` | `ClientTickEvent.Pre / Post` | `TickEvent.ClientTickEvent` + `phase == END` |
 | `bind/ProbeContext` / `collect/WorldProbe` | `Capabilities` 注册表 | `ForgeCapabilities.ITEM_HANDLER` + `BlockEntity#getCapability`（LazyOptional 通道） |
-| `bind/ContainerAnchor` | `useWithoutItem(...).consumesAction()` | `use(level, player, MAIN_HAND, hit).consumesAction()`（`useWithoutItem` 为 1.20.5+） |
+| `bind/ProbeContext`（F9 界面判据） | `useWithoutItem(...).consumesAction()`（"空手会不会消费"） | **标准界面通道判据**：`hasMenuChannel` = 方块级 `getMenuProvider` 或方块实体级 `MenuProvider`。1.20.1 的 `use()` 把**物品交互**也算作消费（机械手空手右键真的存取物品），"会消费"无法区分"有界面的机器"与"会动作的设备"；`use(...).consumesAction()` 降级为提示用途（轮次 4） |
 | `ui/ScopeScreen` | `ClientHooks.guiLayers` | `ForgeHooksClient.pushGuiLayer / popGuiLayer`（签名已核对） |
 | `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | Forge 1.20.1 的 `@Mod` 无 dist 参数；改为构造时检查 `FMLEnvironment.dist` |
 | `bind/DataCommand` | `ClientChatReceivedEvent.System` | 无 System 子类型；用 `event.isSystem()` 判定 |
@@ -154,6 +154,7 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 | `/tick rate` 改速时秒数按 20 换算 | 1.20.1 无 tickRateManager、无速率同步包 |
 | **模组必须带 `pack.mcmeta`（pack_format 15）** | 1.20.1 资源包机制；缺失则 lang 不加载、界面显示键名。1.21 的 NeoForge 用 `neoforge.mods.toml` 充当打包元数据，main 无此需求 |
 | **dev 环境下 SRG-mixin 模组不可用**（实例：Create 6 内嵌 flywheel 1.0.5；AE2 15.3.3） | 开发运行为 named 映射，SRG 写的 `@Shadow` 定位不到（报 `@Shadow ... not located`）；**生产环境正常**。识别方法：扫 jar 内 `*.mixins.json` + refmap —— 若 mixin 声明 `f_*` / `m_*` 影子而 refmap 无对应条目，则该模组不可入 dev。处理：此类模组放 `mods-disabled/` 或只在整合包实例启用 |
+| **F9 不自动开"自建界面通道"机器**（MEK / AE2 / 精妙存储 / Create） | `use()` 合并物品交互，"会消费"无法区分机器类型（见 §4.3）⇒ 只认标准 `MenuProvider` 通道；其余设备直接创建探针 + `flash.maybe_gui` 提示手动路径（先右键开界面、再按 F9）。宁可多一步手动，也不向设备误发交互 |
 | 不尝试「给 mod jar 本地做 SRG→named 重映射」 | FART + tsrg2 方案未走通、已废弃（2026-10-14）；本地混用映射来源不可取，按上一行分流 |
 
 ## 八、测试环境与渠道（2026-10-15 更新）
@@ -176,8 +177,9 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 ## 九、待办与待定
 
 - [x] 建分支 `1.20.1-neo` 并完成配置 / API 移植（compileJava 0 错误；reobf jar 就位，2026-09-20）
-- [x] `VERIFY.md` 按 1.20.1 重建 + 离线断言跑通（443 条全过，2026-10-15）
+- [x] `VERIFY.md` 按 1.20.1 重建 + 离线断言跑通（轮次 4 起 **461 条**全过，2026-10-15）
 - [x] 同步 main：第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15，12 条 `cherry-pick -x`）
+- [x] 轮次 4：DATA 页右键强制数值（**回流 main（`f07ebad`）**）+ F9 判据收紧为"标准界面通道"（2026-10-15）
 - [x] AE2 移出 dev（`mods-disabled/`）；整合包渠道打通并完成兼容性审计（2026-10-15）
 - [ ] **实机验收**：dev 侧清单 = 本分支 `VERIFY.md`（重点 A 组采样保真）；AE / 精妙存储项
       在 NeoForge 测试实例（`1.20.1-NeoForge`）验证
