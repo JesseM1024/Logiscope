@@ -186,8 +186,12 @@ public final class ScopeScreen extends Screen {
     private static final int COLOR_BACKSLOT = 0xFF8FB8E8;
     private static final int COLOR_CHART_GLOW = 0xFFFFE08A;
     private static final int COLOR_CALC_GLOW = 0xFFC0A0F0;
-    /** DATA 页自动重发 `data get block` 的节拍（客户端 tick）—— 1 秒一次就是"实时"了 */
-    private static final long DataRefreshTicks = 20;
+    /**
+     * DATA 页刷新滑条的档位数（第十八轮④）：idx 0..39 = 每 1..40 t 抓一次，
+     * idx 40（最右档）= 不刷新。档位值存 `LogiScopeConfig.dataRefreshTicks`
+     * （整个游戏运行实例一份，不随探针隔离；滑条与 config 是同一个值）。
+     */
+    private static final int RATE_STOPS = 40;
 
     // ==================================================================
     // 会话状态（每次打开重置）
@@ -301,8 +305,10 @@ public final class ScopeScreen extends Screen {
     private List<Snbt.Entry> dataEntries = List.of();
     /** 上一次解析用的原文（变了才重解析） */
     private String dataParsedFrom = "";
-    /** 自动刷新：下一次发命令的客户端 tick */
+    /** 自动刷新：下一次发命令的客户端 tick。速率 = `LogiScopeConfig.dataRefreshTicks`（0 = 不刷新） */
     private long dataNextRequestTick;
+    /** 刷新滑条是否正被拖动（第十八轮④）：按住后鼠标拖动改档位，松手结束 */
+    private boolean dataSliderDrag;
     /** 命令原文按当前宽度折行后的结果（缓存：宽度或原文变了才重算） */
     private List<String> dataTextLines = List.of();
     /** 与 {@link #dataTextLines} 一一对应的**源文本起始偏移**（悬浮高亮按它定位） */
@@ -1032,6 +1038,11 @@ public final class ScopeScreen extends Screen {
                 // 确认添加：把当前 值/路径 + 名称 变成一个追踪目标（可以攒多个）
                 out.add(new Item("data_confirm", tr("logiscope.btn.data_confirm"),
                         dsrc != null && !dataPath.isBlank()));
+                // ★「完成」（第十八轮④）：与选格页的 done 同一个 id、同一条处理路径 ★
+                // 仅追 NBT 的探针不用"回选格再完成"了 —— 在这里直接提交并进图表页。
+                // 置灰条件与选格页一致：选了格子、或已经攒了数据目标。
+                out.add(new Item("done", tr("logiscope.btn.done"),
+                        dsrc != null && (selectionCount() > 0 || dsrc.isDataProbe())));
                 out.add(new Item("data_back", tr("logiscope.btn.to_picker"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1261,7 +1272,7 @@ public final class ScopeScreen extends Screen {
         //   先画就被完全盖住（实测踩过）
         renderTitle(g, L, mouseX, mouseY);
         renderTopGlow(g, L);
-        renderInfo(g, L);
+        renderInfo(g, L, mouseX, mouseY);
 
         switch (page) {
             case ROOT -> renderRoot(g, L, mouseX, mouseY);
@@ -1444,7 +1455,7 @@ public final class ScopeScreen extends Screen {
     // 信息区
     // ------------------------------------------------------------------
 
-    private void renderInfo(GuiGraphics g, Layout L) {
+    private void renderInfo(GuiGraphics g, Layout L, int mouseX, int mouseY) {
         int left = L.x() + PAD;
         int right = L.x() + L.w() - PAD;
         int y = L.infoTop();
@@ -1536,6 +1547,8 @@ public final class ScopeScreen extends Screen {
                 String line = tr("logiscope.data.src") + "  " + tr(DataCommand.statusKey());
                 g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y,
                         DataCommand.statusColor(), false);
+                // 刷新速率滑条（第十八轮④）：贴在 "status ok" 同一行右侧
+                renderDataRateSlider(g, L, mouseX, mouseY);
             }
             case REPLAY -> {
                 // 回放页的信息区：存档名 / 探针来源 / 统计
@@ -3628,6 +3641,11 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean mouseDragged(double mouseX, double mouseY, int button, double dragX, double dragY) {
+        // 刷新滑条拖动（第十八轮④）：优先于面板外转交（拖出面板也继续跟手）
+        if (dataSliderDrag && button == 0) {
+            applyDataSlider((int) mouseX, layout());
+            return true;
+        }
         if (cellMode && !overPanel(mouseX, mouseY, layout()) && cellDragButton >= 0 && button == cellDragButton) {
             handleCellDrag(mouseX, mouseY);
             return true;
@@ -3660,6 +3678,10 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean mouseReleased(double mouseX, double mouseY, int button) {
+        if (dataSliderDrag && button == 0) {
+            dataSliderDrag = false;
+            return true;
+        }
         if (cellDragButton >= 0 && button == cellDragButton) {
             cellDragButton = -1;
             return true;
@@ -4167,9 +4189,15 @@ public final class ScopeScreen extends Screen {
         dataScroll = 0;
         dataTgtScroll = 0;
         dataNextRequestTick = 0;
+        dataSliderDrag = false;
         page = Page.DATA;
         DataCommand.request(p.target().dimension(), p.target().pos());
-        dataNextRequestTick = LogiScopeMod.probes().currentTick() + DataRefreshTicks;
+        // 进页面立刻抓一次（"不刷新"档也抓 —— 不刷新只表示**不自动重发**）。
+        // 之后的自动刷新间隔 = 全局配置档位（第十八轮④）
+        int rate = LogiScopeConfig.dataRefreshTicks();
+        dataNextRequestTick = rate > 0
+                ? LogiScopeMod.probes().currentTick() + rate
+                : Long.MAX_VALUE;
     }
 
     /** 每客户端 tick：抓数（实时刷新）+ 解析 */
@@ -4180,9 +4208,15 @@ public final class ScopeScreen extends Screen {
             return;
         }
         long now = LogiScopeMod.probes().currentTick();
-        if (now >= dataNextRequestTick) {
-            DataCommand.request(src.target().dimension(), src.target().pos());
-            dataNextRequestTick = now + DataRefreshTicks;
+        int rate = LogiScopeConfig.dataRefreshTicks();
+        if (rate > 0) {
+            // 速率被改小（或从"不刷新"切回来）→ 把过期的排期拉回来，不等旧节拍走完。
+            // 速率改大则不动（当前这一拍按旧节拍发出即可，下一拍自然变慢）。
+            dataNextRequestTick = Math.min(dataNextRequestTick, now + rate);
+            if (now >= dataNextRequestTick) {
+                DataCommand.request(src.target().dimension(), src.target().pos());
+                dataNextRequestTick = now + rate;
+            }
         }
         reparseData();
     }
@@ -4247,6 +4281,71 @@ public final class ScopeScreen extends Screen {
         }
         dataTextLines = out;
         dataTextStarts = starts;
+    }
+
+    // ------------------------------------------------------------------
+    // DATA 页的刷新速率滑条（第十八轮④）
+    // ------------------------------------------------------------------
+
+    /**
+     * 滑条几何 [x, y, w, h]（渲染与命中共用同一个矩形）。
+     * x 贴在状态文字右侧（"status ok" 后面）；右侧给档位数值标签（"20t" / "不刷新"）留 36px。
+     */
+    private int[] dataSliderRect(Layout L) {
+        int left = L.x() + PAD;
+        int right = L.x() + L.w() - PAD;
+        int y = L.infoTop() + ROW_H - 2;
+        String line = tr("logiscope.data.src") + "  " + tr(DataCommand.statusKey());
+        int sx = left + this.font.width(line) + 10;
+        int sw = Math.min(220, right - sx - 36);
+        return new int[]{sx, y, Math.max(0, sw), ROW_H + 2};
+    }
+
+    /** 档位 ↔ 索引：idx 0..39 = 1..40t；idx 40（最右）= 不刷新（0） */
+    private static int rateToIdx(int value) {
+        return value <= 0 ? RATE_STOPS : value - 1;
+    }
+
+    private static int idxToRate(int idx) {
+        return idx >= RATE_STOPS ? 0 : idx + 1;
+    }
+
+    /** 画刷新滑条：轨道 + 已选段 + 拖钮 + 右侧档位文字；悬停/拖动时提亮 */
+    private void renderDataRateSlider(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int[] r = dataSliderRect(L);
+        int sx = r[0];
+        int sw = r[2];
+        if (sw < 24) {
+            return;   // 面板太窄，放不下就不画（命中判定同样会跳过）
+        }
+        int sy = r[1];
+        int cy = sy + (ROW_H + 2) / 2;               // 与状态文字垂直居中
+        int value = LogiScopeConfig.dataRefreshTicks();
+        boolean off = value <= 0;
+        int idx = rateToIdx(value);
+        int kx = sx + sw * idx / RATE_STOPS;
+        boolean over = isIn(mouseX, mouseY, sx, sy, sw, r[3]);
+        boolean active = dataSliderDrag || over;
+
+        g.fill(sx, cy - 1, sx + sw, cy + 1, active ? 0xFF4A4A5A : 0xFF3A3A46);          // 轨道
+        g.fill(sx, cy - 1, kx, cy + 1, off ? 0xFF8A6030 : 0xFF5DCAA5);                 // 已选段
+        g.fill(kx - 2, cy - 4, kx + 3, cy + 4,
+                dataSliderDrag ? 0xFFFFD24A : active ? 0xFFE0E0EC : 0xFFB8B8C8);       // 拖钮
+        String label = off ? tr("logiscope.data.rate_off") : value + "t";
+        g.drawString(this.font, label, sx + sw + 5, sy + 2,
+                off ? 0xFFEF9F27 : 0xFF9099A8, false);
+    }
+
+    /** 把鼠标位置换算成档位并写回（写盘由 config 的 setter 负责；值没变则什么都不做） */
+    private void applyDataSlider(int mx, Layout L) {
+        int[] r = dataSliderRect(L);
+        if (r[2] <= 0) {
+            return;
+        }
+        int idx = Math.round((mx - r[0]) * (float) RATE_STOPS / r[2]);
+        idx = Math.max(0, Math.min(RATE_STOPS, idx));
+        LogiScopeConfig.setDataRefreshTicks(idxToRate(idx));
+        // 排期不用这里管：tickDataPage 每 tick 会把过期排期拉回来（见那里的注释）
     }
 
     private void renderDataPage(GuiGraphics g, Layout L, int mouseX, int mouseY) {
@@ -4425,6 +4524,14 @@ public final class ScopeScreen extends Screen {
 
     /** DATA 页的鼠标点击：值列表（左键取值路径 / 右键用它的文字作名称）+ 两个编辑格 */
     private boolean handleDataClick(int mx, int my, Layout L, int button) {
+        // 刷新滑条（第十八轮④）：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
+        int[] sl = dataSliderRect(L);
+        if (button == 0 && sl[2] >= 24 && isIn(mx, my, sl[0], sl[1], sl[2], sl[3])) {
+            dataFocus = 0;   // 与"点信息/原文区收起编辑焦点"同一惯例
+            dataSliderDrag = true;
+            applyDataSlider(mx, L);
+            return true;
+        }
         DataRects R = dataRects(L);
         int left = L.x() + PAD;
 
