@@ -887,3 +887,28 @@ AE 不能通过容器格判断，写特例覆盖逻辑。
 MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasGui ✗ →
 `openWorldCreate` 直接进创建流程 → 选格页显示"无容器格，可监测 NBT"。
 离线：build / TestChart 411 条 / verify-jar 全过。
+
+
+## 第十七轮①：上升/下降事件（计算模块扩展，2026-10-14）
+
+**需求**：回放存档的计算里，「变更区间」之外再要两个单向版本 —— 只数**增加**的
+事件 / 只数**减少**的事件（数量线与 IO 线都要）。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/CurveMath` | 新增 `changeRiseEvents` / `changeFallEvents`（数量线）、`flowRiseEvents` / `flowFallEvents`（IO 线）；`changeEvents` / `flowEvents` 行为不变 —— 内部共用带符号过滤的实现（`keepEvent`，sign 0/±1），Δ = 0 仍不算事件。语义与「变更区间」逐位对齐：断档不计；周期 = 相邻两次**同向**事件的 tick 间隔 |
+| `ui/ScopeScreen` | `OP_RISE_EVENTS = 5` / `OP_FALL_EVENTS = 6` 进运算弹窗（共 7 项，高度由 `OP_VALUES.length` 自动算）；三条事件类运算的输出抽成 `addEventLines`（只有首行文案键不同，其余两行完全同源） |
+| lang | `calc.op.rise_events` / `calc.op.fall_events` / `calc.rise_events` / `calc.fall_events` 四键，中英各 **175** 键一致 |
+| 测试 | t39（32 条）：有升有降 / 全升 / 断档 / 小数 / IO / 单点序列，外加"上 + 下 = 全部变更"不变量。TestChart **411 → 443 条全过** |
+
+**设计口径（写下来免得下次又想一遍）**：
+- "上升事件"对数量线 = 相邻采样差 > 0；对 IO 线 = 流量值 > 0。两者都是"Δ 为正的
+  事件"，与「变化总量」的 Σ升 同源口径 —— 断档处照样不收。
+- 上升/下降不是"新统计量"，是「变更区间」的**过滤视图**：count / dMean·dVar /
+  pMean·pVar 全部只在过滤后的序列上算（周期因此是"相邻两次上升"的间隔，
+  这正是用户想看的节奏）。
+- 三角关系做成了离线不变量：`changeEvents.count == rise.count + fall.count`
+  （同一份 Δ 只有正负两种去向）；IO 侧同式。
+
+离线：build / TestChart 443 条 / verify-jar / BenchRender（台阶 99.3%・混合 63.8%，
+与第十三轮一致）全过。实机复测见 `VERIFY.md` 第十七轮①。

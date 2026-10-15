@@ -318,12 +318,14 @@ public final class ScopeScreen extends Screen {
     private boolean aIo;
     private int aOp;
 
-    /** 运算选择（与 {@link CurveMath} 的四种运算一一对应） */
+    /** 运算选择（与 {@link CurveMath} 的六种运算一一对应） */
     private static final int OP_NONE = 0;
     private static final int OP_EXTREMES = 1;
     private static final int OP_STATS = 2;
     private static final int OP_TOTAL = 3;
     private static final int OP_EVENTS = 4;
+    private static final int OP_RISE_EVENTS = 5;
+    private static final int OP_FALL_EVENTS = 6;
 
     private static String opKey(int op) {
         return switch (op) {
@@ -331,11 +333,14 @@ public final class ScopeScreen extends Screen {
             case OP_STATS -> "logiscope.calc.op.stats";
             case OP_TOTAL -> "logiscope.calc.op.total";
             case OP_EVENTS -> "logiscope.calc.op.events";
+            case OP_RISE_EVENTS -> "logiscope.calc.op.rise_events";
+            case OP_FALL_EVENTS -> "logiscope.calc.op.fall_events";
             default -> "logiscope.calc.op.none";
         };
     }
 
-    private static final int[] OP_VALUES = {OP_NONE, OP_EXTREMES, OP_STATS, OP_TOTAL, OP_EVENTS};
+    private static final int[] OP_VALUES = {OP_NONE, OP_EXTREMES, OP_STATS, OP_TOTAL,
+            OP_EVENTS, OP_RISE_EVENTS, OP_FALL_EVENTS};
 
     /** 「运算」弹窗矩形（渲染与命中共用；锚在工具栏 calc_op 块下方，底部放不下就往上弹） */
     @Nullable
@@ -2013,14 +2018,12 @@ public final class ScopeScreen extends Screen {
                         out.add(tr("logiscope.calc.gaps", t.gaps()));
                     }
                 }
-                case OP_EVENTS -> {
-                    CurveMath.Events ev = CurveMath.changeEvents(pts);
-                    out.add(tr("logiscope.calc.events", ev.count()));
-                    if (ev.count() > 0) {
-                        out.add(tr("logiscope.calc.delta", signedNum(ev.dMean()), fmtNum(ev.dVar())));
-                        out.add(tr("logiscope.calc.period", fmtNum(ev.pMean()), fmtNum(ev.pVar())));
-                    }
-                }
+                case OP_EVENTS -> addEventLines(out, CurveMath.changeEvents(pts),
+                        "logiscope.calc.events");
+                case OP_RISE_EVENTS -> addEventLines(out, CurveMath.changeRiseEvents(pts),
+                        "logiscope.calc.rise_events");
+                case OP_FALL_EVENTS -> addEventLines(out, CurveMath.changeFallEvents(pts),
+                        "logiscope.calc.fall_events");
                 default -> {
                 }
             }
@@ -2071,18 +2074,25 @@ public final class ScopeScreen extends Screen {
                     out.add(tr("logiscope.calc.gaps", t.gaps()));
                 }
             }
-            case OP_EVENTS -> {
-                CurveMath.Events ev = CurveMath.flowEvents(flow);
-                out.add(tr("logiscope.calc.events", ev.count()));
-                if (ev.count() > 0) {
-                    out.add(tr("logiscope.calc.delta", signedNum(ev.dMean()), fmtNum(ev.dVar())));
-                    out.add(tr("logiscope.calc.period", fmtNum(ev.pMean()), fmtNum(ev.pVar())));
-                }
-            }
+            case OP_EVENTS -> addEventLines(out, CurveMath.flowEvents(flow),
+                    "logiscope.calc.events");
+            case OP_RISE_EVENTS -> addEventLines(out, CurveMath.flowRiseEvents(flow),
+                    "logiscope.calc.rise_events");
+            case OP_FALL_EVENTS -> addEventLines(out, CurveMath.flowFallEvents(flow),
+                    "logiscope.calc.fall_events");
             default -> {
             }
         }
         return out;
+    }
+
+    /** 变更区间 / 上升事件 / 下降事件共用的三行输出（三种运算只有首行的文案键不同） */
+    private void addEventLines(List<String> out, CurveMath.Events ev, String countKey) {
+        out.add(tr(countKey, ev.count()));
+        if (ev.count() > 0) {
+            out.add(tr("logiscope.calc.delta", signedNum(ev.dMean()), fmtNum(ev.dVar())));
+            out.add(tr("logiscope.calc.period", fmtNum(ev.pMean()), fmtNum(ev.pVar())));
+        }
     }
 
     /** 裁出 [lo, hi] 内的采样点（点按 tick 升序，可提前 break） */
