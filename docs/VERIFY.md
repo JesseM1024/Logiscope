@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.0-1.20.1）
+# LogiScope · 实机验证清单（当前版本 0.1.1-1.20.1-alpha）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④ 的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
@@ -20,8 +20,8 @@
 > | 假槽识别 | `Slot#isFake()` 在 1.20.1 不存在，仅排除玩家背包 |
 > | 打包元数据 | 必须带 `pack.mcmeta`（`pack_format 15`），否则 lang 不加载、界面显示键名 |
 > | dev 实例模组 | `1_20_1_neo/mods/` = MEK `10.4.16.80`；**AE2 `15.3.3` 与 Create `6.0.8` 在 `mods-disabled/`**（legacyforge dev 下 SRG-mixin 模组不可用，见 PORT §七） |
-> | 整合包渠道 | **GregTech Leisure**（Forge 47.3.7，已装入本 jar）：含 AE2 `15.2.13` + 精妙存储 + GTCEu —— AE / 精妙存储项（Q9 / S8）在此验证 |
-> | 由此改写判据的项 | **S2 依赖 `/tick rate`**、**N9 依赖配置界面**（已就地改写）；**Q9 / S8 改在整合包实例跑** |
+> | 外部实例（主） | **`1.20.1-NeoForge`**（HMCL，NeoForge 47.1.105，已装入本 jar）：AE2 `15.3.6` + MEK + 精妙存储 + Create + pipez —— AE / 精妙存储项（Q9 / S8）在此验证；备用渠道 = GregTech Leisure（Forge 47.3.7） |
+> | 由此改写判据的项 | **S2 依赖 `/tick rate`**、**N9 依赖配置界面**（已就地改写）；**Q9 / S8 改在外部实例跑** |
 
 
 ## 怎么跑
@@ -58,7 +58,7 @@ build\moddev\runClient.cmd
 | S5 | 多人（可选，LAN 即可）：开界面记录 / 关界面 | 开界面能读（回退路径）；关界面 `no_data` —— 与旧行为一致 |
 | ★S6 | MEK 机器**不开 NBT 追踪**，直接物品探针选 **2 格相同物品**（如 2 格圆石） | 动作栏弹一次 **"槽位下标无法验证"警告**（旧判据从不弹；修正后才出现）。警告后读数可能不是你选的那几格（如实告知；要精确保真请改用 NBT 追踪） |
 | S7 | MEK 开 NBT 追踪（开关界面各试一次） | 与之前完全一致 |
-| S8 | **（dev 未装精妙存储；在整合包实例验证）** 精妙存储箱子：选格 → 开关界面看读数 | 与之前一致（普通模组机器下标本就唯一，回退正确） |
+| S8 | **（dev 未装精妙存储；在外部实例验证）** 精妙存储箱子：选格 → 开关界面看读数 | 与之前一致（普通模组机器下标本就唯一，回退正确） |
 | S9 | 把被监测的机器**挖掉** | 该线断开（`no_data`），不是一条假线（回归） |
 | S10 | 手动「暂停」一次再「继续」 | 跨暂停断开（gap），恢复后第一笔照算（回归） |
 
@@ -83,7 +83,7 @@ build\moddev\runClient.cmd
 
 | # | 操作 | 期望 |
 |---|---|---|
-| ★Q9 | **（dev 未装 AE2；在整合包实例验证）** AE 选格页 | 黄色行只剩一行（`AE 网络终端 · 已选 N`）；灰色说明行**删除**；**鼠标悬浮黄行**弹出说明（"读数 = 该物品在此 AE 网络中的可用数量…"） |
+| ★Q9 | **（dev 未装 AE2；在外部实例验证）** AE 选格页 | 黄色行只剩一行（`AE 网络终端 · 已选 N`）；灰色说明行**删除**；**鼠标悬浮黄行**弹出说明（"读数 = 该物品在此 AE 网络中的可用数量…"） |
 | ★Q10 | 对准 MEK 设备（电解机 / 富集仓等）按快捷键创建探针 | 提示栏**当场显示**"MEK 设备无容器槽位，已自动开启 NBT 追踪"；选格页 NBT 追踪**已是 ON** |
 | ★Q11 | 对准**无 GUI 的方块实体**（储能 / 管道 / 任意有 NBT 的方块）创建探针进选格页 | 黄行显示 **"无容器格，可监测 NBT"**（NBT 追踪开着时带 `NBT tracking: ON (N)`）；「清空勾选」「选格」「Done」按条件自动置灰 |
 | Q12 | 非 mek 方块创建探针（回归） | 无自动开启、无新提示，一切照旧 |
@@ -152,16 +152,16 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.0-1.20.1.jar
+python verify-jar.py build/libs/logiscope-0.1.1-1.20.1-alpha.jar
 ```
 
 | # | 检查 | 期望 |
 |---|---|---|
-| E1 | `gradlew.bat build`（本机已在 `~/.gradle/gradle.properties` 配代理 ⇒ 联网校验元数据走代理；无代理的机器加 `--offline`） | `BUILD SUCCESSFUL`。这里必须联网：同步要校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
+| E1 | `gradlew.bat build --offline`（代理进程在跑时可直接联网构建；代理关闭时用 `--offline`，本机缓存完整） | `BUILD SUCCESSFUL`。联网构建需校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
 | E2 | `TestChart` | **443 条**断言全过；lang 中英各 **176** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.0-1.20.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
 
 ## F. 回归抽查
 
@@ -178,6 +178,6 @@ python verify-jar.py build/libs/logiscope-0.1.0-1.20.1.jar
 ## 报问题时的三件套
 
 1. **复现步骤**（哪台设备 / 哪条线 / 框了哪一段 / 面板上那几个数）；
-2. **`1_20_1_neo/logs/latest.log`**（整合包侧 = `.minecraft/versions/GregTech Leisure/logs/latest.log`）；
+2. **`1_20_1_neo/logs/latest.log`**（外部实例侧 = `.minecraft/versions/1.20.1-NeoForge/logs/latest.log`）；
 3. **能对上的数字**：存量线的统计 vs IO 线的统计、或状态行（`ticks N  no-data M`）——
    数据层问题几乎都藏在"两个数对不上"或"该断没断"里。

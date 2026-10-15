@@ -47,10 +47,10 @@ gradlew.bat createLaunchScripts
 | Gradle | 9.2.1（wrapper 自带） |
 | Minecraft | 1.20.1 |
 | NeoForge | 1.20.1-47.1.106（构建插件用 legacy 线 `net.neoforged.moddev.legacyforge`） |
-| 模组版本 | `0.1.0-1.20.1`（本分支） |
+| 模组版本 | `0.1.1-1.20.1-alpha`（本分支） |
 
 > **版本分支约定**：`main` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
-> 本分支 `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
+> 本分支 `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，产物 jar 名 `logiscope-0.1.1-1.20.1-alpha`）。
 > 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
 > 通用 bugfix 默认进 main，再 cherry-pick 到 `1.20.1-neo`。
 >
@@ -213,7 +213,7 @@ java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-che
 | 构建报「非零退出码」但无输出 | Gradle 吞掉了子进程 stderr | 加 `--info`；`build.gradle` 里已配好输出转发 |
 | PowerShell 里跑构建"退出码 1"但其实成功了 | PowerShell 把 Gradle 写到 stderr 的 JVM WARNING 当成 `NativeCommandError` | 看日志里的 `BUILD SUCCESSFUL`，别只看退出码；或 `... 2>&1 | Out-File 日志` 再读日志 |
 | IDEA 同步后行为异常 | IDEA 会另起一个 Gradle 守护进程重新生成文件 | 同步后用 `python verify-jar.py` 复核一次 |
-| **`createMinecraftArtifacts` 失败 / IJ 同步卡死 / 编辑器 import 全红**（报 `Could not HEAD .../forge-<版本>-userdev.jar`，`Connection timed out` / `Network is unreachable`） | Gradle 解析平台依赖需联网 HEAD 校验元数据，而 `maven.neoforged.net` 从国内直连不可达。**元数据与产物本机有缓存**（`~/.gradle/caches/neoformruntime`），两条互斥解法 | **① 走代理（本机当前方案）**：`~/.gradle/gradle.properties` 配 `systemProp.http(s).proxyHost/Port` 指向系统代理（Gradle 官方配法；实测 userdev HEAD 由超时变 200 / 0.4s）。**② 离线**：命令行 `--offline`；IJ 用 Gradle 工具窗口的「离线模式」开关；或放一个路径限定的 `~/.gradle/init.d/logiscope-offline.gradle`（`gradle.startParameter.offline = true` + `currentDir` 判定），使命令行与 IDE 同时自动离线。**这不是代码问题**。离线态下**新增依赖**会报 `No cached version ... available for offline mode`，属预期 |
+| **`createMinecraftArtifacts` 失败 / IJ 同步卡死 / 编辑器 import 全红**（报 `Could not HEAD .../forge-<版本>-userdev.jar`，`Connection timed out` / `Network is unreachable`） | Gradle 解析平台依赖需联网 HEAD 校验元数据，而 `maven.neoforged.net` 从国内直连不可达。**元数据与产物本机有缓存**（`~/.gradle/caches/neoformruntime`），两条互斥解法 | **① 走代理（代理进程在跑时）**：`~/.gradle/gradle.properties` 配 `systemProp.http(s).proxyHost/Port` 指向系统代理（Gradle 官方配法；实测 userdev HEAD 由超时变 200 / 0.4s）。代理关闭时此配置会让联网构建报 `Connection refused`（比超时更快、更好认）——改用 ② 即可。**② 离线**：命令行 `--offline`；IJ 用 Gradle 工具窗口的「离线模式」开关；或放一个路径限定的 `~/.gradle/init.d/logiscope-offline.gradle`（`gradle.startParameter.offline = true` + `currentDir` 判定），使命令行与 IDE 同时自动离线。**这不是代码问题**。离线态下**新增依赖**会报 `No cached version ... available for offline mode`，属预期 |
 | Git Bash 里 javac 报"程序包 xxx 不存在"（类实际已编译） | Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏 | 用 `.bat` 包装（成品：`dev-check\offline-check.bat`），或只用单条目 classpath |
 
 详细的排错记录见隔壁项目 `..\neoforge-1.21.1-walkthrough\WALKTHROUGH.md`，
