@@ -47,14 +47,14 @@ gradlew.bat createLaunchScripts
 | Gradle | 9.2.1（wrapper 自带） |
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.209 |
-| 模组版本 | `0.1.1-1.21.1`（master 主线） |
+| 模组版本 | `0.1.1-1.21.1`（main 主线） |
 
-> **版本分支约定**：`master` = 1.21.1 主线；`mc-1.20.1` 分支 = MC 1.20.1 + NeoForge 47.1.x 移植线
+> **版本分支约定**：`main` = 1.21.1 主线；`1.20.1-neo` 分支 = MC 1.20.1 + NeoForge 47.1.x 移植线
 > （构建插件换成 `net.neoforged.moddev.legacyforge`，Java 17，产物 jar 名 `logiscope-0.1.0-1.20.1`）。
 > 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
-> 通用 bugfix 默认进 master，再 cherry-pick 到 `mc-1.20.1`。
+> 通用 bugfix 默认进 main，再 cherry-pick 到 `1.20.1-neo`。
 >
-> **发布 tag 约定**：`<加载器>-<MC版本>-<模组版本>`（例：`neoforge-1.21.1-0.1.0`）；
+> **发布 tag 约定**：`<加载器>-<MC版本>-<模组版本>`（例：`neoforge-1.21.1-0.1.1`）；
 > 一个版本 = 一个 tag = 一个 GitHub Release，不把多个版本合并到同一个 tag。
 
 ---
@@ -65,17 +65,17 @@ gradlew.bat createLaunchScripts
 |---|---|---|
 | [`docs/VISION.md`](docs/VISION.md) | 项目方向、核心依据、**明确不做什么** | 开始任何新功能前 |
 | [`docs/GOALS.md`](docs/GOALS.md) | G0–G7 分目标与**可验证的验收标准** | 想知道"下一步做什么" |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**17 条关键逻辑路径（CP1–CP17）**、数据契约、**已核实的 API 清单** | **改代码前必读** |
-| [`docs/VERIFY.md`](docs/VERIFY.md) | **当前这一轮的实机验证清单**（逐条可打勾） | 每次改完要进游戏试 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 分层、**接口与数据流程**、关键逻辑路径（CP1–CP27）、数据契约、**已核实的 API 清单** | **改代码前必读** |
+| [`docs/VERIFY.md`](docs/VERIFY.md) | **当前这一版要测什么**（合并清单，逐条可打勾） | 每次改完要进游戏试 |
 | [`docs/VERIFY-HISTORY.md`](docs/VERIFY-HISTORY.md) | 历轮验证结论、根因 → 修法、**已接受的限制**、完整 A–F 功能清单 | 回归排查时回看 |
-| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 目前进度、已知问题、验证记录 | 每次开工前 |
-| [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚方案、检查点清单、灾难恢复、**本地 git 用法（含要不要上传 GitHub）** | 做有风险的改动前 |
-| [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) | **1.20.1 移植方案**：构建插件差异、必撞 API 清单、待核实项 | 在 `mc-1.20.1` 分支上动手前 |
+| [`docs/PROGRESS.md`](docs/PROGRESS.md) | 现状速览、当前轮、未完成项 | 每次开工前 |
+| [`docs/PROGRESS-HISTORY.md`](docs/PROGRESS-HISTORY.md) | 历轮（一 ~ 十七轮）的结论 / 根因 / 已接受限制 | 查“以前为什么这么做” |
+| [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚与灾难恢复、改动前安全点、**GitHub 发布流程** | 做有风险的改动前 |
+| [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) | **1.20.1 移植方案**：构建插件差异、必撞 API 清单 | 在 `1.20.1-neo` 分支上动手前 |
 
 **最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`；提交前 → `BACKUP.md`。
 
-> 版本控制是**纯本机的**（`D:\dev\logiscope\.git`），不需要联网也不需要账号。
-> 详见 `docs/BACKUP.md` 第八节。
+> 代码托管：本地 git + GitHub 公开仓库 `JesseM1024/Logiscope`（发布通道）。详见 `docs/BACKUP.md` 第八节。
 
 ---
 
@@ -90,13 +90,15 @@ gradlew.bat createLaunchScripts
 | 在世界里，准星指着一台**没有界面**的容器（如机械手） | 直接新建一个探针并进入**选格页**（这类设备只能列表选格） |
 | 在世界里，准星上是空气或非容器方块 | 打开**根页**，用来挑一个已创建的探针看 |
 
-**三个页面**
+**五个页面**
 
 | 页面 | 内容 |
 |---|---|
-| **根页** | 「＋ 创建探针」+「正在运行的探针」列表（点一行去看它，点行尾 `×` 删掉它） |
-| **选格页** | 「选择容器格」可视化选格 / 「清空选择」/「完成」/「列表」 |
-| **图表页** | 波形本体；「选格」回到**这个探针**的选格页，「列表」回根页 |
+| **根页** | 「＋ 创建探针」+「正在运行的探针」列表（点一行去看它，点行尾 `×` 删掉它）+ 存档列表（标题即**筛选框**，打字过滤） |
+| **选格页** | 可视化选格 / NBT 追踪开关 /「Probe data」进数据页 /「完成」/「主界面」 |
+| **图表页** | 波形本体；「Back to slot」回本探针选格页、「Main screen」回根页；「Stop & archive」存档并停止 |
+| **回放页** | 打开历史存档：波形 + 框选 + 计算 + 重命名（右键图例 = 选中该曲线「分析」） |
+| **数据页（Probe data）** | NBT 原文 / 值列表 / 追踪目标 / 手输路径；「确认添加」「完成」；「status ok」旁有**刷新速率滑条**（1~40t，最右 = 不刷新） |
 
 **面板操作**
 
@@ -114,14 +116,15 @@ gradlew.bat createLaunchScripts
 | 点**图例色块** | 开关那条数据线（**存量**）的渲染 |
 | 点图例里物品后面的 **`IO`** 小格 | 开关这个物品的 **IO 线**（单 tick 净流量，默认关）。
 想看 IO 时建议把它的存量线关掉 —— 纵轴会自动缩放到 IO 自己的范围。
-⚠️ **一进一出发生在同一个 tick 里**（存量一直不变）时，净流量是 0：从外部只能观测到"每格的存量"，看不到同格内的进出（见 `docs/ARCHITECTURE.md` CP18）。要看这种情形的进出，请监控上游/下游容器的格子 |
+注意：**一进一出发生在同一个 tick 里**（存量一直不变）时，净流量是 0 —— 从外部只能观测到"每格的存量"，看不到同格内的进出（见 `docs/ARCHITECTURE.md` CP18）。要看这种情形的进出，请监控上游 / 下游容器的格子 |
 
 **按钮**
 
-- 根页：`＋ 创建探针` / `收起`
-- 选格页：`选择容器格`（再点一次结束）/ `清空选择` / `完成` / `列表` / `收起`
-- 图表页：`选格` / `列表` / `暂停` / `继续` / `清空` / `关界面后继续检测`
-- 图表工具栏：`实时滚动`（冻结）/ `-` / `+` / `全览` / `清选`
+- 根页：`＋ 创建探针` / `打开存储文件夹` / `收起`
+- 选格页：`选择容器格`（再点一次结束）/ `清空勾选` / `NBT 追踪` / `Probe data` / `完成` / `主界面` / `收起`
+- 图表页：`暂停` / `继续` / `清空` / `存档并停止` / `关界面后继续检测` / `Back to slot` / `Main screen`
+- 图表工具栏：`实时滚动`（冻结）/ `-` / `+` / `全览` / `清选`；回放页另有 `重命名` 与 `计算（数量/IO）`·`运算`
+- 数据页：`刷新` / `确认添加` / `完成` / `Back` / `收起` + 刷新速率滑条
 
 **多格聚合的语义**（一个探针监控多格时，到底记什么）
 
@@ -132,18 +135,14 @@ gradlew.bat createLaunchScripts
 | 全部为空 | 空（数量 0，那条灰蓝线） |
 
 也就是说：**"多格"只体现在"同种物品的数量相加"上，物品仍然各自一条彩色线。**
-（第一版曾把多种物品合成一条「混合物品」，实机反馈是"这不是我要的"，已改掉。）
 
-> **关于键位**：一路试过 `O` → `]` → `F9`，`O` 和 `]` 都被"在搜索框里打字"咬到过。
-> 代码默认给的是 `F9`（功能键**不产生字符**，冲突通道从根上不存在）；
-> 你要是更喜欢 `]`，也能用 —— 那就是三层文本守卫在兜（见 `ARCHITECTURE.md` CP2），
-> 实测在 JEI 搜索框里打 `hopper` 再按 `]` 也不会误触发。
+> **关于键位**：代码默认 `F9`（功能键**不产生字符**，与搜索框的冲突通道从根上不存在）。
+> 改成 `]` 这类字符键也可以用 —— 三层文本守卫（`ARCHITECTURE.md` CP2）会兜住
+> （实测在 JEI 搜索框里打 `hopper` 再按 `]` 也不误触发）。
 >
-> 另外 `KeyMapping` 的匹配**不看修饰键**，所以设成 `Ctrl+O` 没用
-> （单独按 `o` 照样命中）—— 这是踩过的坑之一。
->
-> ⚠️ 改了默认键位之后要注意：按键绑定会存在 `run/options.txt` 里并**覆盖代码默认值**。
-> 这就是为什么"改了代码里的默认值但游戏里没变"。
+> 两点注意：`KeyMapping` 匹配**不看修饰键**（设 `Ctrl+O` 无效，单独按 `o` 照样命中）；
+> 按键绑定存在 `run/options.txt` 里并**覆盖代码默认值** —— 改了代码默认值而未生效时，
+> 删掉那一行或在「选项 → 控制」里手动重绑。
 
 ---
 
@@ -152,54 +151,60 @@ gradlew.bat createLaunchScripts
 ```
 logiscope/
 ├─ docs/                       设计文档（见上表）
-├─ dev-check/TestChart.java    ★ 离线断言：不启动游戏就能验断点规则/分组/统计/多格聚合
+├─ dev-check/                  离线断言与压测（不启动游戏）
+│  ├─ TestChart.java           断点规则 / 分组 / 统计 / 聚合 / 槽位对齐 / 计算 / 存档格式
+│  └─ BenchRender.java         渲染路径压测（列聚合与游程合并的 fill 次数）
 ├─ src/main/
 │  ├─ java/com/jessetech/logiscope/
 │  │  ├─ LogiScopeMod.java     主类：注册事件监听与配置、持有唯一 ProbeManager
-│  │  ├─ LogiScopeConfig.java  资源上限的客户端配置（缓冲 72000 / 探针 16 / 物品种类 256）
-│  │  ├─ bind/                 输入层（快捷键 + TextInputGuard 三层打字守卫）
-│  │  │     ContainerAnchor    右键方块 → 维度+坐标锚点
-│  │  │     ProbeTarget        探针目标（一组槽位 + 持久身份）
-│  │  │     ProbeContext       ★ 当前可探测的容器（容器界面 / 准星）
-│  │  ├─ collect/              采集层（★ 三条取值路径都在这）
-│  │  │     ContainerAccess    读菜单槽位（界面开着）
-│  │  │     WorldProbe         读方块实体（界面关了，单人；读结果带身份与状态）—— 每实例一份
-│  │  │     ProbeSlots         无 GUI 容器的槽位清单（问服务端）
-│  │  │     ServerClock        ★ 两只全局时钟（权威世界 tick + 客户端 tick）
-│  │  │     ProbeInstance      ★ 一个探针：状态机 + 每 tick 采样 + 聚合
-│  │  │     ProbeManager       ★ 探针实例表 / 创建 / 删除 / 活跃指针 / 每 tick 驱动
-│  │  ├─ store/                存储层（环形缓冲 + version + no_data / gap 标记）
+│  │  ├─ LogiScopeConfig.java  客户端配置（缓冲 / 探针上限 / 物品种类上限 / DATA 页刷新节拍）
+│  │  ├─ bind/                 输入层与绑定层
+│  │  │     KeyBindings        快捷键 + Screen 按键拦截 + 无界面时的准星入口
+│  │  │     TextInputGuard     三层“正在打字”守卫
+│  │  │     ContainerAnchor    右键方块 → 维度 + 坐标锚点
+│  │  │     ProbeTarget / DataTarget   探针目标 / NBT 数据目标
+│  │  │     ProbeContext       当前可探测的容器（容器界面 / 准星）
+│  │  │     DataCommand        读方块 NBT 的取数通道
+│  │  ├─ collect/              采集层
+│  │  │     ContainerAccess    读菜单槽位（兜底路径）
+│  │  │     WorldProbe         读方块实体 + 下标验证（单人主路径）—— 每实例一份
+│  │  │     ProbeSlots         无 GUI 容器的槽位清单
+│  │  │     DataProbe / AeNetworkReader    NBT 路径取数 / AE 网络数量
+│  │  │     ServerClock        全局权威世界 tick
+│  │  │     ProbeInstance      一个探针：状态机 + 每 tick 采样
+│  │  │     ProbeManager       探针实例表 / 两个驱动点
+│  │  ├─ store/                存储层（环形缓冲 / no_data / gap / 标记）
 │  │  ├─ analysis/             分析层（纯函数，不 import 任何游戏类）
-│  │  │     Analyzer           摘要 / 逐 tick 差值
-│  │  │     ChartData          扁平序列 → 按物品分组的数据线（★ 断点规则在这）
-│  │  │     Aggregator         ★ 多格聚合规则（同物品求和 / 混装标 mixed）
+│  │  │     ChartData / Aggregator / Analyzer / CurveMath / Val / Snbt / SlotAlign / WaveColumns …
+│  │  ├─ archive/              持久层（导出 / 读取 / 重命名）
 │  │  ├─ ui/                   呈现层（只读）
-│  │  │     ScopeScreen        浮层面板：三页面（根/选格/图表）+ 布局 / 交互
-│  │  │     ChartRenderer      坐标轴 / 波形 / 框选 / 准线
+│  │  │     ScopeScreen        浮层面板：根 / 选格 / 图表 / 回放 / 数据
+│  │  │     ChartRenderer      坐标轴 / 波形 / 框选 / 准线 / 标记
 │  │  ├─ templates/            元数据模板（${} 占位符）
 │  │  └─ resources/assets/     语言文件
 ├─ build.gradle                注意 filteringCharset = 'UTF-8' 那一行
 ├─ gradle.properties           版本号都在这里
 └─ verify-jar.py               构建产物验收工具
-
-运行时（不是你手写的）：`config/logiscope-client.toml` —— 资源上限都在那里，
-游戏内从「模组列表 → LogiScope → 配置」改；`bufferSamples` 改完**立刻生效**。
 ```
+
+运行时（不是你手写的）：`config/logiscope-client.toml` —— `bufferSamples` / `maxProbes` /
+`maxItemKinds` / `dataRefreshTicks` 都在那里，游戏内从「模组列表 → LogiScope → 配置」改；
+`bufferSamples` 与 `dataRefreshTicks` 改完立刻生效。
 
 **`analysis/` 与 `store/` 刻意不 import 任何 `net.minecraft`** ——
-这不是洁癖，而是让 `dev-check/TestChart.java` 能脱离游戏跑断言的前提：
+这是让 `dev-check/TestChart.java` 能脱离游戏跑断言的前提：
 
 ```bat
-gradlew.bat compileJava
-javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" TestChart
+gradlew.bat build
+javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
+java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 ```
 
-波形断点这类逻辑的 bug 在游戏里几乎看不出来，靠断言钉住才是可靠的办法。
+波形断点、聚合口径这类逻辑的 bug 在游戏里几乎看不出来，靠断言钉住才是可靠的办法。
 
 ---
 
-## 构建备忘（踩过的坑）
+## 构建备忘
 
 | 现象 | 原因 | 处理 |
 |---|---|---|
