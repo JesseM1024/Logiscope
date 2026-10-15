@@ -48,18 +48,27 @@ import org.jetbrains.annotations.Nullable;
  *   └─ 屏幕是空的（在世界上）  → 看准星：
  *        ├─ 不是容器方块实体          → 打开根页（选一个已创建的探针来看）
  *        └─ 是容器方块实体
- *             ├─ 会消费右键（有界面）  → 模拟一次真实右键把界面打开；界面一出现就压面板（根页）
- *             │                          （40 tick 内没等到界面 → 兜底当无界面，见下）
- *             └─ 不消费右键（无界面）  → **不发任何交互**，直接进创建流程（列表选格）
+ *             ├─ 有标准界面通道        → 模拟一次真实右键把界面打开；界面一出现就压面板（根页）
+ *             │   （方块级 / 方块实体级    （40 tick 内没等到界面 → 兜底当无界面，见下）
+ *             │     MenuProvider）
+ *             └─ 没有                   → **不发任何交互**，直接进创建流程（列表选格）；
+ *                                          "会消费右键"的设备附一条手动路径提示
  * ```
  *
  * 目的很直白：**指着哪台设备按快捷键，就是在说"我要探测这一台"**，
  * 不用先右键开界面、再按快捷键、再在列表里找。
  *
- * 不能用 `getMenuProvider` 判有没有界面 *   那条判据连**原版熔炉**都判不出来（它不覆写 `getMenuProvider`），
- *   于是空手对着精妙存储 / MEK 熔炼工厂按 F9 会错进"无 GUI"分支。
- *   现在改成问"这个方块会不会消费一次右键"（`ProbeContext#wouldConsumeClick`），
- *   而且**判定为无界面时不发交互** —— 于是手里拿着扳手也绝不会误触工具。
+ * 1.20.1 的界面判据 = 标准通道，不是"会不会消费" *
+ *   1.21 线问的是"空手使用会不会消费"（`useWithoutItem`），Create 机械手把物品
+ *   交互拆去了 `useItemOn`，所以这个问法能把"有界面的机器"和"会做动作的设备"分开。
+ *   但 1.20.1 只有合并的 `use()`：机械手空手右键会真的存取物品、同样返回"消费"，
+ *   对着它按 F9 会**误发一次真实右键**。两类含义在返回值上无法区分，所以 1.20.1
+ *   退回静态判据 —— 只认方块级 / 方块实体级的 `MenuProvider`
+ *   （`ProbeContext#hasMenuChannel`）。
+ *   代价（已接受的取舍）：MEK / 精妙存储 / AE2 这类自建界面通道的机器不再自动开
+ *   界面 —— 直接进创建流程（列表选格），并提示"先右键打开界面再按 F9"的手动路径。
+ *   宁可多一步手动，也不向设备误发交互。
+ *   （`wouldConsumeClick` 仍保留，只用来决定要不要给这条手动路径提示。）
  */
 public final class KeyBindings {
 
@@ -247,25 +256,34 @@ public final class KeyBindings {
 
         String name = ProbeContext.blockName(mc.level, pos);
 
-        // "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）//   但模拟右键只对**真容器**做（isContainerLike = Container/ItemHandler）//   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
-        //   真的触发睡觉 —— 右键模拟的资格必须比探测资格更严。
+        // "有没有界面"：1.20.1 线只认**标准界面通道**（方块级 / 方块实体级的
+        // MenuProvider，见 ProbeContext 类注释的三代判据）。
+        // 为什么不再问"会不会消费右键"：1.20.1 的 use() 把物品交互也算消费 ——
+        // Create 机械手空手右键会存取物品、同样返回"消费"，拿它当判据会对设备
+        // 误发一次真实右键。而"模拟右键"只对**真容器**做（isContainerLike）：
+        // 床 / 告示牌这类"有 BE 但没容器"的方块不发，右键模拟的资格比探测资格更严。
         boolean containerLike = ProbeContext.isContainerLike(mc.level, pos);
-        boolean hasGui = containerLike && (ProbeContext.hasMenuProvider(mc.level, pos)
-                || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player));
+        boolean hasGui = containerLike && ProbeContext.hasMenuChannel(mc.level, pos);
 
         if (!hasGui) {
-            // 无 GUI 的容器（机械手这类）→ 直接进入这台设备的创建流程。
-            // 没有菜单 → 可视化选格用不了，选格页会自动切成"列表选格"。
+            // 无标准界面通道（机械手这类）→ 直接进入这台设备的创建流程，
+            // **绝不发交互**（没有菜单 → 可视化选格用不了，选格页会自动切成列表选格）。
+            // 若它"会消费右键"（可能只是设备动作，也可能是没被识别的自建界面），
+            // 提示一次手动路径：先右键打开界面，再按 F9 压浮层。
+            if (containerLike && ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player)) {
+                ScopeScreen.flashOnOpen("logiscope.flash.maybe_gui");
+            }
             ScopeScreen.openWorldCreate(mc, mc.level.dimension(), pos.immutable(), name);
             return;
         }
 
-        // 有界面：只有服务端能开菜单，所以必须模拟一次真实右键。
+        // 有标准界面通道：只有服务端能开菜单，所以必须模拟一次真实右键。
         if (!ProbeContext.tryOpenContainerGui(mc, hit)) {
             // 手上物品会抢走这次右键（覆写了 onItemUseFirst 的工具）→ 不冒险，
             // 退回根页并提示用户空手再试。
-            ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
+            // 提示要在打开之前入队 —— init() 一进入就会消费它（晚设会拖到下一次打开）。
             ScopeScreen.flashOnOpen("logiscope.flash.hand_blocks_use");
+            ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
         pendingOpen = new PendingOpen(mc.level.dimension(), pos.immutable(), name,
@@ -275,8 +293,8 @@ public final class KeyBindings {
     /**
      * 等服务端开界面的超时兜底。
      *
-     * 到期还没界面 → 说明这个方块其实没有界面（但"会不会消费右键"误判成有了，
-     * 例如某台机器右键会做别的事）。这时按"无 GUI"处理：直接进创建流程。
+     * 到期还没界面 → 说明这次模拟右键没能开出界面（例如方块有 MenuProvider 通道，
+     * 但当前条件不满足没能打开）。这时按"无界面"处理：直接进创建流程。
      * 不这么做的话这个标志会一直挂着，导致用户**下一次正常开任何容器时面板自己弹出来**。
      */
     private static void expirePendingOpen(Minecraft mc) {

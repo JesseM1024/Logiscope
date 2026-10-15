@@ -37,22 +37,32 @@ import java.lang.reflect.Method;
  * | 准星指着**无 GUI** 的容器方块 | 只有维度+坐标，槽位清单得问服务端 | ❌ 只能按下标列表选 |
  * | 都没有 | 没有候选 —— 界面就只显示"已创建的探针列表" | — |
  *
- * "有没有 GUI" 不能用静态判据，要用**实际结果***
- * 第一版用 `BlockState#getMenuProvider` 判定，结果实测不成立：
- * **空手对着精妙存储箱子、MEK 熔炼工厂按快捷键，界面没打开，反而进了"无 GUI"分支。**
- * 原因（javap 反查核实）：
+ * "有没有 GUI"的判据换过三代，两代教训都留着 *
+ * 第一代：`BlockState#getMenuProvider`（方块级）—— 对下面这些方块判不出来，
+ * 会进"无 GUI"分支（实测：空手对着精妙存储箱子、MEK 熔炼工厂按快捷键，界面没打开）：
  *
- * | 方块 | 覆写 `getMenuProvider`？ | 界面从哪开 |
+ * | 方块 | 覆写方块级 `getMenuProvider`？ | 界面从哪开 |
  * |---|---|---|
  * | 原版 `ChestBlock` | ✅ 覆写（`SimpleMenuProvider`） | `getMenuProvider` + `openMenu` |
- * | 原版 `AbstractFurnaceBlock` / `BarrelBlock` | ❌ **不覆写** | `useWithoutItem` 里直接 `player.openMenu(...)` |
- * | 精妙存储 `ChestBlock` | ❌ 不覆写 | 同上（客户端直接 `return SUCCESS` 做预测） |
- * | Mekanism `BlockTile` | ❌ 不覆写 | 同上（客户端按 `HasGui` 属性返回 SUCCESS / PASS） |
+ * | 原版 `AbstractFurnaceBlock` / `BarrelBlock` | ❌ 不覆写 | 走方块实体：`BaseContainerBlockEntity` **实现 MenuProvider** |
+ * | 精妙存储 `StorageBlockEntity` | ❌ 不覆写 | 自建通道，不占标准两条 |
+ * | Mekanism `BlockTile` | ❌ 不覆写 | 自建通道：`AttributeGui` 现造 MenuProvider + `NetworkHooks.openScreen` |
  *
- * 也就是说**连原版熔炉都判不出来**，更别说模组机器。所以改成先问一次
- * "这个方块右键会不会**消费**这次交互"（见 {@link #wouldConsumeClick}）——
- * 这是所有容器方块为了做客户端预测都必须回答的问题，比 `getMenuProvider` 可靠得多。
- * `getMenuProvider` 保留为**快速肯定判据**（非空就直接算"有界面"，省一次预测）。
+ * 第二代：问一次"这个方块右键会不会**消费**"（客户端预测返回 SUCCESS）——
+ * 对上面的机器有效，但 1.20.1 的 `use()` 把**物品交互**也算作消费：Create 机械手
+ * 空手右键会真的存取物品、同样返回 SUCCESS，于是对着它按 F9 会**误发一次真实
+ * 右键**（实测：触发一次物品交互）。两类含义从返回值上无法区分 —— 1.21 线能区分，
+ * 是因为 `use()` 拆分成了 `useItemOn` / `useWithoutItem`（main 分支继续用
+ * "空手会不会消费"；两地差异见 `PORT-1.20.1.md` §七）。
+ *
+ * 第三代（现行）：只认**标准界面通道** —— {@link #hasMenuChannel}：方块级非空
+ * **或** 方块实体实现 `MenuProvider`（原版熔炉 / 木桶经由 `BaseContainerBlockEntity`
+ * 天然命中）。{@link #wouldConsumeClick} 降级为"提示"用途：只决定要不要告诉用户
+ * "这台设备可能其实有界面"。
+ *
+ * 代价（已接受的取舍）：自建界面通道的机器（上表后两行）不再被识别 —— F9 不模拟
+ * 右键、直接进创建流程（列表选格），附一条手动路径提示（先右键打开界面再按 F9）。
+ * 宁可多一步手动，也不向设备误发交互 —— 误交互会真的改动物品 / 机器状态。
  *
  * "是不是容器方块实体" 的判定是 `Container` 或 ItemHandler 能力 *   和采集层 {@code WorldProbe#readNow} 的两条读取路径严格对齐：
  *   能读到值的方块，才算"可探测的容器"。这样不会出现"界面说能探测、实际读不到"。
@@ -125,15 +135,15 @@ public final class ProbeContext {
     }
 
     /**
-     * 这个方块右键之后会不会打开一个界面 —— **快速肯定判据**。
+     * 方块级界面通道：`BlockState#getMenuProvider(Level, BlockPos)` 非空。
      *
-     * `BlockState#getMenuProvider(Level, BlockPos)` 是 public 的
-     * （BlockState 继承 BlockBehaviour.BlockStateBase，那一层把 protected 的
-     * `BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 包成了 public）。
+     * 该方法 public 的来路：BlockState 继承 BlockBehaviour.BlockStateBase，
+     * 那一层把 protected 的 `BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)`
+     * 包成了 public。
      *
-     * **它只对原版箱子这类方块有效**：原版熔炉/木桶和几乎所有模组机器都不覆写它。
-     * 所以本方法**只能当"非空 ⇒ 一定有界面"来用**，返回 false 不代表没界面 ——
-     * 那一步要问 {@link #wouldConsumeClick}。
+     * **只对覆写它的方块有效**（原版箱子这类）；原版熔炉/木桶与几乎所有模组机器
+     * 都不覆写。所以本方法**只能当"非空 ⇒ 一定有界面"来用**，返回 false 不代表
+     * 没界面 —— 还有方块实体级通道，合并判据见 {@link #hasMenuChannel}。
      */
     public static boolean hasMenuProvider(Level level, BlockPos pos) {
         BlockState state = level.getBlockState(pos);
@@ -142,29 +152,51 @@ public final class ProbeContext {
     }
 
     /**
-     * "这个方块会不会消费一次右键"的直接问法 —— 判断有没有界面的主判据 *
-     * 做法：直接在客户端调一次 `BlockState#useWithoutItem(Level, Player, BlockHitResult)`。
-     * 所有容器方块都必须实现它（客户端返回 SUCCESS 以做预测，服务端才真的开菜单），
-     * 所以它比任何静态判据都准：
+     * 这个方块有没有**标准界面通道** —— 1.20.1 线 F9 判定"有界面"的唯一判据。
      *
-     * | 方块 | 客户端 `useWithoutItem` 返回 |
+     * 两条通道任取其一：
+     *   ① 方块级：{@link #hasMenuProvider}（原版箱子这类覆写它的方块）；
+     *   ② 方块实体级：`BlockEntity instanceof MenuProvider`（原版熔炉 / 木桶等
+     *      经由 `BaseContainerBlockEntity` 天然实现）。
+     *
+     * 为什么不问"会不会消费右键"：见类注释的三代判据（机械手空手右键会存取
+     * 物品、同样返回"消费"，会把设备误判成有界面）。代价 = 自建界面通道的机器
+     * （MEK / 精妙存储 / AE2）按无界面处理 —— 多一步手动，不误发交互。
+     */
+    public static boolean hasMenuChannel(Level level, BlockPos pos) {
+        if (hasMenuProvider(level, pos)) {
+            return true;
+        }
+        BlockEntity be = level.getBlockEntity(pos);
+        return be instanceof MenuProvider;
+    }
+
+    /**
+     * "这个方块会不会消费一次右键" —— **只用于提示**，不再用于判定有没有界面
+     * （判界面用 {@link #hasMenuChannel}）。
+     *
+     * 返回 true 同时覆盖两种东西：有界面的客户端预测（箱子 / 熔炉 / MEK 带 GUI
+     * 的机器），和"会做动作的设备"（Create 机械手：空手右键会存取物品）——
+     * 在 1.20.1 上无法从返回值区分，所以不能拿它决定"要不要模拟一次真实右键"。
+     * 现行用法：无界面通道 + 会消费 ⇒ 提示"这台设备可能其实有界面"。
+     *
+     * | 方块 | 客户端 `use` 返回 |
      * |---|---|
      * | 原版箱子 / 熔炉 / 木桶 | `SUCCESS`（第一行就是 `if (level.isClientSide()) return SUCCESS`） |
      * | 精妙存储箱子 | `SUCCESS`（javap 核实：`getfield isClientSide` → `getstatic SUCCESS`） |
      * | Mekanism 机器 | 有 `HasGui` 属性 → `SUCCESS`；没有 → `PASS`（javap 核实） |
-     * | 真的没有界面的机器 | `PASS` |
+     * | Create 机械手（**反例**） | 大多朝向 `SUCCESS`（空手右键会存取物品，见类注释） |
      *
      * 为什么是"直接调"而不是"发一次右键再看结果" * `MultiPlayerGameMode#useItemOn` 会在**方块 use 返回 PASS 之后**继续走到
      * `itemstack.useOn(...)` —— 玩家手里拿着扳手对着"没有界面的机器"按快捷键时，
-     * 那一步会**真的改动机器**（用户 T15 的顾虑）。直接问一次不会发任何包，
-     * 所以"判定为无界面"这条路**完全不碰物品逻辑**。
+     * 那一步会**真的改动机器**（用户 T15 的顾虑）。直接问一次不会发任何包。
      *
-     * 安全性：这些实现的第一件事就是 `if (level.isClientSide) return ...`，
-     * 真正的开菜单逻辑在服务端分支里。所以客户端调用是纯查询。
-     * 仍然包一层 try/catch：万一某个模组在客户端分支里做了别的（少数不守规矩的），
-     * 我们宁可**当成"有界面"**（继续走发交互那条路），也不要漏掉一个真界面。
+     * 安全性：兼容的方块在客户端分支第一行就 `return ...`，真正的开菜单 / 状态
+     * 改动在服务端分支里，所以客户端调用是纯查询。仍然包一层 try/catch：
+     * 万一某个模组在客户端分支里做了别的（少数不守规矩的），宁可当成"会消费"
+     * （多提示一句），也不要漏报。
      *
-     * @return true = 会消费（大概率有界面）；false = PASS/异常之外的"明确没消费"
+     * @return true = 会消费（可能是有界面、也可能只是会做动作）
      */
     public static boolean wouldConsumeClick(Level level, BlockPos pos, BlockHitResult hit, Player player) {
         try {
