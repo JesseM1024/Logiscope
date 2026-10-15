@@ -957,3 +957,23 @@ MEK 加压管道现在的路径：probeTarget ✓ → containerLike ✗ → hasG
 
 离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过。
 实机复测见 `VERIFY.md` 第十八轮①。
+
+
+## 第十八轮②：删除"界面已关"提示（2026-10-15）
+
+**需求**（用户原话）："现在就不需要关闭原版类容器的提示……了，删除这个逻辑。"
+（=`LogiScope：界面已关，转为坐标跟踪` / EN `GUI closed, tracking by position`）
+
+采样统一服务端后（第十八轮①），界面开/关**不对读数路径产生任何切换** ——
+这条提示在描述一件没发生的事（它是菜单时代的残余：旧口径里"关界面 = 从菜单读切成坐标读"）。
+
+| 件 | 内容 |
+|---|---|
+| `collect/ProbeInstance#enterFollowing` | 去掉 `boolean notify` 参数与 `msg.following` 调用（7 个调用点全部转无参）；javadoc 写明删除原因 |
+| lang | 删除 `logiscope.msg.following`（中英各 175 → **174** 键，仍一致） |
+| 注释 | `warnIfIndexUnverified` / `notifyPlayer` 里对"转为坐标跟踪"去抖场景的引用改为历史表述（force 语义不变） |
+
+**保留的**：`pauseAuto` 的"数据源丢失，已暂停"（`msg.paused_auto`）—— 那是"真的没在采"的
+提醒，与界面无关；`warnIfIndexUnverified` 的强制警告（force 通道照旧）。
+
+离线：build / TestChart 443 条 / verify-jar 全过。

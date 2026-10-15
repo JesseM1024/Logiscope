@@ -210,7 +210,7 @@ public final class ProbeInstance {
             dataTargets = List.copyOf(n);
             // 刚加目标时如果还停在 ARMED（没选格也没目标），顺手进入可采样状态
             if (state == State.ARMED && integratedServerUp()) {
-                enterFollowing(false);
+                enterFollowing();
             }
             return true;
         }
@@ -247,7 +247,7 @@ public final class ProbeInstance {
             dataTargets = List.copyOf(n);
             // 刚有了目标却还停在 ARMED（既没选格也没目标）→ 顺手进入可采样状态
             if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
-                enterFollowing(false);
+                enterFollowing();
             }
             return dataTargets.size();
         }
@@ -287,7 +287,7 @@ public final class ProbeInstance {
             }
             dataTargets = List.copyOf(n);
             if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
-                enterFollowing(false);
+                enterFollowing();
             }
             return dataTargets.size();
         }
@@ -397,7 +397,7 @@ public final class ProbeInstance {
             if (menuSourceReady()) {
                 this.state = State.RECORDING;
             } else if (newTarget.hasPersistentId()) {
-                enterFollowing(false);
+                enterFollowing();
             } else {
                 // 既没有菜单路径、又拿不到坐标：只能明确停住，不假装在记录
                 this.state = State.PAUSED;
@@ -496,7 +496,7 @@ public final class ProbeInstance {
             return;
         }
         if (manager.followAfterClose() && target.hasPersistentId()) {
-            enterFollowing(true);
+            enterFollowing();
         }
     }
 
@@ -535,7 +535,7 @@ public final class ProbeInstance {
         if (!ContainerAccess.hasForeignContainerOpen()) {
             // 玩家关掉界面了 → 转坐标跟踪（单人下从此由服务端 tick 采样，一个 tick 都不缺）
             if (manager.followAfterClose() && target.hasPersistentId()) {
-                enterFollowing(true);
+                enterFollowing();
             } else {
                 pauseAuto();
             }
@@ -613,7 +613,7 @@ public final class ProbeInstance {
      *   "MEK 那类全是 #0"，字段却选错了）。现在改成检查 containerSlotIndex 重复 ——
      *   判据与 `SlotAlign.containerIndexReliable` 同一不变式：**同清单内重复的下标不是身份**。
      *
-     * 每个探头只提示一次（force 绕过去抖 —— 不能让"转为坐标跟踪"的去抖把它吞掉）。
+     * 每个探头只提示一次（force 绕过去抖 —— 这条警告不允许被任何提示窗口吞掉）。
      */
     private void warnIfIndexUnverified() {
         if (warnedUnverifiedIndex) {
@@ -656,7 +656,7 @@ public final class ProbeInstance {
         }
         if (manager.followAfterClose() && target.hasPersistentId()
                 && !ContainerAccess.hasForeignContainerOpen()) {
-            enterFollowing(false);
+            enterFollowing();
         }
     }
 
@@ -859,13 +859,17 @@ public final class ProbeInstance {
         return dt.fallbackName();
     }
 
-    private void enterFollowing(boolean notify) {
+    /**
+     * 转入 FOLLOWING（界面关着的跟踪态）。
+     *
+     * ★ 第十八轮②：不再发"界面已关，转为坐标跟踪"提示 ★ ——
+     *   采样统一走服务端后（第十八轮①），界面开/关不对读数路径产生任何切换，
+     *   这条提示在描述一件没发生的事（它是旧口径的残余：关界面 = 从菜单读切成坐标读）。
+     */
+    private void enterFollowing() {
         // 采样由服务端 tick 接管（单人）；没有集成服务端时退化成"记 no_data"。
         // 这里不做任何垫值：第一次观测就是第一个世界 tick 的真值。
         state = State.FOLLOWING;
-        if (notify) {
-            notifyPlayer("logiscope.msg.following");
-        }
     }
 
     private void pauseAuto() {
@@ -901,7 +905,8 @@ public final class ProbeInstance {
      *
      * 加 2 秒去抖：状态在边界附近来回跳时（例如玩家反复开关界面），
      * 不该把动作栏刷成跑马灯。**force = 重要警告，绕过去抖**
-     * （"下标不可信"紧跟在"转为坐标跟踪"后面，普通去抖会把它吞掉 —— 第七轮 N3）。
+     * （历史：第七轮 N3 —— "下标不可信"警告曾紧跟另一条提示、落进去抖窗口被吞，
+     * 故加了 force 通道；第十八轮②删掉"界面已关"提示后，force 的语义不变）。
      */
     private void notifyPlayer(String key) {
         notifyPlayer(key, false);
