@@ -1,18 +1,16 @@
 # LogiScope · 1.20.1 NeoForge 移植方案
 
-> 状态：**配置层 + API 移植已完成**（compileJava 0 错误、reobf jar 已产出，2026-09-20）；
-> **实机验收待做**。本文件在两分支各自维护，结论以 `1.20.1-neo` 分支上的版本为准。
+> 状态（2026-10-15）：配置层 + API 移植完成（2026-09-20）；main 的第十七轮①、第十八轮①–④
+> 与文档体系重构已全部搬运；离线验证全过；AE2 已移出 dev、整合包渠道已打通并完成兼容性审计
+> （§八）；**实机验收待做**（清单见本分支 [`VERIFY.md`](VERIFY.md)）。
+> 本文件在两分支各自维护，结论以 `1.20.1-neo` 分支上的版本为准。
 >
-> 注意：**两条分支的 git 历史互不相关**（main 曾 rebase 重写，2026-10-14 核查）——
-> 两分支之间用 **cherry-pick** 搬运改动，不要用 merge。
+> 纪律：两分支 git 历史**互不相关**（main 曾 rebase 重写，2026-10-14 核查）——
+> 搬运一律 `git cherry-pick -x` 并保留来源 sha，**禁用 merge / rebase**。
 >
-> 2026-10-15：main 的**第十七轮①、第十八轮①–④**已 cherry-pick 到本分支（离线验证全过，
-> 见 `PROGRESS.md` 的「[1.20.1] 轮次」节）；1.20.1 线的**首次实机验收清单**见本分支的
-> `VERIFY.md`（已按本分支的命令 / 产物名 / 运行目录重建）。
->
-> 原则：**本文只记 1.20.1 的差异与 1.20.1 上重新核实的结论**。
-> 1.21.1 的事实记录留在 [`ARCHITECTURE.md`](ARCHITECTURE.md)，不要两边改写。
-> 所有"待核实"项落地时用 1.20.1 的 sources jar 逐行查证，不凭记忆。
+> 口径：本文只记录 1.20.1 的差异与在 1.20.1 上重新核实的结论；1.21.1 的事实记录留在
+> [`ARCHITECTURE.md`](ARCHITECTURE.md)，不两边改写。所有结论以 1.20.1 的 sources jar
+> 逐行查证，不凭记忆。
 
 ---
 
@@ -21,81 +19,66 @@
 | 项 | 值 |
 |---|---|
 | 目标 MC | 1.20.1 |
-| 目标 NeoForge | `1.20.1-47.1.106`（1.20.1 线最后一个版本；**待核实**：以 maven 实际产物为准） |
-| Java | **17**（`org.gradle.java.home` 与 toolchain 都要改） |
-| 模组版本 | `0.1.0-1.20.1`（版本号带 MC 后缀的约定见 `gradle.properties` 注释） |
-| 分支 | `1.20.1-neo`（从 main 线的 `c00c545`「版本号带 MC 后缀」提交切出；2026-10-15 用文档 blob 比对核实） |
+| 目标 NeoForge | `1.20.1-47.1.106`（构建基线 == 该版本，产物在 `build/moddev/artifacts/`） |
+| Java | **17**（`org.gradle.java.home` 与 toolchain 同时锁定） |
+| 模组版本 | `0.1.0-1.20.1`（版本号带 MC 后缀的约定见 `gradle.properties`） |
+| 分支 | `1.20.1-neo`（自 main 线 `c00c545`「版本号带 MC 后缀」提交切出；2026-10-15 经文档 blob 比对核实） |
 
-**前提（待用户确认）**：需要一个 1.20.1 的测试实例。现有两个实例
-（`1.21.1-NeoForge`、`NAST hard d0.9.5`）都是 1.21.1，可能需新装 `1.20.1-NeoForge`。
-编译基线 == 目标实例的 NeoForge 版本（老规矩）。
+**测试实例**：dev 实例（`1_20_1_neo/`，NeoForge 47.1.106）用于常规验证；AE / 精妙存储
+相关项在 Forge 47.3.7 整合包实例验证（见 §八）。
 
----
+## 二、构建层改动
 
-## 二、构建层改动（比版本号更大的那块石头）
-
-1. **插件**：`net.neoforged.moddev` → **`net.neoforged.moddev.legacyforge`**（2.0.147）。
-   MDG 2 官方支持 Forge 1.17–1.20.1 与 NeoForge 1.20.1，同一家的 legacy 插件，
-   `runClient` / `createLaunchScripts` 工作流保留。
-2. **配置块**：`neoForge { version = ... }` → `legacyForge { neoForgeVersion = '1.20.1-47.1.106' }`。
-3. **reobf**：1.20.1 生产环境是 SRG 映射，**发布 jar 必须 reobfuscated**
-   （legacy 插件自带 remapJar；开发环境照常用官方映射）。`verify-jar.py` 的检查口径按 remapJar 产物理解。
-4. toolchain `JavaLanguageVersion.of(21)` → `of(17)`。
-5. parchment 属性：1.20.1 对应 `2023.09.03`（若启用）。
-6. Gradle wrapper 9.2.1 对 legacy 插件是否兼容——**已核实：兼容**（`generateModMetadata`
-   在 Gradle 9.2.1 + 插件 2.0.147 下 BUILD SUCCESSFUL）。
-7. ⚠️ 现有 `filteringCharset = 'UTF-8'` 的编码铁律原样保留（跨版本通用，参考 build.gradle 注释块）。
-8. ★ **DSL 已用字节码核实（javap 插件 jar）**：2.0.147 里 `LegacyForgeExtension` 外层只有
-   `version`（Forge 线）和 `mcpVersion`（原版线）；**NeoForge 1.20.1 要写
-   `legacyForge { enable { neoForgeVersion = '...' } }`**（`neoForgeVersion` 在
-   `LegacyForgeModdingSettings` 上，三选一互斥）。网上资料（DeepWiki）写的外层
-   `neoForgeVersion` 会直接报 "unknown property"。
-   预防性配置 `obfuscation { createRemappingConfiguration(configurations.localRuntime) }` 照官方 MDK 加了。
+1. **插件**：`net.neoforged.moddev` → `net.neoforged.moddev.legacyforge`（2.0.147；官方支
+   持 Forge 1.17–1.20.1 与 NeoForge 1.20.1），`runClient` / `createLaunchScripts` 工作流保留。
+2. **配置块**：`neoForge { version = ... }` → `legacyForge { enable { neoForgeVersion = '...' } }`。
+   DSL 经字节码核实：2.0.147 的 `LegacyForgeExtension` 外层只有 `version`（Forge 线）与
+   `mcpVersion`（原版线）；NeoForge 1.20.1 的 `neoForgeVersion` 在 `LegacyForgeModdingSettings`
+   上（三选一互斥）。改成外层写法会报 "unknown property"。
+3. **reobf**：1.20.1 生产环境为 SRG 映射，发布 jar 必须 reobfuscated（legacy 插件自带
+   remapJar）；`verify-jar.py` 按 remapJar 产物核对。
+4. toolchain `JavaLanguageVersion.of(21)` → `of(17)`；parchment 属性对应 `2023.09.03`（若启用）。
+5. Gradle wrapper 9.2.1 与 legacy 插件兼容（`generateModMetadata` 已核实 BUILD SUCCESSFUL）。
+6. **编码铁律保留**：`filteringCharset = 'UTF-8'`（跨版本通用，见 `build.gradle` 注释块）。
+7. 预防性配置 `obfuscation { createRemappingConfiguration(configurations.localRuntime) }`
+   按官方 MDK 加入。
 
 ## 三、元数据层改动
 
 | 项 | 1.21.1（main） | 1.20.1（本分支） |
 |---|---|---|
-| 元数据文件名 | `META-INF/neoforge.mods.toml` | **`META-INF/mods.toml`**（已改名，`git mv`） |
-| 依赖字段 | `type="required"` | **`mandatory=true`**（`type` 写法是 20.2+ 才有） |
-| 平台依赖 modId | `neoforge` | **`forge`**（1.20.1 世代平台 mod id 未改名；依赖范围用 `[47,)`） |
+| 元数据文件名 | `META-INF/neoforge.mods.toml` | **`META-INF/mods.toml`**（模板文件同步改名） |
+| 依赖字段 | `type="required"` | **`mandatory=true`**（`type` 为 20.2+ 写法） |
+| 平台依赖 modId | `neoforge` | **`forge`**（依赖范围 `[47,)`） |
 | `loader_version_range` | `[4,)` | `[47,)` |
-| `neo_version_range` | `[21.1.209,)` | `[47,)`（对平台 mod 的范围；`neo_version=1.20.1-47.1.106` 只给构建插件用） |
+| `neo_version_range` | `[21.1.209,)` | `[47,)`（`neo_version=1.20.1-47.1.106` 仅供构建插件） |
 
-模板文件 `src/main/templates/META-INF/neoforge.mods.toml` **已改名为
-`src/main/templates/META-INF/mods.toml`**。
-小坑：模板注释里不要写 `${}`（空表达式）——Groovy expand 会把它替换成 `null`。
+模板注释中不写 `${}`（空表达式会被 Groovy expand 替换为 `null`）。
 
-## 四、代码层必撞的 API（按文件，全部"待核实→改→记结论"）
+## 四、代码层 API 差异（逐项已核实）
 
-### ★ 第一撞（2026-09-20 compileJava 实测，200 条错误的根因）：包名家族反了
+### 4.1 包名家族（compileJava 首轮 200 条错误的根因）
 
-**1.20.1 世代的 NeoForge 没有改包名 —— 还是 Forge 的 `net.minecraftforge.*`**。
-`net.neoforged.*` 是 1.20.4+ 才引入的。开包核实
-（`build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar`，15910 条目）：
-jar 内只有 `net/minecraft` + `net/minecraftforge`，**没有任何 `net/neoforged`**。
-所以移植方向是 `net.neoforged.*` → `net.minecraftforge.*`（不是"包名不用改"）：
+**1.20.1 世代 NeoForge 沿用 Forge 的 `net.minecraftforge.*`**（`net.neoforged.*` 为 1.20.4+
+引入）。已开包核实（`build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar`，15910 条目）：
+jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`。
 
-| 1.21.1（main） | 1.20.1（本分支，已开包核实） |
+| 1.21.1（main） | 1.20.1（本分支） |
 |---|---|
-| `net.neoforged.fml.common.Mod` | `net.minecraftforge.fml.common.Mod`（FML 类不在 merged jar 里，走独立 FML 依赖） |
+| `net.neoforged.fml.common.Mod` | `net.minecraftforge.fml.common.Mod`（FML 类不在 merged jar 内，走独立 FML 依赖） |
 | `net.neoforged.bus.api.IEventBus` | `net.minecraftforge.eventbus.api.IEventBus` |
 | `net.neoforged.api.distmarker.Dist` | `net.minecraftforge.api.distmarker.Dist` |
 | `net.neoforged.fml.ModContainer` / `config.ModConfig` | `net.minecraftforge.fml.ModContainer` / `net.minecraftforge.fml.config.ModConfig` |
-| `net.neoforged.neoforge.common.NeoForge`（事件总线） | `net.minecraftforge.common.MinecraftForge` |
+| `net.neoforged.neoforge.common.NeoForge` | `net.minecraftforge.common.MinecraftForge` |
 | `net.neoforged.neoforge.common.ModConfigSpec` | `net.minecraftforge.common.ForgeConfigSpec` |
 | `net.neoforged.neoforge.client.event.*` | `net.minecraftforge.client.event.*` |
 | `net.neoforged.neoforge.event.entity.player.*` | `net.minecraftforge.event.entity.player.*` |
-| `net.neoforged.neoforge.items.IItemHandler` | `net.minecraftforge.items.IItemHandler`（jar 内存在 ✓） |
+| `net.neoforged.neoforge.items.IItemHandler` | `net.minecraftforge.items.IItemHandler` |
 | `net.neoforged.neoforge.capabilities.Capabilities` | `net.minecraftforge.common.capabilities.ForgeCapabilities` |
-| `net.neoforged.neoforge.client.ClientHooks` | `net.minecraftforge.client.ForgeHooksClient`（签名待核） |
-| `net.neoforged.neoforge.client.gui.ConfigurationScreen` | **不存在**（1.20.1 Forge 无自动配置界面）；`IConfigScreenFactory` 也不在 jar 里，1.20.1 的对应物是 `net.minecraftforge.client.ConfigScreenHandler.ConfigScreenFactory`（待核） |
+| `net.neoforged.neoforge.client.ClientHooks` | `net.minecraftforge.client.ForgeHooksClient` |
+| `net.neoforged.neoforge.client.gui.ConfigurationScreen` | **不存在**（1.20.1 无自动配置界面，见 §七） |
 
-jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerTickEvent/Phase`、
-`ScreenEvent`、`ClientPlayerNetworkEvent`、`PlayerInteractEvent`、
-`capabilities/Capability`、`IClientItemExtensions`。
-
-### 逐文件撞点（compileJava 200 条错误分布）
+### 4.2 逐文件撞点（compileJava 首发 200 条错误分布）
 
 | 文件 | 错误数 |
 |---|---|
@@ -110,119 +93,89 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 | `collect/DataProbe` / `bind/ContainerAnchor` | 各 4 |
 | `collect/ContainerAccess` / `ui/ChartRenderer` / `collect/AeNetworkReader` | 各 2 |
 
-### 其余 API 差异（import 修完后的第二轮撞点，预期）
+### 4.3 语义差异（import 修完后的第二轮）
 
-| 文件 | 1.21.1 现状 | 1.20.1 情况（预期） |
+| 文件 | 1.21.1（main） | 1.20.1 实际情况（已核实） |
 |---|---|---|
-| `LogiScopeMod` / `collect/ProbeManager` | `event.tick.ServerTickEvent`（Pre/Post） | `TickEvent.ServerTickEvent` + `phase == Phase.END`。**CP 采样点挂权威事件的结构不变** |
-| `LogiScopeMod` / `bind/KeyBindings` | `ClientTickEvent.Pre/Post` | `TickEvent.ClientTickEvent` + `phase == Phase.END` |
-| `bind/ProbeContext` / `collect/WorldProbe` | `Capabilities` 注册表 | `ForgeCapabilities.ITEM_HANDLER` + `getCapability(cap, side)` |
-| `bind/ContainerAnchor` | `useWithoutItem(...).consumesAction()` | 1.20.5 才拆出 `useWithoutItem`，1.20.1 是 `use(player, hand)`。**判据必须重新核实** |
-| `ui/ScopeScreen` | `ClientHooks.guiLayers` | `ForgeHooksClient` 对应方法签名重核（历史教训：同名不同物） |
-| `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | Forge 1.20.1 的 `@Mod` **没有 dist 参数**；备选 `@Mod("logiscope")` + `EventBusSubscriber(value = Dist.CLIENT)` / 构造时判 Dist |
-| `DataCommand` | `ClientChatReceivedEvent.System` | 1.20.1 该事件无 System 子类型（待核），用 `type == ChatType.SYSTEM` 判 |
-| `bind/TextInputGuard` | `ScreenEvent.CharacterTyped.Pre` | 1.20.1 是 `ScreenEvent.CharacterTyped`（无 Pre/Post，待核） |
-| `collect/AeNetworkReader` | AE2 1.21.1 版 grid/node API | AE2 1.20.1 对应 API 逐个核实 |
-| `analysis/Snbt` / `archive/*` | DataComponent 系 | 1.20.1 是 `getTag()` NBT，grep 确认引用面 |
+| `LogiScopeMod` / `collect/ProbeManager` | `event.tick.ServerTickEvent`（Pre / Post） | `TickEvent.ServerTickEvent` + `phase == Phase.END`；采样点挂权威事件的结构不变 |
+| `LogiScopeMod` / `bind/KeyBindings` | `ClientTickEvent.Pre / Post` | `TickEvent.ClientTickEvent` + `phase == END` |
+| `bind/ProbeContext` / `collect/WorldProbe` | `Capabilities` 注册表 | `ForgeCapabilities.ITEM_HANDLER` + `BlockEntity#getCapability`（LazyOptional 通道） |
+| `bind/ContainerAnchor` | `useWithoutItem(...).consumesAction()` | `use(level, player, MAIN_HAND, hit).consumesAction()`（`useWithoutItem` 为 1.20.5+） |
+| `ui/ScopeScreen` | `ClientHooks.guiLayers` | `ForgeHooksClient.pushGuiLayer / popGuiLayer`（签名已核对） |
+| `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | Forge 1.20.1 的 `@Mod` 无 dist 参数；改为构造时检查 `FMLEnvironment.dist` |
+| `bind/DataCommand` | `ClientChatReceivedEvent.System` | 无 System 子类型；用 `event.isSystem()` 判定 |
+| `bind/TextInputGuard` | `ScreenEvent.CharacterTyped.Pre / Post` | 同形（该事件在 1.20.1 已存在，已核实） |
+| `collect/AeNetworkReader` | AE2 1.21.1 grid / node API | AE2 1.20.1 对应 API（反射，零编译期依赖） |
+| `analysis/Snbt` / `archive/*` | DataComponent 系 | `getTag()` NBT（引用面已 grep 核实） |
+| 其余 | `mouseScrolled(…, scrollX, scrollY)` / `saveWithoutMetadata(registryAccess)` / `ResourceLocation.parse` | 单滚动参数 / `saveWithoutMetadata()` / `new ResourceLocation(...)` |
 
-核实手段不变：legacy 插件同步后能拿到 1.20.1 的 sources jar
-（`build/moddev/artifacts/forge-1.20.1-47.1.106-sources.jar`），
-`dev-check` 离线断言的 classpath 换成这个 merged jar 路径。
+核实手段：legacy 插件同步后产出 `build/moddev/artifacts/forge-1.20.1-47.1.106-sources.jar`；
+`dev-check` 离线断言的 classpath 用 `forge-1.20.1-47.1.106-merged.jar`。
 
-## 五、文档口径（两个版本线并存时的规矩）
+## 五、文档口径（两个版本线并存）
 
-- `ARCHITECTURE.md`：**只在 1.21.1 侧维护**，头部已加声明；1.20.1 的差异只写进本文。
-- `VERIFY.md`（当轮清单）：**每个分支各自维护**——分支上按 1.20.1 的命令与产物名重建当轮清单。
-- `PROGRESS.md`：历史轮次记录不改写；1.20.1 的轮次记录用"### [1.20.1] 轮次 N"小节追加。
-- 离线断言命令里 `neoforge-21.1.209-merged.jar` 的路径在 legacy 插件下**必然不同**，
-  移植时同步更新 `VERIFY.md` 的 H 组命令。
+- `ARCHITECTURE.md`：只在 1.21.1 侧维护；1.20.1 的差异只写进本文。
+- `VERIFY.md`：各分支各自维护（分支上按 1.20.1 的命令 / 产物名重建当轮清单）。
+- `PROGRESS.md`：历史轮次不改写；1.20.1 的记录用「[1.20.1] …」小节追加。
 
-## 六、IJ 操作步骤（建分支与日常切换）
+## 六、IJ 操作与日常切换
 
-1. `1.20.1-neo` 分支已建立并完成全部配置 / API 移植（勾选状态见末节）。
-2. （参考）建分支：IJ 右下角 Git widget → main 右键 → New Branch，勾选 Checkout；
-   等价命令 `git switch -c 1.20.1-neo`。
-3. 在分支上改配置层（本文二、三节）→ 弹出 "Load Gradle Changes"（Ctrl+Shift+O）→ 同步；
-   首次会下载 1.20.1 全套产物，较慢。
-   > **同步卡住 / import 全红时的正解（2026-10-15 实测）**：同步要联网 HEAD 校验
-   > `forge-1.20.1-47.1.106-userdev.jar` 的元数据，而 `maven.neoforged.net` 从国内**直连不可达**
-   > （报 `Connection timed out` / `Network is unreachable`）⇒ `createMinecraftArtifacts` 失败，
-   > 编辑器里 `import net.minecraftforge.*` / `net.minecraft.*` 全红。**这不是代码问题**：
-   > 元数据与产物本机有缓存（`~/.gradle/caches/neoformruntime`）。
-   >
-   > 两条互斥解法（本机当前用 ①）：
-   > 1. **走代理**：在 `~/.gradle/gradle.properties` 配
-   >    `systemProp.http(s).proxyHost/Port` 指向系统代理 —— 这是 Gradle 官方推荐的代理配法，
-   >    命令行与 IDE 同步都自动生效。实测：同一个 userdev HEAD 请求，直连超时 → 经代理
-   >    **HTTP 200 / 0.4s**；配置后裸跑 `gradlew.bat build` 从 223 秒失败变为 20 秒成功。
-   > 2. **离线**：命令行 `gradlew.bat build --offline`；IJ 用 Gradle 工具窗口的「离线模式」开关。
-   >    想让命令行与 IDE **都**自动离线，可放一个**按项目路径限定**的 init 脚本
-   >    `~/.gradle/init.d/logiscope-offline.gradle`（内容：`gradle.startParameter.offline = true`，
-   >    外加 `currentDir` 前缀判断）—— 实测有效（Gradle 对命令行与 Tooling API 构建都会执行
-   >    `init.d/` 下的脚本），但**本机最终没采用**（改用代理）。
-   > 3. **注意**：Gradle **没有**项目级离线属性 —— `org.gradle.offline` 不存在
-   >    （2026-10-15 在 gradle-9.2.1 发行包里搜过，零命中），所以别指望在 `gradle.properties`
-   >    里一行搞定。
-4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
-   （随分支走）；File → Project Structure → Project SDK 选 17。
-   ⚠️ `.idea/` **不受 git 管理**，切分支不会自动改编辑器 SDK —— 每次切到本分支后手动设一次
-   （只影响 IJ 编辑器解析，Gradle 侧由 `org.gradle.java.home` 保证）。
-5. **切分支串味**（已解决一半）：`build/`、run 目录不受 git 管理——
-   - 本分支 build.gradle 的 runs.configureEach 里已设
-     `gameDirectory = project.file('1_20_1_neo')`（属性名 javap 核实：
-     `RunModel.getGameDirectory()`），首次 `runClient` 会自动创建该目录；
-     `saves` / `options.txt` / mods / logs 与 main 的 `run/` 互不覆盖。
-   - `build/` 仍共用：**切回 1.21.1 前先 `gradlew.bat clean`，切完重新 sync**。
-   - 两条铁律照旧：测试 jar 换版本线时**先删同名旧 jar**；正在开发的模组不进 run 目录的 mods。
-   - 测试 jar 目标路径：1.20.1 线 = `1_20_1_neo/mods/`；main 线 = `run/mods/`。
-6. 分支策略：`main` = 1.21.1 主线；通用 bugfix 进 main 后 cherry-pick 到 `1.20.1-neo`；
-   只对单侧成立的修复不互挑（在提交消息里注明"仅 1.20.1"或"仅 1.21.1"）。
-   搬运一律 `git cherry-pick -x <sha>`（两条历史无共同祖先，**不要 merge / rebase**）；
-   文档类提交若有 1.20.1 专有内容（`README` / 本文件 / `VERIFY`），冲突时保留分支侧内容。
+1. 分支已建立并完成全部配置 / API 移植（勾选状态见 §九）；日常仅需 Checkout + 同步。
+2. **同步卡住 / import 全红的处理（2026-10-15 实测）**：同步需联网 HEAD 校验
+   `forge-1.20.1-47.1.106-userdev.jar` 的元数据；`maven.neoforged.net` 直连不可达时
+   `createMinecraftArtifacts` 失败，编辑器内 `net.minecraftforge.*` / `net.minecraft.*` 全红
+   （**非代码问题**；元数据与产物本机有缓存，位于 `~/.gradle/caches/neoformruntime`）。
+   两条互斥解法：
+   1. **走代理（本机当前采用）**：`~/.gradle/gradle.properties` 配
+      `systemProp.http(s).proxyHost / Port` 指向系统代理，命令行与 IDE 同步同时生效。
+      实测：userdev HEAD 直连超时 → 经代理 HTTP 200 / 0.4s；裸跑 `gradlew.bat build`
+      由 223 秒失败变为 20 秒成功。
+   2. **离线**：命令行 `--offline`；IJ 用 Gradle 工具窗口的「离线模式」开关；或放一个
+      **按项目路径限定**的 init 脚本 `~/.gradle/init.d/logiscope-offline.gradle`
+      （`gradle.startParameter.offline = true` + `currentDir` 前缀判断）。
+      注：Gradle **没有**项目级离线属性（`org.gradle.offline` 不存在，gradle-9.2.1
+      发行包核实），只能走上两法。
+3. **JDK**：`org.gradle.java.home` = `C:/Program Files/Java/jdk-17`（随分支走）。`.idea/`
+   不受 git 管理，切到本分支后需手动把 Project SDK 设为 17（仅影响编辑器解析，Gradle 侧
+   由 `org.gradle.java.home` 保证）。
+4. **目录隔离**：本分支 `build.gradle` 设 `gameDirectory = 1_20_1_neo`（`RunModel.getGameDirectory()`
+   已 javap 核实），`saves` / `options.txt` / `mods` / `logs` 与 main 的 `run/` 互不覆盖。
+   `build/` 仍共用：**切回 1.21.1 前先 `gradlew.bat clean`，切换后重新 sync**。
+   测试 jar 换版本线前**先删同名旧 jar**；正在开发的模组不进 dev 的 mods。
+5. 分支策略：`main` = 1.21.1 主线；通用 bugfix 进 main 后 `cherry-pick -x` 到本分支；
+   仅单侧成立的修复不互挑（提交消息注明）。文档类提交冲突时保留分支侧 1.20.1 专有内容。
 
 ## 七、已知限制（1.20.1 线）
 
 | 限制 | 原因 |
 |---|---|
-| 配置界面入口不存在 | NeoForge 的 ConfigurationScreen 是 20.4+ 才有；改 TOML（config/logiscope-client.toml） |
-| 假槽无法识别 | Forge 1.20.1 的 Slot 没有 isFake()；isSelectable 只排除玩家背包 |
-| `/tick rate` 改速时秒数按 20 换算 | 1.20.1 没有 tickRateManager / 速率同步包 |
-| **模组必须带 pack.mcmeta**（pack_format 15） | 1.20.1 资源包机制；没有 = lang 不加载 = 界面全是键名（2026-09-20 实测踩中，日志证据 `Missing metadata in pack mod:logiscope`）。1.21 的 NeoForge 用 neoforge.mods.toml 充当打包元数据，main 不需要 |
-| **dev 环境下 SRG-mixin 模组必炸**（如 Create 6 内嵌 flywheel 1.0.5） | 开发运行时是 named 映射，SRG 写的 `@Shadow` 定位不到（报 `@Shadow ... not located`）；**生产环境正常**。结论：Create 只放整合包实例测，dev 的 `1_20_1_neo/mods/` 里放 mods-disabled。 |
-| 不要尝试"给 mod jar 本地做 SRG→named 重映射" | FART + tsrg2 方案未走通、已废弃（2026-10-14，产物已删）。本地混用映射来源的方案不值得再试；要测就按上一行分流。 |
+| 配置界面入口不存在 | `ConfigurationScreen` 为 20.4+ 引入；改 `config/logiscope-client.toml` |
+| 假槽无法识别 | Forge 1.20.1 的 Slot 无 `isFake()`（20.4+ 才引入）；`isSelectable` 仅排除玩家背包 |
+| `/tick rate` 改速时秒数按 20 换算 | 1.20.1 无 tickRateManager、无速率同步包 |
+| **模组必须带 `pack.mcmeta`（pack_format 15）** | 1.20.1 资源包机制；缺失则 lang 不加载、界面显示键名。1.21 的 NeoForge 用 `neoforge.mods.toml` 充当打包元数据，main 无此需求 |
+| **dev 环境下 SRG-mixin 模组不可用**（实例：Create 6 内嵌 flywheel 1.0.5；AE2 15.3.3） | 开发运行为 named 映射，SRG 写的 `@Shadow` 定位不到（报 `@Shadow ... not located`）；**生产环境正常**。识别方法：扫 jar 内 `*.mixins.json` + refmap —— 若 mixin 声明 `f_*` / `m_*` 影子而 refmap 无对应条目，则该模组不可入 dev。处理：此类模组放 `mods-disabled/` 或只在整合包实例启用 |
+| 不尝试「给 mod jar 本地做 SRG→named 重映射」 | FART + tsrg2 方案未走通、已废弃（2026-10-14）；本地混用映射来源不可取，按上一行分流 |
 
-## 八、测试环境（1_20_1_neo/mods/，2026-09-20 已就位）
+## 八、测试环境与渠道（2026-10-15 更新）
 
-| 模组 | 版本 | 来源 |
+| 渠道 | 位置 / 加载器 | 内容 |
 |---|---|---|
-| AE2 | appliedenergistics2-forge-**15.3.3** | Modrinth（Forge 版，NeoForge 1.20.1 兼容期可跑） |
-| Mekanism | 1.20.1-10.4.16.80 | Modrinth（forge+neoforge 双标） |
-| Create | 1.20.1-6.0.8（放 `mods-disabled/`） | Modrinth（Flywheel 已内置，无外部依赖） |
+| dev 实例 | `1_20_1_neo/`（MDG `runClient`，NeoForge 47.1.106） | `mods/` = MEK `10.4.16.80`；**AE2 `15.3.3` 与 Create `6.0.8` 在 `mods-disabled/`**（SRG-mixin 限制，见 §七） |
+| 整合包实例 | `GregTech Leisure`（HMCL，Forge 47.3.7） | 68 模组：AE2 `15.2.13` + AE 附属（ae2wtlib / mae2 / ExtendedAE）、**sophisticatedstorage 全家桶**、GTCEu 等。装入 `logiscope-0.1.0-1.20.1.jar` 后承担 AE / 精妙存储相关验证 |
 
-三者均按 Modrinth 元数据校过字节数与 zip 完整性。AE2 的 grid API 走反射（零编译期依赖），
-装上即可测 AeNetworkReader。
+装入整合包前先删同名旧 jar。**兼容性实证（2026-10-15）**：对该 jar 的全部常量池引用审计 ——
+265 个类引用（其中 `net.minecraftforge` 35、`net.minecraft` 58）与 180 条 mc / forge 属主成员
+引用，在 Forge 47.3.7 运行时（srg.jar + 打补丁 client.jar + universal + FML 组件 + `java.base.jmod`）
+**全部可解析，0 缺失；0 个 `net.neoforged` 引用** ⇒ 两条加载器线共用同一枚 jar。
 
-> 2026-10-15 核对目录：`1_20_1_neo/mods/` 实际只有 **MEK 10.4.16.80 + AE2 15.3.3**；
-> Create 在 `mods-disabled/`（原因见第七节 SRG-mixin 一条）。本文原记 AE2 为 15.4.10，与目录不符，
-> 已按实际更正。⇒ `VERIFY.md` 里依赖**精妙存储**的项在本分支暂不可测（已在清单里标注）。
+> 备查：审计用一次性脚本与报告在 `build/_probe/`（未入库，`clean` 会清；结论已记入本表）。
 
 ## 九、待办与待定
 
-- [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）；不装则用 MDG 的 `1_20_1_neo/` 开发实例验
-- [x] 建分支 `1.20.1-neo` 并切过去（用户在 IJ 中完成）
-- [x] 配置层移植（二、三节）—— `generateModMetadata` 在 Gradle 9.2.1 + 插件 2.0.147 下通过，元数据占位符替换正确（2026-09-20）
-- [x] 逐文件 API 移植 —— **compileJava 0 错误（2026-09-20）**，14 个文件全部改完：
-  包名家族映射（见第四节表）、TickEvent Pre/Post → phase 判定、Capabilities →
-  ForgeCapabilities + LazyOptional（走 BE#getCapability）、ModConfigSpec → ForgeConfigSpec、
-  ClientChatReceivedEvent.System → isSystem()、useWithoutItem → use(+MAIN_HAND)、
-  mouseScrolled 双参数 → 单参数、saveWithoutMetadata 去参、ResourceLocation.parse → new、
-  @Mod(dist) → FMLEnvironment.dist 判定、ConfigurationScreen → 不注册（限制）。
-  `gradlew.bat build` 通过，产出 reobf 后的 `build/libs/logiscope-0.1.0-1.20.1.jar`，
-  元数据/reobf 已开包核验；verify-jar.py 已改为双版本线通用（两个 jar 都过）。
-  ★ 注意：这只说明**编译层**通过；逻辑等价性要靠离线断言 + 实机验收。
-- [x] `VERIFY.md` 按 1.20.1 重建当轮清单（含离线断言 classpath，2026-10-15）
-- [x] 1.20.1 侧的离线断言（`forge-1.20.1-47.1.106-merged.jar` + `dev-check` → 443 条全过，2026-10-15）
-- [x] **同步 main 的功能改动**：第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15，12 条 `cherry-pick -x`，
-  见 `PROGRESS.md` 的「[1.20.1] 轮次 1」）
-- [ ] **实机验收（首次）** —— 清单 = 本分支 `VERIFY.md`（A 组采样保真为重点）；
-      Create 相关共存测试须知见第七节两行
+- [x] 建分支 `1.20.1-neo` 并完成配置 / API 移植（compileJava 0 错误；reobf jar 就位，2026-09-20）
+- [x] `VERIFY.md` 按 1.20.1 重建 + 离线断言跑通（443 条全过，2026-10-15）
+- [x] 同步 main：第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15，12 条 `cherry-pick -x`）
+- [x] AE2 移出 dev（`mods-disabled/`）；整合包渠道打通并完成兼容性审计（2026-10-15）
+- [ ] **实机验收**：dev 侧清单 = 本分支 `VERIFY.md`（重点 A 组采样保真）；AE / 精妙存储项
+      在 GregTech Leisure 验证
+- [ ] 发布决策：版本号是否随 main 提到 `0.1.1-1.20.1`（当前 `0.1.0-1.20.1`，本线未发布）

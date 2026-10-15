@@ -23,21 +23,23 @@
 ## [1.20.1] 线：现状与移植记录
 
 **现状（2026-10-15）**：功能已与 main **对齐到第十八轮④**（第十七轮① + 第十八轮①–④ 全部搬运到位），
-离线全过；**首次实机验收待做**（清单 = 本分支的 [`VERIFY.md`](VERIFY.md)，已按 1.20.1 的命令 /
-产物名 / 运行目录重建）。版本号仍是 `0.1.0-1.20.1`（本线尚未发布）。
+离线全过；dev 启动问题已定位并处理（AE2 的 SRG-mixin 缺陷 → `mods-disabled/`，整合包渠道打通并完成
+兼容性审计，见「轮次 2」）；**首次实机验收待做**（dev 清单 = 本分支 [`VERIFY.md`](VERIFY.md)；
+AE / 精妙存储项在 GregTech Leisure 验证）。版本号仍为 `0.1.0-1.20.1`（本线未发布）。
 
 | 项 | 值 |
 |---|---|
-| 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.0-1.20.1.jar`（reobf） |
+| 构建 | `gradlew.bat build` 通过；产物 `build/libs/logiscope-0.1.0-1.20.1.jar`（reobf） |
 | 离线 | TestChart **443 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **176** 键 |
-| 运行实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80` + AE2 `15.3.3`，Create `6.0.8` 在 `mods-disabled/` |
-| 未做 | 实机验收（重点 A 组采样保真）；测试实例是否另装（见 PORT §九 待办） |
+| dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
+| 整合包渠道 | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；本 jar 已装入，常量池审计 0 缺失 |
+| 未做 | 实机验收（重点 A 组采样保真） |
 
 ### [1.20.1] 轮次 1：同步 main 第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15）
 
-**做法**：两分支历史**无共同祖先**（`merge-base` 为空）⇒ 全部用 `git cherry-pick -x` 逐条搬运，
-保留 1.20.1 侧 API 垫片（`ForgeConfigSpec` / `MinecraftForge.EVENT_BUS` + `TickEvent.Phase.END` /
-`ForgeHooksClient` / `META-INF/mods.toml`），**不采用** main 的 21.1 写法。
+**做法**：两分支历史**无共同祖先**（`merge-base` 为空），全部经 `git cherry-pick -x` 逐条搬运并
+保留来源 sha；保留 1.20.1 侧 API 垫片（`ForgeConfigSpec` / `MinecraftForge.EVENT_BUS` +
+`TickEvent.Phase.END` / `ForgeHooksClient` / `META-INF/mods.toml`），不采用 main 的 21.1 写法。
 
 | 来源（main） | 内容 | 冲突与解法 |
 |---|---|---|
@@ -53,11 +55,28 @@
 `ForgeConfigSpec#save()`（内部走 `FileConfig.save()` 落盘）与 `ConfigValue#set(T)` 在 1.20.1 都存在，
 前置条件不满足时抛异常 ⇒ 滑条写回用 try/catch 包裹（与 main 同语义）。
 
-**环境坑（已写进 README / PORT §六）**：
-1. Gradle 解析 `net.neoforged:forge:1.20.1-47.1.106` 时要联网 HEAD 校验元数据，而
-   `maven.neoforged.net` 当前不可达 ⇒ `createMinecraftArtifacts` 失败、IJ 同步卡住、编辑器 import 全红。
-   **解法：加 `--offline`**（neoformruntime 缓存完整，全部产物已在本机）。
-2. Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏（报"程序包不存在"），离线断言脚本改用 `.bat` 包装。
+**环境事项（详见 README 构建备忘 / PORT §六）**：
+1. `createMinecraftArtifacts` 需联网 HEAD 校验 forge userdev 元数据；`maven.neoforged.net` 直连
+   不可达 ⇒ IJ 同步卡住、编辑器 import 全红（非代码问题）。最终解法：Gradle 走代理
+   （`~/.gradle/gradle.properties`）；备选：`--offline`。
+2. Git Bash → cmd 传多条目 `-cp`（分号列表）会拆坏（报"程序包不存在"）；离线断言脚本改用
+   `.bat` 包装（`dev-check/offline-check.bat`）。
+
+### [1.20.1] 轮次 2：AE2 移出 dev + 整合包渠道打通 + 兼容性审计（2026-10-15）
+
+**事件**：dev `runClient` 启动即崩 —— AE2 15.3.3 的 `PickColorMixin` 以 SRG 名（`@Shadow f_91074_`）
+声明影子字段，其 refmap 无对应字段条目；dev 为 named 映射 ⇒ `InvalidMixinException`，7 秒内退出
+（生产环境无此问题）。证据链：启动日志的重映射行 → `javap` 字段声明 → refmap 零命中 → tsrg
+交叉核对（`f_91074_` = `Minecraft.player`）。已排除：换 AE2 版本无效（15.4.11 的 refmap 逐字
+相同）；本模组与 MEK 均无 mixin；MDG legacy 插件无「dev 跑 SRG」开关。
+
+**处理（A+B）**：AE2 移入 `mods-disabled/`（dev 不再加载）；AE 相关验证改在整合包实例
+GregTech Leisure（Forge 47.3.7，含 AE2 15.2.13 + 精妙存储）进行，jar 已装入其 `mods/`。
+
+**兼容性审计**：对 jar 全部常量池引用做解析审计 —— 265 个类引用逐条核对存在性，其中
+`net.minecraft` / `net.minecraftforge` 属主的 180 条成员引用按继承链逐条解析；在 Forge 47.3.7
+运行时（srg + 补丁 client + universal + FML 组件 + JDK `java.base.jmod`）**0 缺失、0
+`net.neoforged` 引用** ⇒ 两条加载器线共用同一枚 jar。（审计脚本为一次性工具，未入库。）
 
 ---
 
