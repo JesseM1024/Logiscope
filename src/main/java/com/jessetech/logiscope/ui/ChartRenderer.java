@@ -972,9 +972,9 @@ public final class ChartRenderer {
      * 当前世界的 tick 速率（tick/秒）。
      *
      * 时间轴上的"秒"必须按它换算 —— 固定按 20 算的话 `/tick rate 200` 下
-     * 1 秒会被标成 10 秒。★ 1.20.1 已知限制：没有 Level#tickRateManager（1.21 才有），
-     * 服务端也不向客户端同步 tick 速率 —— vanilla 1.20.1 固定 20 t/s。
-     * 若装了改 tick 速率的第三方模组，秒数会按 20 换算（如实记录，不假装有真值）。
+     * 1 秒会被标成 10 秒。1.20.1 已知限制：无 Level#tickRateManager（1.21 引入），
+     * 服务端也不同步 tick 速率 —— vanilla 固定 20 t/s；第三方改速场景下秒数按 20
+     * 标称，不引入推算值。
      */
     private static double ticksPerSecond() {
         return 20.0;

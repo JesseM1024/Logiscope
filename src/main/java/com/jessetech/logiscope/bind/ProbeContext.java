@@ -207,8 +207,8 @@ public final class ProbeContext {
 
     @Nullable
     private static IItemHandler itemHandler(Level level, BlockPos pos) {
-        // 1.20.1 没有 Level#getCapability(cap,pos,side)（那是 NeoForge 20.4+ 的
-        // Capabilities 注册表），走方块实体的 LazyOptional 通道
+        // 1.20.1 无 Level#getCapability(cap, pos, side)（20.4+ 的 Capabilities 注册表提供），
+        // 走方块实体的 LazyOptional 通道
         BlockEntity be = level.getBlockEntity(pos);
         if (be == null) {
             return null;

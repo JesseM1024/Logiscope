@@ -25,9 +25,9 @@ import org.slf4j.LoggerFactory;
 /**
  * LogiScope —— 纯客户端物流探测示波器。
  *
- * 【客户端专用】Forge 1.20.1 的 @Mod 没有 dist 参数（NeoForge 20.2+ 才有），
- * 改为构造时判 {@code FMLEnvironment.dist}：专用服务端上只打一行日志就返回，
- * 不注册任何监听 —— 所以服务端不需要安装它，也不会因为缺少客户端类而崩溃。
+ * 【客户端专用】Forge 1.20.1 的 @Mod 无 dist 参数（20.2+ 才引入），改为构造时检查
+ * {@code FMLEnvironment.dist}：非客户端环境仅记一条日志后返回、不注册任何监听 ——
+ * 服务端无需安装本模组，也不会因缺少客户端类而崩溃。
  *
  * 事件总线分工：
  *   - modBus（模组总线）：只在初始化阶段触发的事件，如注册快捷键
@@ -51,7 +51,7 @@ public final class LogiScopeMod {
     public LogiScopeMod() {
         IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
 
-        // 专用服务器上跳过全部客户端注册（1.20.1 的 @Mod 没有 dist 参数）
+        // 非客户端环境：跳过全部客户端注册（1.20.1 的 @Mod 无 dist 参数）
         if (FMLEnvironment.dist != Dist.CLIENT) {
             LOGGER.info("[LogiScope] not a client dist, skipping all client registrations");
             return;
@@ -60,10 +60,10 @@ public final class LogiScopeMod {
         // 注册快捷键（必须在模组总线上）
         KeyBindings.register(modBus);
 
-        // 资源上限配置（客户端类型）。文件在 config/logiscope-client.toml。
-        // 1.20.1 没有 NeoForge 的自动配置界面（ConfigurationScreen 是 20.4+ 才有），
-        // 也不注册 ConfigScreenHandler 扩展点 —— 1.20.1 线从 TOML 文件手改
-        // （已知限制，见 docs/PORT-1.20.1.md）。
+        // 资源上限配置（客户端类型），落在 config/logiscope-client.toml。
+        // 1.20.1 无自动配置界面（ConfigurationScreen 为 20.4+ 引入），亦不注册
+        // ConfigScreenHandler 扩展点：配置仅经 TOML 文件修改（已知限制，
+        // 见 docs/PORT-1.20.1.md）。
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, LogiScopeConfig.SPEC);
 
         // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyMapping 不走全局输入，

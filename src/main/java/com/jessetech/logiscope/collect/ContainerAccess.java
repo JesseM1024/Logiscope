@@ -72,11 +72,10 @@ public final class ContainerAccess {
     }
 
     /**
-     * 这个槽位能不能被选作监控目标（设备槽）。
+     * 这个槽位能否被选作监控目标（设备槽）。
      *
-     * ★ 1.20.1 已知限制：Forge 的 Slot 没有 isFake()（NeoForge 20.4+ 才加）★
-     * 1.20.1 生态里模组的假槽/幽灵槽没有统一标记，无法识别 ——
-     * 只保留"排除玩家背包"这一条判据。见 docs/PORT-1.20.1.md。
+     * 1.20.1 已知限制：Slot 无 isFake()（20.4+ 才引入），模组假槽/幽灵槽无统一标记、
+     * 无法识别；仅保留「排除玩家背包」一条判据。详见 docs/PORT-1.20.1.md。
      */
     public static boolean isSelectable(Slot slot) {
         return !isPlayerSlot(slot);

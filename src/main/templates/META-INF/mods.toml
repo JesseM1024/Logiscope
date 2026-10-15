@@ -1,6 +1,6 @@
 # 构建时，本文件中的占位符会被 gradle.properties 的值替换。
 # 最终产物在 build/generated/sources/modMetadata/META-INF/mods.toml
-# （1.20.1 世代文件名是 mods.toml；neoforge.mods.toml 是 1.20.4+ 才改的名。）
+# （1.20.1 世代文件名为 mods.toml；1.20.4+ 起改名为 neoforge.mods.toml。）
 
 modLoader="javafml" #mandatory
 loaderVersion="${loader_version_range}" #mandatory
@@ -21,9 +21,9 @@ and log how the item type and count inside it change tick by tick.
 '''
 
 # 纯客户端模组：依赖只在客户端校验。
-# 服务端即使没装这个模组也不会报错（配合主类上的 @Mod(dist = Dist.CLIENT)）。
-# 1.20.1 是 Forge 血统：依赖字段是 mandatory=true（type="required" 是 20.2+ 的写法），
-# 平台依赖的 modId 在 1.20.1 世代还叫 "forge"。
+# 服务端即使未安装本模组也不会报错（配合主类的 FMLEnvironment.dist 检查）。
+# 1.20.1 为 Forge 血统：依赖字段用 mandatory=true（type="required" 为 20.2+ 写法）；
+# 平台依赖 modId 在 1.20.1 世代仍为 "forge"。
 [[dependencies.${mod_id}]]
     modId="forge"
     mandatory=true

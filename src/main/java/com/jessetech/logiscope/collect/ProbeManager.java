@@ -60,7 +60,7 @@ public final class ProbeManager {
 
     /** 由主类注册到游戏总线，签名固定为 (event) */
     public static void onClientTick(TickEvent.ClientTickEvent event) {
-        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），只认 END（= NeoForge 的 Post）
+        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），仅取 END（1.21.1 线为 Post 事件）
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
@@ -91,7 +91,7 @@ public final class ProbeManager {
      * 专用服务器上这个监听器不会被加载（模组声明为纯客户端）。
      */
     public static void onServerTick(TickEvent.ServerTickEvent event) {
-        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），只认 END（= NeoForge 的 Post）
+        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），仅取 END（1.21.1 线为 Post 事件）
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
@@ -99,8 +99,8 @@ public final class ProbeManager {
         if (!mc.isLocalServer()) {
             return;
         }
-        // 1.20.1 的 ServerTickEvent 不带 getServer()（NeoForge 20.4+ 才有）；
-        // 上面已经确认是本地集成服务端，直接取它 —— 采样线程就是当前线程。
+        // 1.20.1 的 ServerTickEvent 无 getServer()（20.4+ 才引入）；此处已确认本地集成
+        // 服务端，直接取 mc.getSingleplayerServer() —— 采样线程即当前线程。
         MinecraftServer server = mc.getSingleplayerServer();
         if (server == null) {
             return;

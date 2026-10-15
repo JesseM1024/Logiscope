@@ -3682,7 +3682,7 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public boolean mouseScrolled(double mouseX, double mouseY, double scrollY) {
-        // 1.20.1 的 mouseScrolled 只有单滚动参数（NeoForge 21.1 拆成 scrollX/scrollY）
+        // 1.20.1 的 mouseScrolled 为单滚动参数（1.21.1 线拆为 scrollX/scrollY）
         Layout L = layout();
         if (overPanel(mouseX, mouseY, L)) {
             int dir = (int) Math.signum(scrollY);

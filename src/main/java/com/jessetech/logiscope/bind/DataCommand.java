@@ -131,8 +131,8 @@ public final class DataCommand {
 
     /** 系统消息到达（仅多人命令路会走到这里）：收下回执并吞掉，不刷聊天框 */
     public static void onChatReceived(ClientChatReceivedEvent event) {
-        // 1.20.1 没有 System 子类型（NeoForge 20.4+ 才拆），
-        // 事件自带 isSystem()：`data get block` 的回执就是系统消息
+        // 1.20.1 无 System 子类型（20.4+ 才拆分）；事件自带 isSystem()，
+        // `data get block` 的回执即系统消息
         if (!event.isSystem()) {
             return;
         }

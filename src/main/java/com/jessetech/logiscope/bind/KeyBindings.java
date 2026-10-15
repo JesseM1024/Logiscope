@@ -190,7 +190,7 @@ public final class KeyBindings {
      * 排空之后只有在"当前没有界面"时才真的响应。
      */
     public static void onClientTick(TickEvent.ClientTickEvent event) {
-        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），只认 END（= NeoForge 的 Post）
+        // 1.20.1 的 TickEvent 每 tick 触发两次（START/END），仅取 END（1.21.1 线为 Post 事件）
         if (event.phase != TickEvent.Phase.END) {
             return;
         }
