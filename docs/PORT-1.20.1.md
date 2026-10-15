@@ -146,10 +146,17 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
    首次会下载 1.20.1 全套产物，较慢。
    > **同步卡住 / import 全红时的正解（2026-10-15 实测）**：同步要联网 HEAD 校验
    > `forge-1.20.1-47.1.106-userdev.jar` 的元数据，而 `maven.neoforged.net` 从国内常不可达
-   > （报 `Connection timed out`）⇒ `createMinecraftArtifacts` 失败，编辑器里
-   > `import net.minecraftforge.*` / `net.minecraft.*` 全红。**这不是代码问题**：
-   > 元数据与产物本机已齐全（`~/.gradle/caches/neoformruntime`），
-   > 加 **`--offline`**（IJ：Gradle 工具窗口的「离线模式」开关）再同步即恢复。
+   > （报 `Connection timed out` / `Network is unreachable`）⇒ `createMinecraftArtifacts` 失败，
+   > 编辑器里 `import net.minecraftforge.*` / `net.minecraft.*` 全红。**这不是代码问题**：
+   > 元数据与产物本机已齐全（`~/.gradle/caches/neoformruntime`）。
+   >
+   > **本机已装** `~/.gradle/init.d/logiscope-offline.gradle` —— 一个**按项目路径限定**的 init 脚本
+   > （`gradle.startParameter.offline = true`，条件 `currentDir` 在 `D:\dev\logiscope` 下）。
+   > Gradle 对**所有**构建自动应用 `init.d/` 脚本（含 IJ 的 Tooling API 同步）⇒ 命令行与 IDE
+   > 都不必再手加 `--offline`。**注意**：Gradle **没有**项目级离线属性（`org.gradle.offline`
+   > 不存在，2026-10-15 在 gradle-9.2.1 发行包里核实过），所以只能走 init 脚本或 IDE 开关。
+   > 要恢复联网解析就删掉该脚本；离线态下**新增依赖**会报
+   > `No cached version ... available for offline mode`（预期行为）。
 4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
    （随分支走）；File → Project Structure → Project SDK 选 17。
    ⚠️ `.idea/` **不受 git 管理**，切分支不会自动改编辑器 SDK —— 每次切到本分支后手动设一次

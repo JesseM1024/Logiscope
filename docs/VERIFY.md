@@ -146,7 +146,7 @@ build\moddev\runClient.cmd
 
 ```bat
 cd /d D:\dev\logiscope
-gradlew.bat build --offline
+gradlew.bat build
 javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" -d build/dev-check dev-check/TestChart.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
@@ -156,7 +156,7 @@ python verify-jar.py build/libs/logiscope-0.1.0-1.20.1.jar
 
 | # | 检查 | 期望 |
 |---|---|---|
-| E1 | `gradlew.bat build --offline` | `BUILD SUCCESSFUL`（`--offline` 是当前网络下的必需项：同步要联网校验 forge userdev 元数据，而 `maven.neoforged.net` 不可达） |
+| E1 | `gradlew.bat build`（本机已装 `~/.gradle/init.d/logiscope-offline.gradle` ⇒ 自动离线；无该脚本时手加 `--offline`） | `BUILD SUCCESSFUL`。离线是必需项：同步要联网校验 forge userdev 元数据，而 `maven.neoforged.net` 不可达 |
 | E2 | `TestChart` | **443 条**断言全过；lang 中英各 **176** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |

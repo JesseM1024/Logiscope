@@ -213,7 +213,7 @@ java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-che
 | 构建报「非零退出码」但无输出 | Gradle 吞掉了子进程 stderr | 加 `--info`；`build.gradle` 里已配好输出转发 |
 | PowerShell 里跑构建"退出码 1"但其实成功了 | PowerShell 把 Gradle 写到 stderr 的 JVM WARNING 当成 `NativeCommandError` | 看日志里的 `BUILD SUCCESSFUL`，别只看退出码；或 `... 2>&1 | Out-File 日志` 再读日志 |
 | IDEA 同步后行为异常 | IDEA 会另起一个 Gradle 守护进程重新生成文件 | 同步后用 `python verify-jar.py` 复核一次 |
-| **`createMinecraftArtifacts` 失败 / IJ 同步卡死 / 编辑器 import 全红**（报 `Could not HEAD .../forge-<版本>-userdev.jar`，`Connection timed out`） | Gradle 解析平台依赖时要联网 HEAD 校验元数据，而 `maven.neoforged.net` 从国内常不可达。**元数据与产物本机已齐**（`~/.gradle/caches/neoformruntime`） | 加 **`--offline`**：`gradlew.bat build --offline`；IJ 则在 Gradle 工具窗口打开「离线模式」再重新同步。**这不是代码问题**，import 全红会随之消失 |
+| **`createMinecraftArtifacts` 失败 / IJ 同步卡死 / 编辑器 import 全红**（报 `Could not HEAD .../forge-<版本>-userdev.jar`，`Connection timed out` / `Network is unreachable`） | Gradle 解析平台依赖时要联网 HEAD 校验元数据，而 `maven.neoforged.net` 从国内常不可达。**元数据与产物本机已齐**（`~/.gradle/caches/neoformruntime`） | 本机已装**路径限定**的 init 脚本 `~/.gradle/init.d/logiscope-offline.gradle`（只对 `D:\dev\logiscope` 生效；Gradle 对所有构建自动应用它 ⇒ 命令行与 IJ 同步都走离线，不必再手加 `--offline`）。没装该脚本的机器：命令行加 `--offline`，IJ 用 Gradle 工具窗口的「离线模式」开关。**这不是代码问题**，import 全红会随之消失。要恢复联网解析就删掉那个脚本（注意：离线态下**新增依赖**会报 `No cached version ... available for offline mode`，属预期） |
 | Git Bash 里 javac 报"程序包 xxx 不存在"（类明明已编译出来） | Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏 | 把离线检查写进一个 `.bat`（见 `build/dev-check/offline-check.bat` 的写法），或只用单条目 classpath |
 
 详细的排错记录见隔壁项目 `..\neoforge-1.21.1-walkthrough\WALKTHROUGH.md`，
