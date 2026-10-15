@@ -99,7 +99,7 @@
 | 输入 → 呈现 | `KeyBindings`（`ScreenEvent.KeyPressed.Pre`）+ `TextInputGuard` 三层守卫 | 按键事件 / `boolean` | 渲染线程（事件） |
 | 绑定 ← 世界 | `ContainerAnchor`：`RightClickBlock` 记 pending → `ScreenEvent.Init.Post` 提升为 active | `Anchor(dimension, pos, containerId)` | 渲染线程（事件） |
 | 绑定 → 采集 | `ProbeTarget`：`List<SlotRef>` + deviceName + dim + pos；`SlotRef(menuSlotIndex, containerSlotIndex, itemId, count)` | 不可变 record | 构造于渲染线程，服务端线程读取 |
-| 绑定 → 采集 | `DataTarget`：`valuePath` / `namePath` / `literalName` / 锚点；含 slot 锚点与 AE 变体 | 不可变 record；`ProbeInstance#dataTargets` 为 COW 列表 | 渲染线程写（锁内），服务端线程读 |
+| 绑定 → 采集 | `DataTarget`：`valuePath` / `namePath` / `literalName` / 锚点 / 读取口径（`forceNumeric`）；含 slot 锚点与 AE 变体 | 不可变 record；`ProbeInstance#dataTargets` 为 COW 列表 | 渲染线程写（锁内），服务端线程读 |
 | 采集（服务端） | `WorldProbe#readNow` / `ProbeSlots#readNow` | `SlotView(itemId, count, 下标)` | 仅服务端线程（C6） |
 | 采集（服务端） | `DataProbe`（NBT 路径取数）、`AeNetworkReader`（AE 网络数量） | `Val`；`null` = 读不到 | 服务端 tick |
 | 采集 → 存储 | `ProbeInstance` → `SampleStore.add(Sample(tick, itemId, Val))`；标记样本 `no_data` / `gap` | 不可变 record；同一 tick 多物品各一条 | 服务端写、渲染读（`sampleLock` 互斥，C10） |
@@ -1451,6 +1451,9 @@ items: [ { id: "minecraft:iron_ingot", count: 64, slot: 9b }, … ]   // 扁平�
   - **C26-1 读取按标签类型分流**：`DataProbe.asVal` 里 NBT 的 byte/short/int/long 走
     `Val.of(long)`（2^63 也精确），float/double 走 `Val.of(double)`；
     **非有限（NaN/∞）→ null = 读不到**（绝不把 NaN 变成 0）。
+    **强制数值模式**（DATA 页右键标记 `DataTarget.forceNumeric`）改走 `asValForced`：
+    数值标签照 `asVal`；字符串再试 `Val.parseNumericText`（整数优先 long、纯整数超 long
+    拒绝近似、小数走 double）；其余类型 / 不可转换 → null 照常记 no-data（不垫 0）。
   - **C26-2 渲染走 `asDouble()`**：`WaveColumns` 的列缓冲保持 `double[]`、逐列聚合零分配
     —— `Val` 是不可变 record，逐列新建对象就是每帧几百次分配（禁止）。
     精度损失只影响"画在哪个像素"，不影响读数。
@@ -1761,7 +1764,7 @@ src/main/java/com/jessetech/logiscope/
    └─ ChartRenderer.java        呈现层：坐标轴 / 自动缩放 / 多线 / 框选 / 准线 / 标记（CP11 / CP18 / CP21）
 
 dev-check/
-├─ TestChart.java               离线断言（不启动游戏）：断点规则 / 分组 / 配色 / 统计 / 聚合 / 对齐 / 计算
+├─ TestChart.java               离线断言（不启动游戏）：断点规则 / 分组 / 配色 / 统计 / 聚合 / 对齐 / 计算 / 数值解析
 └─ BenchRender.java             渲染路径离线压测：列聚合与游程合并的 fill 次数（CP21）
 ```
 
