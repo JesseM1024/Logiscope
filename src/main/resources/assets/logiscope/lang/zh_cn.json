@@ -138,7 +138,6 @@
   "logiscope.flash.data_dup": "该路径已在追踪中：%s",
   "logiscope.flash.data_force": "已加入追踪（按数值读取）：%s",
   "logiscope.flash.data_not_scalar": "该条目不是单个值（列表 / 复合），无法作为数据追踪：%s",
-  "logiscope.flash.maybe_gui": "已按无界面设备直接创建 · 若它其实有界面：先右键打开，再按 F9",
   "logiscope.info.data_count": "数据 x%s",
   "logiscope.calc.title": "计算 · %s · %s · %s",
   "logiscope.calc.rise": "上升 %s",

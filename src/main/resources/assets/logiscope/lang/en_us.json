@@ -138,7 +138,6 @@
   "logiscope.flash.data_dup": "already tracking: %s",
   "logiscope.flash.data_force": "tracking added (read as numeric): %s",
   "logiscope.flash.data_not_scalar": "not a single value (list/compound); cannot track: %s",
-  "logiscope.flash.maybe_gui": "created as no-GUI device; if it has a GUI: right-click to open, then press F9",
   "logiscope.info.data_count": "data x%s",
   "logiscope.calc.title": "Calc · %s · %s · %s",
   "logiscope.calc.rise": "rise %s",
