@@ -44,9 +44,13 @@ import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.ArchiveFormat;
 import com.jessetech.logiscope.bind.DataTarget;
+import com.jessetech.logiscope.collect.DataProbe;
 import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
+import net.minecraft.nbt.IntTag;
+import net.minecraft.nbt.ListTag;
+import net.minecraft.nbt.StringTag;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -97,6 +101,7 @@ public class TestChart {
         t37Val();
         t38AeTargets();
         t39RiseFallEvents();
+        t40ForcedNumeric();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -749,6 +754,48 @@ public class TestChart {
         List<SeriesPoint> single = List.of(new SeriesPoint(1, 42, true));
         eq("单点序列：上升 0 次", 0, CurveMath.changeRiseEvents(single).count());
         eq("单点序列：下降 0 次", 0, CurveMath.changeFallEvents(single).count());
+    }
+
+    /**
+     * t40：DATA 页「强制按数值读取」的文本解析。
+     *
+     * 需求：有些模组把数值存成**字符串** NBT；右键标记后读取时尝试解析，
+     * 不可转换（任意文本 / NaN / 超 long 的纯整数）→ null（上层记 no-data）。
+     * 这里钉的是 {@link Val#parseNumericText}（纯逻辑）与 {@link DataProbe#asValForced}
+     * （标签层分发；离线 classpath 里本来就有 merged jar，可以用游戏类）。
+     */
+    private static void t40ForcedNumeric() {
+        // —— 文本解析：整数必须精确（走 long） ——
+        Val a = Val.parseNumericText("64");
+        yes("'64' 解析为整数形式", a != null && a.isIntegral());
+        eq("'64' 的值", 64L, a == null ? null : a.longValue());
+        Val b = Val.parseNumericText("  64  ");
+        eq("首尾空白被 trim", 64L, b == null ? null : b.longValue());
+        eq("Long.MAX 精确", 9223372036854775807L,
+                Val.parseNumericText("9223372036854775807").longValue());
+        eq("负数走整数", -2L, Val.parseNumericText("-2").longValue());
+
+        // —— 小数 / 科学计数走 double ——
+        eq("'3.5' 小数", 3.5, Val.parseNumericText("3.5").asDouble(), 1e-9);
+        no("'3.5' 非整数形式", Val.parseNumericText("3.5").isIntegral());
+        eq("'1e3' = 1000", 1000.0, Val.parseNumericText("1e3").asDouble(), 1e-9);
+
+        // —— 诚实边界：纯整数但超出 long → 拒绝（宁 no-data，不近似成 double） ——
+        eq("超 long 的纯整数 → null", null, Val.parseNumericText("12345678901234567890"));
+
+        // —— 不可转换 ——
+        eq("任意文本 → null", null, Val.parseNumericText("abc"));
+        eq("空串 → null", null, Val.parseNumericText(""));
+        eq("null → null", null, Val.parseNumericText(null));
+        eq("'NaN' → null", null, Val.parseNumericText("NaN"));
+        eq("'Infinity' → null", null, Val.parseNumericText("Infinity"));
+
+        // —— 标签层：强制模式 = 数值标签原样 + 字符串尝试解析；其余类型读不到 ——
+        eq("StringTag(\"64\") 强制转换", 64L,
+                DataProbe.asValForced(StringTag.valueOf("64")).longValue());
+        eq("StringTag(\"abc\") → null", null, DataProbe.asValForced(StringTag.valueOf("abc")));
+        eq("IntTag 照常（本来就是数值）", 7L, DataProbe.asValForced(IntTag.valueOf(7)).longValue());
+        eq("ListTag → null（类型不可转换）", null, DataProbe.asValForced(new ListTag()));
     }
 
     private static void t22StoreResize() {

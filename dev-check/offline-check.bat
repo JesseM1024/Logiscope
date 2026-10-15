@@ -16,13 +16,13 @@ rem  the console codepage.
 rem ============================================================
 setlocal
 cd /d "%~dp0.."
-set CP=build\classes\java\main;dev-check\lib\gson-2.10.1.jar;build\moddev\artifacts\forge-1.20.1-47.1.106-merged.jar
+set CP=build\classes\java\main;dev-check\lib\gson-2.10.1.jar;dev-check\lib\guava-31.1-jre.jar;build\moddev\artifacts\forge-1.20.1-47.1.106-merged.jar
 
 echo === [1/4] javac TestChart ===
 javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\TestChart.java
 if errorlevel 1 goto fail
 
-echo === [2/4] TestChart (expect 443 assertions, 0 failures) ===
+echo === [2/4] TestChart (expect 461 assertions, 0 failures) ===
 java -Dfile.encoding=UTF-8 -cp "build\dev-check;%CP%" TestChart
 if errorlevel 1 goto fail
 

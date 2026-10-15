@@ -29,6 +29,10 @@ import java.util.List;
  *                   只给 NBT 槽位锚点用：采样时拿它跟"现在那块地方是什么方块实体"比，
  *                   不一样就说明"这个 slot 号已经没有意义了"，该记 `no_data` 而不是记 0
  *                   （见 {@code DataProbe#readSlotAnchor} 与 ARCHITECTURE C24-10 的"读不到 vs 空格子"）。
+ * @param forceNumeric **强制按数值读取**（DATA 页在值列表上**右键**标记的）：
+ *                   读取时若标签是字符串，尝试把它解析成数值；不可转换照常记
+ *                   {@code no_data}。用于"数值被模组存成字符串"的键
+ *                   （如 {@code "energy": "1000"}）。只影响值的读取，不影响名称。
  */
 public record DataTarget(
         String valuePath,
@@ -38,12 +42,13 @@ public record DataTarget(
         ResourceKey<Level> dimension,
         BlockPos pos,
         int nbtSlot,
-        @Nullable String beType) {
+        @Nullable String beType,
+        boolean forceNumeric) {
 
-    /** 普通路径目标 */
+    /** 普通路径目标（非强制数值） */
     public DataTarget(String valuePath, @Nullable String namePath, String literalName,
                       String blockLabel, ResourceKey<Level> dimension, BlockPos pos) {
-        this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null);
+        this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null, false);
     }
 
     // ------------------------------------------------------------------
@@ -65,7 +70,7 @@ public record DataTarget(
      */
     public static DataTarget aeNetwork(String itemId, String blockLabel,
                                        ResourceKey<Level> dimension, BlockPos pos) {
-        return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null);
+        return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null, false);
     }
 
     /** 是不是 AE 网络目标 */
@@ -86,7 +91,7 @@ public record DataTarget(
     public static DataTarget slotAnchor(String listPath, String itemId, String blockLabel,
                                         ResourceKey<Level> dimension, BlockPos pos, int slot,
                                         @Nullable String beType) {
-        return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot, beType);
+        return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot, beType, false);
     }
 
     /** 是不是 NBT 槽位目标 */
@@ -114,6 +119,9 @@ public record DataTarget(
      * | NBT 槽位锚点（{@code isSlotAnchor}） | (列表路径, slot 号) 相同 | 同一 slot 只该有一条 |
      * | **AE 网络** | {@code literalName}（物品 registry id）相同 | 读的是"网络中该物品"，名字就是身份；valuePath 全是 {@code ae:network}，**绝不能拿它去重**（不然所有 AE 目标互判重复） |
      * | 普通路径 | valuePath 相同 | 一个路径一个数 |
+     *
+     * 普通路径的强制数值标记（{@code forceNumeric}）**不参与**去重 —— 同一路径
+     * 仍然只保留一个目标；要换口径（自动 ⇄ 强制）先删掉再加。
      */
     public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
         for (DataTarget d : list) {

@@ -37,11 +37,15 @@ public final class DataProbe {
     /**
      * 按路径取数值（**自适应**：NBT 的 byte/short/int/long 走精确 long，
      * float/double 走 double）。null = 没有方块实体 / 路径不存在 / 非数字。
+     *
+     * {@code target.forceNumeric()}（DATA 页右键标记）时走 {@link #asValForced}：
+     * 字符串标签会**尝试解析成数值**（有些模组把数值存成字符串）；不可转换
+     * 照常返回 null —— 上层记 no_data，不假装是 0。
      */
     @Nullable
     public Val readNumber(ServerLevel level, DataTarget target) {
         Tag tag = navigate(readRoot(level, target.pos()), Snbt.parsePath(target.valuePath()));
-        return asVal(tag);
+        return target.forceNumeric() ? asValForced(tag) : asVal(tag);
     }
 
     /**
@@ -152,5 +156,19 @@ public final class DataProbe {
             return Val.of(n.getAsDouble());
         }
         return Val.of(n.getAsLong());
+    }
+
+    /**
+     * **强制数值模式**的读数：数值标签照 {@link #asVal}；失败时再试
+     * **字符串解析**（{@link Val#parseNumericText}）。任意文本 / 列表 / 复合 /
+     * 空值 → null = 读不到（上层记 no_data）。
+     */
+    @Nullable
+    public static Val asValForced(@Nullable Tag tag) {
+        Val v = asVal(tag);
+        if (v != null) {
+            return v;
+        }
+        return tag instanceof StringTag s ? Val.parseNumericText(s.getAsString()) : null;
     }
 }
