@@ -8,7 +8,7 @@
 ## 一句话现状
 
 - **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **177** 键一致。
+  `verify-jar.py` 全过；lang 中英各 **178** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；0.1.0 同线；
   发布约定见 [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
@@ -129,21 +129,29 @@ Esc 才是清空。
 离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
 （lang 176 键一致）。实机复测见 `VERIFY.md` 第十八轮④（N1–N9）。
 
-## 第十八轮⑤：DATA 页右键强制数值（自 1.20.1 线回流，2026-10-15）
+## 第十八轮⑤：DATA 页右键强制数值（自 1.20.1 线回流；实机反馈后重写为一步式，2026-10-15）
 
 **需求**（用户原话归纳）："有的数值类型在 NBT 中被存储为字符串"；在 probe data 页新增
 **右键 = 强制把某个值按数值量读取**；原始值是字符串或无法转换为数值量的值 → 结果报 no data。
-功能先在 `1.20.1-neo` 线落地（[1.20.1] 轮次 4），随后回流本分支 —— 本提交 `f07ebad`
-（1.20.1 侧对应 `a6e701b`）。
+功能先在 `1.20.1-neo` 线落地（[1.20.1] 轮次 4），随后回流本分支：初版 `f07ebad`
+（1.20.1 侧对应 `a6e701b`）→ **实机反馈后重写为一步式 `8198679`**（1.20.1 侧对应 `9d8a02e`）。
 
 | 件 | 内容 |
 |---|---|
 | `analysis/Val` | 新增 `parseNumericText`（纯逻辑）：trim → `Long.parseLong`（整数精确）→ 纯整数超 long **拒绝近似** → `Double.parseDouble`；NaN / ∞ / 任意文本 → null。与 `of(double)` 的两条诚实边界同一口径 |
 | `collect/DataProbe` | `readNumber` 按 `DataTarget.forceNumeric` 分流；新增 `asValForced`：数值标签照 `asVal`，字符串再试文本解析；List / Compound → null = 读不到 |
 | `bind/DataTarget` | record 新增第 9 个分量 `forceNumeric`（**不参与去重**）；工厂方法 / 普通构造器默认 false |
-| `ui/ScopeScreen` | 值列表**右键**从"用作文名称"改为"强制按数值读取"（原行为取消）；左键取值 / 手输 / 粘贴 / 退格回到自动口径；`drawEditCell` 的标记参数改为 marker 色值（强制 = 琥珀 `0xFFFFB040`，名称跟 NBT = 品红 `COLOR_ANALYZE`） |
-| lang | 新增 `flash.data_force`；`data.hint.pick` 改口径（中英 176 → **177** 键） |
+| `ui/ScopeScreen` | 值列表**右键**从"用作文名称"改为**一步式强制数值追踪**（`handleDataValueRightClick`：加入追踪 / 同路径替换 / 非标量提示）；右键派发在 `mouseClicked` 的 `button != 0` 早退**之前**；左键语义不变；初版的 `dataForceNumeric` 编辑框状态已撤除（`drawEditCell` 恢复 autoName 版） |
+| lang | 新增 `flash.data_force` / `flash.data_not_scalar`；`data.hint.pick` 改口径（中英 176 → **178** 键） |
 | `dev-check` | t40 断言 18 条（443 → **461**）；classpath 补 `guava-32.1.2-jre`（t40 的 `ListTag` 构造依赖）；新增 `offline-check.bat` 一键脚本（与 1.20.1 线同款） |
+
+**实机反馈与重写（同日）**：1.20.1 侧实测"右键无法把 '100' / '39900' 这样的值作为数据追踪" ——
+根因：`mouseClicked` 在 `button != 0` 时直接 `return true`（右键早退），初版把右键分支写在了
+只接左键的 `handleDataClick` 里 = **死代码**（离线断言测不到 UI 事件流，未暴露）。重写要点：
+- 右键派发移到早退之前（`mouseClicked` 里的 DATA 页右键通道）
+- 右键 = **直接按「强制数值」口径加入追踪**（一步式，不再绕"填编辑框 → 点确认"）
+- 同路径已存在时**替换**（自动 ⇄ 强制换口径不必先删再加）
+- 非标量条目（列表 / 复合）右键明确提示，不硬加
 
 **设计取舍**：
 - **"强制"是路径的属性，不是全局开关**：标记跟着这一次填进的值路径走（加进目标列表后
@@ -152,7 +160,7 @@ Esc 才是清空。
 - **左键语义不变**（数值 = 取值路径 / 文字 = 当名称）：右键是纯增量。
 
 离线：build / TestChart 461 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
-（lang 177 键一致）。实机复测见 `VERIFY.md` 第十八轮⑤（P1–P6）。
+（lang 178 键一致）。实机复测见 `VERIFY.md` 第十八轮⑤（C-4，P1–P7）。
 
 ## 未完成 / 待优化项
 

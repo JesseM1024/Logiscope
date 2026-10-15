@@ -1451,7 +1451,7 @@ items: [ { id: "minecraft:iron_ingot", count: 64, slot: 9b }, … ]   // 扁平�
   - **C26-1 读取按标签类型分流**：`DataProbe.asVal` 里 NBT 的 byte/short/int/long 走
     `Val.of(long)`（2^63 也精确），float/double 走 `Val.of(double)`；
     **非有限（NaN/∞）→ null = 读不到**（绝不把 NaN 变成 0）。
-    **强制数值模式**（DATA 页右键标记 `DataTarget.forceNumeric`）改走 `asValForced`：
+    **强制数值模式**（DATA 页右键加入追踪，`DataTarget.forceNumeric`）改走 `asValForced`：
     数值标签照 `asVal`；字符串再试 `Val.parseNumericText`（整数优先 long、纯整数超 long
     拒绝近似、小数走 double）；其余类型 / 不可转换 → null 照常记 no-data（不垫 0）。
   - **C26-2 渲染走 `asDouble()`**：`WaveColumns` 的列缓冲保持 `double[]`、逐列聚合零分配
