@@ -4452,8 +4452,9 @@ public final class ScopeScreen extends Screen {
         List<DataTarget> dts = src == null ? List.of() : src.dataTargets();
         dataTgtScroll = Math.max(0, Math.min(dataTgtScroll,
                 Math.max(0, dts.size() - R.tgtRows())));
-        g.drawString(this.font, tr("logiscope.data.targets") + " · " + dts.size()
-                + "  ·  " + tr("logiscope.data.targets_hint"), left, R.tgtTop(), COLOR_ANALYZE, false);
+        g.drawString(this.font, cut(tr("logiscope.data.targets") + " · " + dts.size()
+                + "  ·  " + tr("logiscope.data.targets_hint"), L.w() - 2 * PAD),
+                left, R.tgtTop(), COLOR_ANALYZE, false);
         for (int i = 0; i < R.tgtRows(); i++) {
             int idx = dataTgtScroll + i;
             if (idx >= dts.size()) {
