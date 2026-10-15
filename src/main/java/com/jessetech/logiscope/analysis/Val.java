@@ -54,6 +54,53 @@ public record Val(boolean integral, long i, double d) implements Comparable<Val>
         return integral;
     }
 
+    /**
+     * **文本 → 数值**（尽力精确）：给 DATA 页「强制按数值读取」用 ——
+     * 有些模组把数值存成**字符串** NBT（如 {@code "energy": "1000"}），
+     * 这个入口把那段文本转回数值；转不出来按"读不到"处理（上层记 no_data）。
+     *
+     * 规则（与 {@link #of(double)} 的两条诚实边界同一口径）：
+     *   · 先试 {@code Long.parseLong} —— 整数读数必须保持精确；
+     *   · **纯整数形式但超出 long** → 返回 null（宁 no-data，不近似成 double）；
+     *   · 其余走 {@code Double.parseDouble}，非有限（NaN / Infinity）由
+     *     {@link #of(double)} 过滤成 null；
+     *   · 空串 / 任意文本 → null。
+     */
+    @Nullable
+    public static Val parseNumericText(@Nullable String text) {
+        String t = text == null ? "" : text.trim();
+        if (t.isEmpty()) {
+            return null;
+        }
+        try {
+            return of(Long.parseLong(t));
+        } catch (NumberFormatException ignored) {
+            // 不是 long 范围内的整数：继续往下试
+        }
+        if (isPureInteger(t)) {
+            return null;   // 纯整数但超 long 范围：拒绝近似
+        }
+        try {
+            return of(Double.parseDouble(t));
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    /** 纯整数形式（可带正负号，其余全是数字）—— 给"超 long 的整数拒绝近似"那一步用 */
+    private static boolean isPureInteger(String t) {
+        int start = t.charAt(0) == '+' || t.charAt(0) == '-' ? 1 : 0;
+        if (start >= t.length()) {
+            return false;
+        }
+        for (int i = start; i < t.length(); i++) {
+            if (!Character.isDigit(t.charAt(i))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** 整数形式的原值（仅当 {@link #isIntegral()} 时有意义） */
     public long longValue() {
         return i;

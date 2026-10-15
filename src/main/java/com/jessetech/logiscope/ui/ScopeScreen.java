@@ -285,6 +285,11 @@ public final class ScopeScreen extends Screen {
     private int dataSrcProbeId = Integer.MIN_VALUE;
     /** 采样值路径（可手输，也可点下面的值填进来） */
     private String dataPath = "";
+    /**
+     * 值路径是不是**右键强制按数值读取**来的（字符串值会被尝试解析成数值）。
+     * 任何"自动"途径改动路径（左键取值、手输、粘贴）都会清掉它。
+     */
+    private boolean dataForceNumeric;
     /** 名称字面量（可手输；点一个字符串值也会填这里） */
     private String dataName = "";
     /**
@@ -3759,6 +3764,7 @@ public final class ScopeScreen extends Screen {
                 if (dataPath.length() < 120) {
                     dataPath += codePoint;
                 }
+                dataForceNumeric = false;   // 手输 = 自动口径（强制要在列表上右键重新标）
             } else if (dataName.length() < 48) {
                 dataName += codePoint;
                 dataNamePath = null;   // 手输名称 → 不再跟 NBT 走（手输优先）
@@ -3847,6 +3853,7 @@ public final class ScopeScreen extends Screen {
                 case 259 -> {   // Backspace
                     if (dataFocus == 1) {
                         dataPath = chop(dataPath);
+                        dataForceNumeric = false;   // 手输同口径：回到自动
                     } else {
                         dataName = chop(dataName);
                     }
@@ -3882,6 +3889,7 @@ public final class ScopeScreen extends Screen {
             clip = clip.trim();
             if (dataFocus == 1) {
                 dataPath = clip.length() > 120 ? clip.substring(0, 120) : clip;
+                dataForceNumeric = false;   // 手输同口径：回到自动
             } else {
                 dataName = clip.length() > 48 ? clip.substring(0, 48) : clip;
                 dataNamePath = null;
@@ -4151,6 +4159,7 @@ public final class ScopeScreen extends Screen {
         dataPath = "";
         dataName = "";
         dataNamePath = null;
+        dataForceNumeric = false;
         dataFocus = 0;
         dataEntries = List.of();
         dataParsedFrom = "";
@@ -4464,14 +4473,19 @@ public final class ScopeScreen extends Screen {
         // ---- 4) 虚拟容器：一行两格（值 / 名称）----
         int cellY = R.editTop();
         drawEditCell(g, left, cellY, R.cellW(), tr("logiscope.data.field.value"),
-                dataPath, dataFocus == 1, false);
+                dataPath, dataFocus == 1, dataForceNumeric ? 0xFFFFB040 : 0);
         drawEditCell(g, left + R.cellW() + PAD, cellY, R.cellW(), tr("logiscope.data.field.name"),
-                dataName, dataFocus == 2, dataNamePath != null);
+                dataName, dataFocus == 2, dataNamePath != null ? COLOR_ANALYZE : 0);
     }
 
-    /** 一个可编辑的小格：上面一行小标签，下面一格内容（焦点时描边 + 光标） */
+    /**
+     * 一个可编辑的小格：上面一行小标签，下面一格内容（焦点时描边 + 光标）。
+     *
+     * {@code marker} 非 0 时在右上角画一个小点，颜色由调用方给（同一语汇，两种含义）：
+     * 名称跟着 NBT 走 = 品红；值被标记"强制按数值读取" = 琥珀色。
+     */
     private void drawEditCell(GuiGraphics g, int x, int y, int w, String label,
-                              String value, boolean focused, boolean autoName) {
+                              String value, boolean focused, int marker) {
         g.drawString(this.font, label, x, y - 9, 0xFF8A8AA0, false);
         int border = focused ? 0xFF8A8AC8 : 0xFF4A4A5E;
         g.fill(x, y, x + w, y + CHIP_H, focused ? 0xFF2A2A38 : 0xFF1C1C26);
@@ -4482,9 +4496,8 @@ public final class ScopeScreen extends Screen {
         int color = shown.isEmpty() ? 0xFF6A6A78 : 0xFFE0E0EC;
         g.drawString(this.font, shown.isEmpty() ? tr("logiscope.data.field.empty") : draw,
                 x + 5, y + 3, color, false);
-        if (autoName && !shown.isEmpty()) {
-            // 名称跟着 NBT 走时给一个品红点（与"名称来源是 NBT"同一语汇）
-            g.fill(x + w - 5, y + 3, x + w - 2, y + 6, COLOR_ANALYZE);
+        if (marker != 0 && !shown.isEmpty()) {
+            g.fill(x + w - 5, y + 3, x + w - 2, y + 6, marker);
         }
         if (focused && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
             int cx = x + 5 + Math.min(this.font.width(shown), avail);
@@ -4492,7 +4505,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    /** DATA 页的鼠标点击：值列表（左键取值路径 / 右键用它的文字作名称）+ 两个编辑格 */
+    /** DATA 页的鼠标点击：值列表（左键 数值 = 取值路径 / 左键 文字 = 当名称 / 右键 = 强制按数值读取）+ 两个编辑格 */
     private boolean handleDataClick(int mx, int my, Layout L, int button) {
         // 刷新滑条：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
         int[] sl = dataSliderRect(L);
@@ -4529,6 +4542,7 @@ public final class ScopeScreen extends Screen {
                 if (button == 0) {
                     if (e.numeric()) {
                         dataPath = e.path();
+                        dataForceNumeric = false;
                     } else {
                         // 数值叶子才可采样：点到字符串值就当作"指定名称"
                         dataName = e.node().text() == null ? e.path() : e.node().text();
@@ -4537,8 +4551,11 @@ public final class ScopeScreen extends Screen {
                     return true;
                 }
                 if (button == 1) {
-                    dataName = e.node().text() == null ? e.path() : e.node().text();
-                    dataNamePath = e.textual() ? e.path() : null;
+                    // 右键 = **强制按数值读取**：适合"数值被模组存成字符串"的键
+                    // （如 "energy": "1000"）。不可转换的值也能加，采样时照常记 no-data。
+                    dataPath = e.path();
+                    dataForceNumeric = true;
+                    say(tr("logiscope.flash.data_force").replace("%s", e.path()));
                     return true;
                 }
             }
@@ -4597,11 +4614,12 @@ public final class ScopeScreen extends Screen {
         }
         ProbeTarget t = src.target();
         boolean added = src.addDataTarget(new DataTarget(path, dataNamePath, dataName.trim(),
-                t.deviceName(), t.dimension(), t.pos()));
+                t.deviceName(), t.dimension(), t.pos(), -1, null, dataForceNumeric));
         if (added) {
             dataPath = "";
             dataName = "";
             dataNamePath = null;
+            dataForceNumeric = false;
             String msg = tr("logiscope.flash.data_added").replace("%s", path);
             // 值装不下就当场说清楚 // 样本存储是 int（±21 亿）。追一个 2^63 的值（创造能量立方这类）时，
             // 图上会一条线都没有、只有 no-data 在涨 —— 与其让用户对着空图猜原因，
