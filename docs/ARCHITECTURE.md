@@ -1226,7 +1226,7 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
   （绝不写 0）；多人（无集成服务端）→ PAUSED。
 - **C20-5 与物品探针同构**：数据探针也是 `ProbeInstance`，所以图表 / 框选 / 标记 /
   存档 / 回放 / 计算**全部零改动**可用。
-- **C20-6 已知的性能取舍**：每 tick 构建整份 NBT 再取一个值（见 PROGRESS"待优化项"），
+- **C20-6 已知的性能取舍**：每 tick 构建整份 NBT 再取一个值（见 PROGRESS.md「未完成 / 待优化项」），
   接口不变、可局部替换。
 - **C20-7 多目标与物品共存**：一个探针 = 容器格物品监测 +
   **任意多个** NBT 数据目标（`dataTargets`，COW 列表）。服务端 tick 两段式采样：
