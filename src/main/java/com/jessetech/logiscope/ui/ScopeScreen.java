@@ -50,6 +50,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -180,6 +181,8 @@ public final class ScopeScreen extends Screen {
     private static final int COLOR_ANALYZE = 0xFFE070D8;
     /** NBT 原文悬浮高亮：黄（实测反馈淡紫在深底上难认；黄与深底对比最强） */
     private static final int COLOR_HILIGHT = 0x80FFD24A;
+    /** 「按数值读取」（DATA 页右键填入值格）的黄标 —— 值格右端点的小方格（同悬浮高亮的黄） */
+    private static final int COLOR_FORCED = 0xFFFFD24A;
     /** QoL：「主界面」按钮淡绿 / 「回选格」淡蓝 —— 也用作顶栏光效的页色 */
     private static final int COLOR_MAINSCREEN = 0xFF90EE90;
     private static final int COLOR_BACKSLOT = 0xFF8FB8E8;
@@ -293,6 +296,12 @@ public final class ScopeScreen extends Screen {
      */
     @Nullable
     private String dataNamePath;
+    /**
+     * 值是不是**右键按数值读取**来的：字符串值会被尝试解析成数值
+     * （见 {@code DataProbe#asValForced}）。值格右端点的黄标显示这个口径；
+     * 手改路径（手输 / 粘贴 / 退格）或左键取值都会清掉它（回到自动口径）。
+     */
+    private boolean dataForceNumeric;
     /** 当前聚焦的输入格：0 = 没有，1 = 值路径，2 = 名称 */
     private int dataFocus;
     private int dataScroll;
@@ -2553,10 +2562,10 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // QoL：DATA 页右键值条目 = **直接按「强制数值」口径加入追踪**。
-        // 必须在下面 `button != 0` 早退**之前** —— 否则右键根本走不到值列表
-        // （旧实现在只接左键的 {@link #handleDataClick} 里写了右键分支，等于死代码，
-        // 实机测出"右键无反应"）。
+        // QoL：DATA 页右键值条目 = **按数值读取**口径，把该路径**填入值格**
+        // （不直接加入追踪：填好后可以先设名称、再「确认添加」）。
+        // 必须在下面 `button != 0` 早退**之前** —— 右键分支曾写在只接左键的
+        // {@link #handleDataClick} 里而成为死代码（实机表现为"右键无反应"），勿再下移。
         if (button == 1 && page == Page.DATA
                 && handleDataValueRightClick((int) mouseX, (int) mouseY, L)) {
             return true;
@@ -3769,6 +3778,7 @@ public final class ScopeScreen extends Screen {
                 if (dataPath.length() < 120) {
                     dataPath += codePoint;
                 }
+                dataForceNumeric = false;   // 手输 = 自动口径（要强制就重新右键标）
             } else if (dataName.length() < 48) {
                 dataName += codePoint;
                 dataNamePath = null;   // 手输名称 → 不再跟 NBT 走（手输优先）
@@ -3857,6 +3867,7 @@ public final class ScopeScreen extends Screen {
                 case 259 -> {   // Backspace
                     if (dataFocus == 1) {
                         dataPath = chop(dataPath);
+                        dataForceNumeric = false;   // 手输同口径：回到自动
                     } else {
                         dataName = chop(dataName);
                     }
@@ -3892,6 +3903,7 @@ public final class ScopeScreen extends Screen {
             clip = clip.trim();
             if (dataFocus == 1) {
                 dataPath = clip.length() > 120 ? clip.substring(0, 120) : clip;
+                dataForceNumeric = false;   // 手输同口径：回到自动
             } else {
                 dataName = clip.length() > 48 ? clip.substring(0, 48) : clip;
                 dataNamePath = null;
@@ -4161,6 +4173,7 @@ public final class ScopeScreen extends Screen {
         dataPath = "";
         dataName = "";
         dataNamePath = null;
+        dataForceNumeric = false;
         dataFocus = 0;
         dataEntries = List.of();
         dataParsedFrom = "";
@@ -4474,14 +4487,19 @@ public final class ScopeScreen extends Screen {
         // ---- 4) 虚拟容器：一行两格（值 / 名称）----
         int cellY = R.editTop();
         drawEditCell(g, left, cellY, R.cellW(), tr("logiscope.data.field.value"),
-                dataPath, dataFocus == 1, false);
+                dataPath, dataFocus == 1, dataForceNumeric ? COLOR_FORCED : 0);
         drawEditCell(g, left + R.cellW() + PAD, cellY, R.cellW(), tr("logiscope.data.field.name"),
-                dataName, dataFocus == 2, dataNamePath != null);
+                dataName, dataFocus == 2, dataNamePath != null ? COLOR_ANALYZE : 0);
     }
 
-    /** 一个可编辑的小格：上面一行小标签，下面一格内容（焦点时描边 + 光标） */
+    /**
+     * 一个可编辑的小格：上面一行小标签，下面一格内容（焦点时描边 + 光标）。
+     *
+     * {@code marker} 非 0 时在右端点画一个小方格，颜色由调用方给（同一语汇，两种含义）：
+     * 名称跟着 NBT 走 = 品红；值被标了「按数值读取」 = 黄。
+     */
     private void drawEditCell(GuiGraphics g, int x, int y, int w, String label,
-                              String value, boolean focused, boolean autoName) {
+                              String value, boolean focused, int marker) {
         g.drawString(this.font, label, x, y - 9, 0xFF8A8AA0, false);
         int border = focused ? 0xFF8A8AC8 : 0xFF4A4A5E;
         g.fill(x, y, x + w, y + CHIP_H, focused ? 0xFF2A2A38 : 0xFF1C1C26);
@@ -4492,9 +4510,9 @@ public final class ScopeScreen extends Screen {
         int color = shown.isEmpty() ? 0xFF6A6A78 : 0xFFE0E0EC;
         g.drawString(this.font, shown.isEmpty() ? tr("logiscope.data.field.empty") : draw,
                 x + 5, y + 3, color, false);
-        if (autoName && !shown.isEmpty()) {
-            // 名称跟着 NBT 走时给一个品红点（与"名称来源是 NBT"同一语汇）
-            g.fill(x + w - 5, y + 3, x + w - 2, y + 6, COLOR_ANALYZE);
+        if (marker != 0 && !shown.isEmpty()) {
+            // 右端点的小方格：名称跟 NBT = 品红；值按数值读取 = 黄（色由调用方给）
+            g.fill(x + w - 5, y + 3, x + w - 2, y + 6, marker);
         }
         if (focused && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
             int cx = x + 5 + Math.min(this.font.width(shown), avail);
@@ -4505,7 +4523,7 @@ public final class ScopeScreen extends Screen {
     /**
      * DATA 页的鼠标点击（**只接左键**，见 {@link #mouseClicked} 的 button != 0 早退）：
      * 值列表（数值 = 取值路径 / 文字 = 当名称）+ 两个编辑格 + 刷新滑条。
-     * 右键（强制数值追踪）走 {@link #handleDataValueRightClick}。
+     * 右键（按数值读取填入值格）走 {@link #handleDataValueRightClick}。
      */
     private boolean handleDataClick(int mx, int my, Layout L, int button) {
         // 刷新滑条：左键按下即开始拖动（拖动继续在 mouseDragged 里跟）
@@ -4543,6 +4561,7 @@ public final class ScopeScreen extends Screen {
                 if (button == 0) {
                     if (e.numeric()) {
                         dataPath = e.path();
+                        dataForceNumeric = false;   // 左键取值 = 自动口径
                     } else {
                         // 数值叶子才可采样：点到字符串值就当作"指定名称"
                         dataName = e.node().text() == null ? e.path() : e.node().text();
@@ -4580,15 +4599,15 @@ public final class ScopeScreen extends Screen {
     }
 
     /**
-     * DATA 页值列表的**右键**：直接按「强制数值」口径把该路径加入追踪。
+     * DATA 页值列表的**右键**：把该路径**按「按数值读取」口径填进值格**（不直接加入追踪）。
      *
-     * 为什么一步到位：字符串存储的数值（如 {@code "energy": "1000"}）只有按数值读
-     * 才有意义，右键的意图就是"追踪这个数" —— 不再绕"填进编辑框 → 再点确认添加"两步
-     * （那种两步式在实机上表现为"右键没反应"，因为 panel 的右键早退在它之前）。
+     * 不直接加的原因：填进值格后用户可以接着设名称（左键字符串值 / 手输），
+     * 再点「确认添加」—— 一步式把"追哪个数"和"叫什么名"绑死了，两步更可控。
+     * 值格右端点的**黄色小方格**标记这个口径（与名称格的品红点同一语汇）；
+     * 手改路径（手输 / 粘贴 / 退格）或左键取值都会清掉它（回到自动口径）。
      * 数值条目也允许（读数与自动口径一致，只是显式声明按数值读）。
      *
-     * 同路径已存在时**替换**：自动 ⇄ 强制换口径不必先删再加（同一路径本来就只该有一条，
-     * 去重规则不变 —— 这里主动把旧的那条移掉再加强制版）。
+     * 非单值条目（列表 / 复合）没有可采样的数：明确提示，不填。
      *
      * @return 是否处理了这次右键（false = 没点在值条目行上，事件继续往上走）
      */
@@ -4605,44 +4624,24 @@ public final class ScopeScreen extends Screen {
         }
         Snbt.Entry e = dataEntries.get(idx);
         if (!e.numeric() && !e.textual()) {
-            // 列表 / 复合节点：不是单个可读值，硬加进去只会全程 no-data —— 明确说清楚
+            // 列表 / 复合节点：不是单个可读值，按数值读也读不出东西 —— 明确说清楚
             say(tr("logiscope.flash.data_not_scalar").replace("%s", e.path()));
             return true;
         }
-        ProbeInstance src = dataSrcProbe();
-        if (src == null) {
-            return true;
-        }
-        ProbeTarget t = src.target();
-        DataTarget forced = new DataTarget(e.path(), null, "", t.deviceName(),
-                t.dimension(), t.pos(), -1, null, true);
-        if (DataTarget.isDuplicate(src.dataTargets(), forced)) {
-            // 已有同路径目标（多半是自动口径）：先移除旧的，再加强制版（换口径）
-            src.removeDataTarget(e.path());
-        }
-        boolean added = src.addDataTarget(forced);
-        if (added) {
-            say(tr("logiscope.flash.data_force").replace("%s", e.path()));
-        } else {
-            say(tr("logiscope.flash.data_dup").replace("%s", e.path()));
-        }
+        dataPath = e.path();
+        dataForceNumeric = true;
+        say(tr("logiscope.flash.data_force").replace("%s", e.path()));
         return true;
     }
 
     /**
-     * 「开始采样」：新建一个**数据探针**并按这条路径逐 tick 取值。
-     *
-     * 与物品探针的入口（选格 → 完成）并列的第二条创建路径：选格页那条走
-     * "菜单槽 / ItemHandler 能力"，这条走 "NBT 路径"。两者产出的都是 ProbeInstance，
-     * 所以图表 / 框选 / 标记 / 存档 / 计算全部通用。
-     */
-    /**
      * 「确认添加」：把当前选的 值/路径 + 名称 作为**一个追踪目标**加进探针。
      *
-     * 与的区别 原先是"立即建一个纯数据探针开始采样"，一次只能追一个值；
-     * 现在目标攒在**这个探针**的列表里（可以加好几个），回选格点「完成」后与
-     * 容器格的物品监测**一起**开始。目标加进列表后值与名称就锁定了 —— 要改就删掉重加
-     * （"配置"和"正在跑的记录"必须分开，改配置不碰数据）。
+     * 这是与物品探针入口（选格 → 完成）并列的第二条创建路径：那条走"菜单槽 /
+     * ItemHandler 能力"，这条走 "NBT 路径"。目标攒在**这个探针**的列表里（可以加
+     * 好几个），回选格点「完成」后与容器格的物品监测**一起**开始。
+     * 同路径再次确认、设置变了（读取口径 / 名称）= **替换**旧的那条（同一路径只留
+     * 一条）；设置没变才提示重复。
      */
     private void confirmDataTarget() {
         ProbeInstance src = dataSrcProbe();
@@ -4655,13 +4654,32 @@ public final class ScopeScreen extends Screen {
             return;
         }
         ProbeTarget t = src.target();
-        boolean added = src.addDataTarget(new DataTarget(path, dataNamePath, dataName.trim(),
-                t.deviceName(), t.dimension(), t.pos()));
-        if (added) {
+        DataTarget target = new DataTarget(path, dataNamePath, dataName.trim(),
+                t.deviceName(), t.dimension(), t.pos(), -1, null, dataForceNumeric);
+        // 同一路径只留一条普通目标：设置变了（读取口径 / 名称）就**替换** ——
+        // 「右键填入 + 确认」的常见意图就是把已有那条改成按数值读、或补个名称，
+        // 不必先删再加。只扫普通路径目标：slot 锚点 / AE 目标即便路径字符串偶然相同也不参与。
+        DataTarget old = null;
+        for (DataTarget dt : src.dataTargets()) {
+            if (!dt.isSlotAnchor() && !dt.isAeNetwork() && dt.valuePath().equals(path)) {
+                old = dt;
+                break;
+            }
+        }
+        if (old != null && old.forceNumeric() == dataForceNumeric
+                && Objects.equals(old.namePath(), dataNamePath)
+                && old.literalName().equals(dataName.trim())) {
+            say(tr("logiscope.flash.data_dup").replace("%s", path));
+            return;
+        }
+        boolean ok = old != null ? src.replaceDataTarget(old, target) : src.addDataTarget(target);
+        if (ok) {
             dataPath = "";
             dataName = "";
             dataNamePath = null;
-            String msg = tr("logiscope.flash.data_added").replace("%s", path);
+            dataForceNumeric = false;
+            String msg = tr(old != null ? "logiscope.flash.data_updated" : "logiscope.flash.data_added")
+                    .replace("%s", path);
             // 值装不下就当场说清楚 // 样本存储是 int（±21 亿）。追一个 2^63 的值（创造能量立方这类）时，
             // 图上会一条线都没有、只有 no-data 在涨 —— 与其让用户对着空图猜原因，
             // 不如在添加的那一刻把数值和上限都摆出来（只提醒、不拦着：值可能以后落回范围内）。

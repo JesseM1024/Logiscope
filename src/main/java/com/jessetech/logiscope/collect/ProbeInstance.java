@@ -216,6 +216,31 @@ public final class ProbeInstance {
     }
 
     /**
+     * **替换一个普通路径目标**（DATA 页「确认添加」时同路径换了设置：读取口径 / 名称）。
+     *
+     * 同一条普通路径只留一条 —— 旧的（{@code old}）换成新的（{@code now}），原子完成。
+     * 只按**精确相等**匹配 {@code old}：slot 锚点 / AE 目标即便路径字符串偶然相同也不碰
+     * （{@link #removeDataTarget} 按 valuePath 删、会误伤它们，这里不能用它）。
+     *
+     * @return 是否真的替换了（false = {@code old} 已不在列表里，竞争条件下才可能）
+     */
+    public boolean replaceDataTarget(DataTarget old, DataTarget now) {
+        synchronized (sampleLock) {
+            List<DataTarget> n = new ArrayList<>(dataTargets);
+            if (!n.remove(old)) {
+                return false;
+            }
+            n.add(now);
+            dataTargets = List.copyOf(n);
+            // 与 addDataTarget 同款兜底：列表非空就该是可采样状态
+            if (state == State.ARMED && integratedServerUp()) {
+                enterFollowing();
+            }
+            return true;
+        }
+    }
+
+    /**
      * **用"这一刻选中的格子"替换掉全部 NBT 槽位锚点**。
      *
      * 与 {@link #addDataTarget} 的差别就是这个函数的全部意义 * 覆写语义：**回选格页再点「完成」应当是覆写** ——
