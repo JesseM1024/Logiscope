@@ -156,7 +156,7 @@ python verify-jar.py build/libs/logiscope-0.1.0-1.20.1.jar
 
 | # | 检查 | 期望 |
 |---|---|---|
-| E1 | `gradlew.bat build`（本机已装 `~/.gradle/init.d/logiscope-offline.gradle` ⇒ 自动离线；无该脚本时手加 `--offline`） | `BUILD SUCCESSFUL`。离线是必需项：同步要联网校验 forge userdev 元数据，而 `maven.neoforged.net` 不可达 |
+| E1 | `gradlew.bat build`（本机已在 `~/.gradle/gradle.properties` 配代理 ⇒ 联网校验元数据走代理；无代理的机器加 `--offline`） | `BUILD SUCCESSFUL`。这里必须联网：同步要校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
 | E2 | `TestChart` | **443 条**断言全过；lang 中英各 **176** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
