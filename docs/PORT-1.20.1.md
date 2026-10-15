@@ -24,7 +24,7 @@
 | 目标 NeoForge | `1.20.1-47.1.106`（1.20.1 线最后一个版本；**待核实**：以 maven 实际产物为准） |
 | Java | **17**（`org.gradle.java.home` 与 toolchain 都要改） |
 | 模组版本 | `0.1.0-1.20.1`（版本号带 MC 后缀的约定见 `gradle.properties` 注释） |
-| 分支 | `1.20.1-neo`（从 master 的"版本号 0.1.0-1.21.1"提交切出） |
+| 分支 | `1.20.1-neo`（从 main 线的 `c00c545`「版本号带 MC 后缀」提交切出；2026-10-15 用文档 blob 比对核实） |
 
 **前提（待用户确认）**：需要一个 1.20.1 的测试实例。现有两个实例
 （`1.21.1-NeoForge`、`NAST hard d0.9.5`）都是 1.21.1，可能需新装 `1.20.1-NeoForge`。
@@ -54,7 +54,7 @@
 
 ## 三、元数据层改动
 
-| 项 | 1.21.1（master） | 1.20.1（本分支） |
+| 项 | 1.21.1（main） | 1.20.1（本分支） |
 |---|---|---|
 | 元数据文件名 | `META-INF/neoforge.mods.toml` | **`META-INF/mods.toml`**（已改名，`git mv`） |
 | 依赖字段 | `type="required"` | **`mandatory=true`**（`type` 写法是 20.2+ 才有） |
@@ -76,7 +76,7 @@
 jar 内只有 `net/minecraft` + `net/minecraftforge`，**没有任何 `net/neoforged`**。
 所以移植方向是 `net.neoforged.*` → `net.minecraftforge.*`（不是"包名不用改"）：
 
-| 1.21.1（master） | 1.20.1（本分支，已开包核实） |
+| 1.21.1（main） | 1.20.1（本分支，已开包核实） |
 |---|---|
 | `net.neoforged.fml.common.Mod` | `net.minecraftforge.fml.common.Mod`（FML 类不在 merged jar 里，走独立 FML 依赖） |
 | `net.neoforged.bus.api.IEventBus` | `net.minecraftforge.eventbus.api.IEventBus` |
@@ -140,22 +140,32 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 ## 六、IJ 操作步骤（建分支与日常切换）
 
 1. `1.20.1-neo` 分支已建立并完成全部配置 / API 移植（勾选状态见末节）。
-2. （参考）建分支：IJ 右下角 Git widget → master 右键 → New Branch，勾选 Checkout；
+2. （参考）建分支：IJ 右下角 Git widget → main 右键 → New Branch，勾选 Checkout；
    等价命令 `git switch -c 1.20.1-neo`。
 3. 在分支上改配置层（本文二、三节）→ 弹出 "Load Gradle Changes"（Ctrl+Shift+O）→ 同步；
    首次会下载 1.20.1 全套产物，较慢。
+   > **同步卡住 / import 全红时的正解（2026-10-15 实测）**：同步要联网 HEAD 校验
+   > `forge-1.20.1-47.1.106-userdev.jar` 的元数据，而 `maven.neoforged.net` 从国内常不可达
+   > （报 `Connection timed out`）⇒ `createMinecraftArtifacts` 失败，编辑器里
+   > `import net.minecraftforge.*` / `net.minecraft.*` 全红。**这不是代码问题**：
+   > 元数据与产物本机已齐全（`~/.gradle/caches/neoformruntime`），
+   > 加 **`--offline`**（IJ：Gradle 工具窗口的「离线模式」开关）再同步即恢复。
 4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
-   （随分支走）；File → Project Structure → Project SDK 选 17（只影响 IJ 编辑器解析）。
+   （随分支走）；File → Project Structure → Project SDK 选 17。
+   ⚠️ `.idea/` **不受 git 管理**，切分支不会自动改编辑器 SDK —— 每次切到本分支后手动设一次
+   （只影响 IJ 编辑器解析，Gradle 侧由 `org.gradle.java.home` 保证）。
 5. **切分支串味**（已解决一半）：`build/`、run 目录不受 git 管理——
    - 本分支 build.gradle 的 runs.configureEach 里已设
      `gameDirectory = project.file('1_20_1_neo')`（属性名 javap 核实：
      `RunModel.getGameDirectory()`），首次 `runClient` 会自动创建该目录；
-     `saves` / `options.txt` / mods / logs 与 master 的 `run/` 互不覆盖。
+     `saves` / `options.txt` / mods / logs 与 main 的 `run/` 互不覆盖。
    - `build/` 仍共用：**切回 1.21.1 前先 `gradlew.bat clean`，切完重新 sync**。
    - 两条铁律照旧：测试 jar 换版本线时**先删同名旧 jar**；正在开发的模组不进 run 目录的 mods。
-   - 测试 jar 目标路径：1.20.1 线 = `1_20_1_neo/mods/`；master 线 = `run/mods/`。
-6. 分支策略：`master` = 1.21.1 主线；通用 bugfix 进 master 后 cherry-pick 到 `1.20.1-neo`；
+   - 测试 jar 目标路径：1.20.1 线 = `1_20_1_neo/mods/`；main 线 = `run/mods/`。
+6. 分支策略：`main` = 1.21.1 主线；通用 bugfix 进 main 后 cherry-pick 到 `1.20.1-neo`；
    只对单侧成立的修复不互挑（在提交消息里注明"仅 1.20.1"或"仅 1.21.1"）。
+   搬运一律 `git cherry-pick -x <sha>`（两条历史无共同祖先，**不要 merge / rebase**）；
+   文档类提交若有 1.20.1 专有内容（`README` / 本文件 / `VERIFY`），冲突时保留分支侧内容。
 
 ## 七、已知限制（1.20.1 线）
 
@@ -164,7 +174,7 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 | 配置界面入口不存在 | NeoForge 的 ConfigurationScreen 是 20.4+ 才有；改 TOML（config/logiscope-client.toml） |
 | 假槽无法识别 | Forge 1.20.1 的 Slot 没有 isFake()；isSelectable 只排除玩家背包 |
 | `/tick rate` 改速时秒数按 20 换算 | 1.20.1 没有 tickRateManager / 速率同步包 |
-| **模组必须带 pack.mcmeta**（pack_format 15） | 1.20.1 资源包机制；没有 = lang 不加载 = 界面全是键名（2026-09-20 实测踩中，日志证据 `Missing metadata in pack mod:logiscope`）。1.21 的 NeoForge 用 neoforge.mods.toml 充当打包元数据，master 不需要 |
+| **模组必须带 pack.mcmeta**（pack_format 15） | 1.20.1 资源包机制；没有 = lang 不加载 = 界面全是键名（2026-09-20 实测踩中，日志证据 `Missing metadata in pack mod:logiscope`）。1.21 的 NeoForge 用 neoforge.mods.toml 充当打包元数据，main 不需要 |
 | **dev 环境下 SRG-mixin 模组必炸**（如 Create 6 内嵌 flywheel 1.0.5） | 开发运行时是 named 映射，SRG 写的 `@Shadow` 定位不到（报 `@Shadow ... not located`）；**生产环境正常**。结论：Create 只放整合包实例测，dev 的 `1_20_1_neo/mods/` 里放 mods-disabled。 |
 | 不要尝试"给 mod jar 本地做 SRG→named 重映射" | FART + tsrg2 方案未走通、已废弃（2026-10-14，产物已删）。本地混用映射来源的方案不值得再试；要测就按上一行分流。 |
 
@@ -172,16 +182,20 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 
 | 模组 | 版本 | 来源 |
 |---|---|---|
-| AE2 | appliedenergistics2-forge-15.4.10 | Modrinth（Forge 版，NeoForge 1.20.1 兼容期可跑） |
+| AE2 | appliedenergistics2-forge-**15.3.3** | Modrinth（Forge 版，NeoForge 1.20.1 兼容期可跑） |
 | Mekanism | 1.20.1-10.4.16.80 | Modrinth（forge+neoforge 双标） |
-| Create | 1.20.1-6.0.8 | Modrinth（Flywheel 已内置，无外部依赖） |
+| Create | 1.20.1-6.0.8（放 `mods-disabled/`） | Modrinth（Flywheel 已内置，无外部依赖） |
 
 三者均按 Modrinth 元数据校过字节数与 zip 完整性。AE2 的 grid API 走反射（零编译期依赖），
 装上即可测 AeNetworkReader。
 
+> 2026-10-15 核对目录：`1_20_1_neo/mods/` 实际只有 **MEK 10.4.16.80 + AE2 15.3.3**；
+> Create 在 `mods-disabled/`（原因见第七节 SRG-mixin 一条）。本文原记 AE2 为 15.4.10，与目录不符，
+> 已按实际更正。⇒ `VERIFY.md` 里依赖**精妙存储**的项在本分支暂不可测（已在清单里标注）。
+
 ## 九、待办与待定
 
-- [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）
+- [ ] 测试实例：是否新装 `1.20.1-NeoForge` 实例（用户确认）；不装则用 MDG 的 `1_20_1_neo/` 开发实例验
 - [x] 建分支 `1.20.1-neo` 并切过去（用户在 IJ 中完成）
 - [x] 配置层移植（二、三节）—— `generateModMetadata` 在 Gradle 9.2.1 + 插件 2.0.147 下通过，元数据占位符替换正确（2026-09-20）
 - [x] 逐文件 API 移植 —— **compileJava 0 错误（2026-09-20）**，14 个文件全部改完：
@@ -193,6 +207,9 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
   `gradlew.bat build` 通过，产出 reobf 后的 `build/libs/logiscope-0.1.0-1.20.1.jar`，
   元数据/reobf 已开包核验；verify-jar.py 已改为双版本线通用（两个 jar 都过）。
   ★ 注意：这只说明**编译层**通过；逻辑等价性要靠离线断言 + 实机验收。
-- [ ] `VERIFY.md` 按 1.20.1 重建当轮清单（含 H 组离线断言新 classpath）
-- [ ] 实机验收（等测试实例；Create 相关共存测试须知见第七节两行）
-- [ ] 1.20.1 侧的离线断言（`dev-check` classpath 换 forge-1.20.1-47.1.106-merged.jar 后跑通）
+- [x] `VERIFY.md` 按 1.20.1 重建当轮清单（含离线断言 classpath，2026-10-15）
+- [x] 1.20.1 侧的离线断言（`forge-1.20.1-47.1.106-merged.jar` + `dev-check` → 443 条全过，2026-10-15）
+- [x] **同步 main 的功能改动**：第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15，12 条 `cherry-pick -x`，
+  见 `PROGRESS.md` 的「[1.20.1] 轮次 1」）
+- [ ] **实机验收（首次）** —— 清单 = 本分支 `VERIFY.md`（A 组采样保真为重点）；
+      Create 相关共存测试须知见第七节两行

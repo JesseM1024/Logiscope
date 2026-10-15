@@ -14,6 +14,51 @@
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
   **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①②③④ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
 
+> 以上是 **1.21.1 主线（main）** 的现状。**1.20.1 分支（`1.20.1-neo`）** 的现状与移植记录见
+> 紧随其后的「[1.20.1] 线」一节；两条线的 API 差异与限制统一记在
+> [`PORT-1.20.1.md`](PORT-1.20.1.md)（本文与 ARCHITECTURE 都只描述 1.21.1 主线）。
+
+---
+
+## [1.20.1] 线：现状与移植记录
+
+**现状（2026-10-15）**：功能已与 main **对齐到第十八轮④**（第十七轮① + 第十八轮①–④ 全部搬运到位），
+离线全过；**首次实机验收待做**（清单 = 本分支的 [`VERIFY.md`](VERIFY.md)，已按 1.20.1 的命令 /
+产物名 / 运行目录重建）。版本号仍是 `0.1.0-1.20.1`（本线尚未发布）。
+
+| 项 | 值 |
+|---|---|
+| 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.0-1.20.1.jar`（reobf） |
+| 离线 | TestChart **443 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **176** 键 |
+| 运行实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80` + AE2 `15.3.3`，Create `6.0.8` 在 `mods-disabled/` |
+| 未做 | 实机验收（重点 A 组采样保真）；测试实例是否另装（见 PORT §九 待办） |
+
+### [1.20.1] 轮次 1：同步 main 第十七轮① + 第十八轮①–④ + 文档重构（2026-10-15）
+
+**做法**：两分支历史**无共同祖先**（`merge-base` 为空）⇒ 全部用 `git cherry-pick -x` 逐条搬运，
+保留 1.20.1 侧 API 垫片（`ForgeConfigSpec` / `MinecraftForge.EVENT_BUS` + `TickEvent.Phase.END` /
+`ForgeHooksClient` / `META-INF/mods.toml`），**不采用** main 的 21.1 写法。
+
+| 来源（main） | 内容 | 冲突与解法 |
+|---|---|---|
+| `adde1e3` | 第十七轮① 上升 / 下降事件 | 无（`ScopeScreen` 自动合并） |
+| `b26b30a` | 第十八轮① 采样统一到服务端 | 仅 PROGRESS 文档 → 取 main 版 |
+| `7b8635f` | 第十八轮② 删「界面已关」提示 | 无 |
+| `e03cc5c` | 第十八轮③ 存档筛选框 | 无 |
+| `9f75544` | 第十八轮④ DATA 页「完成」+ 刷新滑条 | **`LogiScopeConfig`**：字段保持 `ForgeConfigSpec.IntValue`（新增 `DATA_REFRESH_TICKS`）；VERIFY 的 V1 行改 1.20.1 版本号 |
+| `c5cca54` `75e164e` `4f31c96` `9e9025b` | 文档体系重构（ARCHITECTURE 重写 / PROGRESS 瘦身 / VERIFY 合并 / 其余文档） | PROGRESS 无分支专有内容 → 取 main；VERIFY 取其重构版后**重建 1.20.1 侧**（另一提交）；README / PORT 保留 1.20.1 内容 |
+| `4ec6915` | 全库注释去历史化（35 文件，纯注释） | 2 处：`WorldProbe`（本线是 **Forge** capability）、`ScopeScreen`（`ForgeHooksClient.pushGuiLayer`）—— 保留分支代码，只吸收措辞 |
+
+**跨版本 API 核实（本次新增）**：从 `build/moddev/artifacts/forge-1.20.1-47.1.106-sources.jar` 读方法体确认
+`ForgeConfigSpec#save()`（内部走 `FileConfig.save()` 落盘）与 `ConfigValue#set(T)` 在 1.20.1 都存在，
+前置条件不满足时抛异常 ⇒ 滑条写回用 try/catch 包裹（与 main 同语义）。
+
+**环境坑（已写进 README / PORT §六）**：
+1. Gradle 解析 `net.neoforged:forge:1.20.1-47.1.106` 时要联网 HEAD 校验元数据，而
+   `maven.neoforged.net` 当前不可达 ⇒ `createMinecraftArtifacts` 失败、IJ 同步卡住、编辑器 import 全红。
+   **解法：加 `--offline`**（neoformruntime 缓存完整，全部产物已在本机）。
+2. Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏（报"程序包不存在"），离线断言脚本改用 `.bat` 包装。
+
 ---
 
 ## 第十八轮①：物品探针采样统一到服务端（菜单降为兜底，2026-10-15）
