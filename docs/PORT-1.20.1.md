@@ -1,7 +1,14 @@
 # LogiScope · 1.20.1 NeoForge 移植方案
 
-> 状态：**方案已定，尚未动手移植**。本文先于分支建立（master 提交），
-> 之后随 `1.20.1-neo` 分支逐步更新，每完成一项就回写结论。
+> 状态：**配置层 + API 移植已完成**（compileJava 0 错误、reobf jar 已产出，2026-09-20）；
+> **实机验收待做**。本文件在两分支各自维护，结论以 `1.20.1-neo` 分支上的版本为准。
+>
+> 注意：**两条分支的 git 历史互不相关**（main 曾 rebase 重写，2026-10-14 核查）——
+> 两分支之间用 **cherry-pick** 搬运改动，不要用 merge。
+>
+> 2026-10-15：main 的**第十七轮①、第十八轮①–④**已 cherry-pick 到本分支（离线验证全过，
+> 见 `PROGRESS.md` 的「[1.20.1] 轮次」节）；1.20.1 线的**首次实机验收清单**见本分支的
+> `VERIFY.md`（已按本分支的命令 / 产物名 / 运行目录重建）。
 >
 > 原则：**本文只记 1.20.1 的差异与 1.20.1 上重新核实的结论**。
 > 1.21.1 的事实记录留在 [`ARCHITECTURE.md`](ARCHITECTURE.md)，不要两边改写。
@@ -132,9 +139,9 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 
 ## 六、IJ 操作步骤（建分支与日常切换）
 
-1. master 上已提交"版本号 0.1.0-1.21.1 + 文档标注"（本文所在提交）。
-2. **建分支**：IJ 右下角 Git widget（或菜单 Git → Branches）→ master 右键 →
-   New Branch from 'master'，名字 `1.20.1-neo`，勾选 Checkout。等价 `git switch -c 1.20.1-neo`。
+1. `1.20.1-neo` 分支已建立并完成全部配置 / API 移植（勾选状态见末节）。
+2. （参考）建分支：IJ 右下角 Git widget → master 右键 → New Branch，勾选 Checkout；
+   等价命令 `git switch -c 1.20.1-neo`。
 3. 在分支上改配置层（本文二、三节）→ 弹出 "Load Gradle Changes"（Ctrl+Shift+O）→ 同步；
    首次会下载 1.20.1 全套产物，较慢。
 4. **JDK**：`gradle.properties` 的 `org.gradle.java.home` 改为 `C:/Program Files/Java/jdk-17`
@@ -158,6 +165,8 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
 | 假槽无法识别 | Forge 1.20.1 的 Slot 没有 isFake()；isSelectable 只排除玩家背包 |
 | `/tick rate` 改速时秒数按 20 换算 | 1.20.1 没有 tickRateManager / 速率同步包 |
 | **模组必须带 pack.mcmeta**（pack_format 15） | 1.20.1 资源包机制；没有 = lang 不加载 = 界面全是键名（2026-09-20 实测踩中，日志证据 `Missing metadata in pack mod:logiscope`）。1.21 的 NeoForge 用 neoforge.mods.toml 充当打包元数据，master 不需要 |
+| **dev 环境下 SRG-mixin 模组必炸**（如 Create 6 内嵌 flywheel 1.0.5） | 开发运行时是 named 映射，SRG 写的 `@Shadow` 定位不到（报 `@Shadow ... not located`）；**生产环境正常**。结论：Create 只放整合包实例测，dev 的 `1_20_1_neo/mods/` 里放 mods-disabled。 |
+| 不要尝试"给 mod jar 本地做 SRG→named 重映射" | FART + tsrg2 方案未走通、已废弃（2026-10-14，产物已删）。本地混用映射来源的方案不值得再试；要测就按上一行分流。 |
 
 ## 八、测试环境（1_20_1_neo/mods/，2026-09-20 已就位）
 
@@ -185,4 +194,5 @@ jar 内直接核实存在的（低风险）：`TickEvent$ClientTickEvent/ServerT
   元数据/reobf 已开包核验；verify-jar.py 已改为双版本线通用（两个 jar 都过）。
   ★ 注意：这只说明**编译层**通过；逻辑等价性要靠离线断言 + 实机验收。
 - [ ] `VERIFY.md` 按 1.20.1 重建当轮清单（含 H 组离线断言新 classpath）
-- [ ] 实机验收（等测试实例）
+- [ ] 实机验收（等测试实例；Create 相关共存测试须知见第七节两行）
+- [ ] 1.20.1 侧的离线断言（`dev-check` classpath 换 forge-1.20.1-47.1.106-merged.jar 后跑通）
