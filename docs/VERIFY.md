@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.1-1.20.1-alpha）
+# LogiScope · 实机验证清单（当前版本 0.1.2-1.20.1-alpha）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④、
 > [1.20.1] 轮次 4（DATA 页右键「按数值读取」两步式 · F9 回滚）的
@@ -184,7 +184,7 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.1-1.20.1-alpha.jar
+python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
 ```
 
 | # | 检查 | 期望 |
@@ -193,7 +193,7 @@ python verify-jar.py build/libs/logiscope-0.1.1-1.20.1-alpha.jar
 | E2 | `TestChart` | **461 条**断言全过；lang 中英各 **179** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.2-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
 
 ## F. 回归抽查
 

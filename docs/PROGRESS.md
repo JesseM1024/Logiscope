@@ -9,8 +9,9 @@
 
 - **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
   `verify-jar.py` 全过；lang 中英各 **179** 键一致。
-- **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；0.1.0 同线；
-  发布约定见 [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
+- **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
+  —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
+  [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
   **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①–⑤ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
 
@@ -26,16 +27,16 @@
 **轮次 4 的 DATA 右键「按数值读取」已回流 main（两步式定稿 `3ddb77c` + 表头截断 `d2dc8c5`）**；
 F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误交互保留不修 —— 见「轮次 4」）。dev 启动
 问题已定位并处理（AE2 的 SRG-mixin 缺陷 → `mods-disabled/`，外部实例渠道打通并完成兼容性审计，
-见「轮次 2」）；版本号提至 `0.1.1-1.20.1-alpha` 并装配 NeoForge 测试实例（见「轮次 3」）；
+见「轮次 2」）；版本号提至 `0.1.2-1.20.1-alpha`（轮次 5），NeoForge 测试实例已装配（「轮次 3」）；
 **首次实机验收进行中**（dev 清单 = 本分支 [`VERIFY.md`](VERIFY.md)，含轮次 4 的 C-4；AE / 精妙
 存储项在 `1.20.1-NeoForge` 实例验证）。
 
 | 项 | 值 |
 |---|---|
-| 构建 | `gradlew.bat build --offline` 通过（代理关闭时；代理在跑可直接联网构建）；产物 `build/libs/logiscope-0.1.1-1.20.1-alpha.jar`（reobf） |
+| 构建 | `gradlew.bat build --offline` 通过（代理关闭时；代理在跑可直接联网构建）；产物 `build/libs/logiscope-0.1.2-1.20.1-alpha.jar`（reobf） |
 | 离线 | TestChart **461 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **179** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
-| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.1-1.20.1-alpha` |
+| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.2-1.20.1-alpha` |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
 | 未做 | 实机验收（重点 A 组采样保真 + C-4 右键「按数值读取」填入值格） |
 
@@ -101,6 +102,15 @@ pipez `1.20.1-1.2.5`；本 jar 已装入其 `mods/`。
 dev `runClient` 若需可用，可先将 MEK 移入 `mods-disabled/`（与 AE2 / Create 同处）。
 
 ---
+
+### [1.20.1] 轮次 5：版本号 0.1.2-1.20.1-alpha（2026-10-17，待发布）
+
+**版本**：`mod_version` `0.1.1-1.20.1-alpha` → **`0.1.2-1.20.1-alpha`**（与 main 的 `0.1.2-1.21.1`
+同步）；产物 `build/libs/logiscope-0.1.2-1.20.1-alpha.jar`；脚本 / 文档产物名同步（VERIFY / GOALS /
+PORT / README / `dev-check/offline-check.bat`）。
+
+**相对 0.1.1-1.20.1-alpha 的功能变化**：DATA 页右键「按数值读取」（填入值格 + 黄标 + 确认替换）
+与追踪目标表头省略号截断；F9 判据维持第二代（收紧已回滚，机械手误交互保留）。
 
 ### [1.20.1] 轮次 4：DATA 页右键「按数值读取」（两步式定稿）+ F9 判据收紧（后回滚）（2026-10-15）
 
@@ -295,21 +305,14 @@ Esc 才是清空。
 ```bat
 cd /d D:\dev\logiscope
 
-:: 1) 编译 + 打包（JDK 21 已由 gradle.properties 的 org.gradle.java.home 锁定）
+:: 1) 编译 + 打包（JDK 17 已由 gradle.properties 的 org.gradle.java.home 锁定；
+::    代理关闭时加 --offline，本机缓存完整）
 gradlew.bat build
 
-:: 2) 离线断言（不用开游戏）
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
+:: 2) 离线断言 + 渲染压测 + 产物验收（一键；逐条等价命令见 VERIFY.md §E）
+dev-check\offline-check.bat
 
-:: 2b) 渲染路径离线压测
-javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-
-:: 3) 产物验收（元数据 / 编码 / 占位符）
-python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
-
-:: 4) 进游戏（或用 build\moddev\runClient.cmd 脱离 Gradle 反复重启）
+:: 3) 进游戏（dev 运行目录 = 1_20_1_neo\，与主线 run/ 隔离）
 gradlew.bat runClient
 ```
 

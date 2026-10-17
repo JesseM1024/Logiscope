@@ -2,7 +2,7 @@
 
 > 状态（2026-10-15）：配置层 + API 移植完成（2026-09-20）；main 的第十七轮①、第十八轮①–④
 > 与文档体系重构已全部搬运；离线验证全过；AE2 已移出 dev、外部实例渠道已打通并完成兼容性审计
-> （§八）；版本号提至 `0.1.1-1.20.1-alpha`；**实机验收待做**（清单见本分支 [`VERIFY.md`](VERIFY.md)）。
+> （§八）；版本号提至 `0.1.2-1.20.1-alpha`；**实机验收待做**（清单见本分支 [`VERIFY.md`](VERIFY.md)）。
 > 本文件在两分支各自维护，结论以 `1.20.1-neo` 分支上的版本为准。
 >
 > 纪律：两分支 git 历史**互不相关**（main 曾 rebase 重写，2026-10-14 核查）——
@@ -21,7 +21,7 @@
 | 目标 MC | 1.20.1 |
 | 目标 NeoForge | `1.20.1-47.1.106`（构建基线 == 该版本，产物在 `build/moddev/artifacts/`） |
 | Java | **17**（`org.gradle.java.home` 与 toolchain 同时锁定） |
-| 模组版本 | `0.1.1-1.20.1-alpha`（版本号带 MC 后缀的约定见 `gradle.properties`） |
+| 模组版本 | `0.1.2-1.20.1-alpha`（版本号带 MC 后缀的约定见 `gradle.properties`） |
 | 分支 | `1.20.1-neo`（自 main 线 `c00c545`「版本号带 MC 后缀」提交切出；2026-10-15 经文档 blob 比对核实） |
 
 **测试实例**：dev 实例（`1_20_1_neo/`，NeoForge 47.1.106）用于常规验证；AE / 精妙存储
@@ -162,7 +162,7 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 | 渠道 | 位置 / 加载器 | 内容 |
 |---|---|---|
 | dev 实例 | `1_20_1_neo/`（MDG `runClient`，NeoForge 47.1.106） | `mods/` = MEK `10.4.16.80`；**AE2 `15.3.3` 与 Create `6.0.8` 在 `mods-disabled/`**（SRG-mixin 限制，见 §七） |
-| NeoForge 测试实例（主） | `1.20.1-NeoForge`（HMCL，NeoForge 47.1.105，版本隔离） | 2026-10-15 装配：AE2 `15.3.6`、MEK `10.4.16.80`、Sophisticated Storage `1.20.1-1.5.5.2182` + Core `1.20.1-1.5.10.2402`、Create `mc1.20.1-6.0.8`、pipez `1.2.5`；装入 `logiscope-0.1.1-1.20.1-alpha.jar`，承接 AE / 精妙存储项（Q9 / S8） |
+| NeoForge 测试实例（主） | `1.20.1-NeoForge`（HMCL，NeoForge 47.1.105，版本隔离） | 2026-10-15 装配：AE2 `15.3.6`、MEK `10.4.16.80`、Sophisticated Storage `1.20.1-1.5.5.2182` + Core `1.20.1-1.5.10.2402`、Create `mc1.20.1-6.0.8`、pipez `1.2.5`；装入 `logiscope-0.1.2-1.20.1-alpha.jar`，承接 AE / 精妙存储项（Q9 / S8） |
 | 整合包实例（备用） | `GregTech Leisure`（HMCL，Forge 47.3.7） | 68 模组：AE2 `15.2.13` + AE 附属（ae2wtlib / mae2 / ExtendedAE）、**sophisticatedstorage 全家桶**、GTCEu 等；当前装 `logiscope-0.1.0-1.20.1.jar` |
 
 装入实例前先删同名旧 jar（文件名随版本号变化，旧的不会被顶掉；同 modId 并存会被 FML 拒绝）。
@@ -184,3 +184,4 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 - [ ] **实机验收**：dev 侧清单 = 本分支 `VERIFY.md`（重点 A 组采样保真）；AE / 精妙存储项
       在 NeoForge 测试实例（`1.20.1-NeoForge`）验证
 - [x] 版本号提升为 `0.1.1-1.20.1-alpha`（2026-10-15，供外部 NeoForge 测试实例；正式发布待实机验收后定）
+- [x] 版本号提升为 `0.1.2-1.20.1-alpha`（2026-10-17，待发布；与 main 的 `0.1.2-1.21.1` 同步）

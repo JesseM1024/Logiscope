@@ -47,10 +47,10 @@ gradlew.bat createLaunchScripts
 | Gradle | 9.2.1（wrapper 自带） |
 | Minecraft | 1.20.1 |
 | NeoForge | 1.20.1-47.1.106（构建插件用 legacy 线 `net.neoforged.moddev.legacyforge`） |
-| 模组版本 | `0.1.1-1.20.1-alpha`（本分支） |
+| 模组版本 | `0.1.2-1.20.1-alpha`（本分支） |
 
 > **版本分支约定**：`main` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
-> 本分支 `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，产物 jar 名 `logiscope-0.1.1-1.20.1-alpha`）。
+> 本分支 `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，产物 jar 名 `logiscope-0.1.2-1.20.1-alpha`）。
 > 移植方案与两个版本线的 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)。
 > 通用 bugfix 默认进 main，再 cherry-pick 到 `1.20.1-neo`。
 >
