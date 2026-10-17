@@ -33,7 +33,7 @@ java -Dfile.encoding=UTF-8 -cp "build\dev-check;build\classes\java\main" BenchRe
 if errorlevel 1 goto fail
 
 echo === [4/4] verify-jar ===
-python verify-jar.py build\libs\logiscope-0.1.1-1.21.1.jar
+python verify-jar.py build\libs\logiscope-0.1.2-1.21.1.jar
 if errorlevel 1 goto fail
 
 echo ALL_OK

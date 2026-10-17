@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.1-1.21.1）
+# LogiScope · 实机验证清单（当前版本 0.1.2-1.21.1）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①–⑤ 的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
@@ -162,7 +162,7 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;dev-check/lib/guava-32.1.2-jre.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
+python verify-jar.py build/libs/logiscope-0.1.2-1.21.1.jar
 ```
 
 | # | 检查 | 期望 |
@@ -171,7 +171,7 @@ python verify-jar.py build/libs/logiscope-0.1.1-1.21.1.jar
 | E2 | `TestChart` | **461 条**断言全过；lang 中英各 **179** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.1-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.2-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
 
 ## F. 回归抽查
 
