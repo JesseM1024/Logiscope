@@ -185,3 +185,31 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
       在 NeoForge 测试实例（`1.20.1-NeoForge`）验证
 - [x] 版本号提升为 `0.1.1-1.20.1-alpha`（2026-10-15，供外部 NeoForge 测试实例；正式发布待实机验收后定）
 - [x] 版本号提升为 `0.1.2-1.20.1-alpha`（2026-10-17，待发布；与 main 的 `0.1.2-1.21.1` 同步）
+
+## 十、加载器兼容性（同一个 jar 适用于 Forge 47.x / NeoForge 47.x）
+
+**结论：1.20.1 线的产物同时适用于 NeoForge 47.x 与 Forge 47.x（MC 1.20.1），不需要分别构建。**
+
+**为什么正常**：1.20.1 的 NeoForge 是 Forge 47.1 的**二进制兼容分支** —— 这一代仍沿用
+`net.minecraftforge.*` 包名（改名到 `net.neoforged.*` 从 1.20.2 才开始），元数据仍是
+`mods.toml` + `javafml`。本模组构建于 `neo_version=1.20.1-47.1.106`，但**源码与字节码
+都不引用任何 `net.neoforged` API**，所以两种加载器都能解析。
+
+**证据（2026-10-17 对 `0.1.2-1.20.1-alpha` 复核）**：
+
+| 检查 | 结果 |
+|---|---|
+| 源码 `import net.neoforged` | **0 条**（只有 `net.minecraftforge.*` + 原版） |
+| jar 的 `net/neoforged/*` 常量池引用（265 个类引用） | **0 条** |
+| 类存在性 × Forge 47.3.7 运行时 | `net.minecraftforge` 35/35、`net.minecraft` 58/58、第三方 11/11 |
+| 成员引用（方法 / 字段，继承感知） | 180 条，**0 缺失** |
+| 入口与元数据 | `@Mod`（javafml）+ `mods.toml`：`loaderVersion="[47,)"`、依赖 `forge [47,)` + `minecraft [1.20.1]`、`side="CLIENT"`；无 mixin / services 入口 |
+| 实机 | Forge 47.3.7 整合包（GregTech Leisure）加载与采样正常；NeoForge 47.1.105 实例同样正常 |
+
+**边界（避免误读）**：
+- 只覆盖 **MC 1.20.1 的 Forge / NeoForge 47.x**；Fabric 与 1.20.2+ 的 NeoForge 不适用
+  （后者已改用 `net.neoforged.*`）。
+- 三方集成（AE2 / MEK / Create / 精妙存储）要求**对应加载器下装了这些模组**；同一 mod 版本
+  在两种加载器下类名一致，反射 / 能力查询目标相同。
+- 构建基线仍是 NeoForge 47.1.106（`neo_version_range=[47,)`）；实测加载器 = NeoForge
+  47.1.105 与 Forge 47.3.7。

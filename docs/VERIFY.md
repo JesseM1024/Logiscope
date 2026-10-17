@@ -204,6 +204,7 @@ python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
 | R3 | MEK：NBT 追踪选格（点 2 格就只测 2 格）+ 反复开关 GUI 读数一致 | 与第十六轮④一致 |
 | R4 | 普通容器（箱子）选格 + 无 slot 列表的设备（机械手） | 行为不变 |
 | R5 | 切英文环境 | 无中文残留 |
+| R6 | 在 **Forge 47.3.7** 整合包（GregTech Leisure）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.2-1.20.1-alpha`，无红字）；F9 面板 / 选格 / 采样曲线与 NeoForge 侧一致（加载器兼容性回归，见 PORT §十） |
 
 ---
 
