@@ -117,18 +117,21 @@ Draw g = new Draw(pose);   // ScopeScreen#render(PoseStack, int, int, float) 里
 
 ---
 
-## 七、本机构建环境备注（一次性，不入库）
+## 七、本机构建环境备注（仅排错参考，不影响仓库）
 
-本机 `libraries.minecraft.net` TLS 握手失败、`maven.neoforged.net` 网络不可达，
+本机直连 `libraries.minecraft.net` TLS 握手失败、`maven.neoforged.net` 不可达，
 而 1.18.2 的部分构件（`mcp_config`、`mergetool`、`minecraft-dependencies:1.18.2`、
-`neoform-runtime`）只在这些域名上。本次通过临时手段完成构建：
+`neoform-runtime`）只在这些域名上。
 
-- 本地 HTTP 镜像（阿里云 public → BMCLAPI → 本机 `.minecraft/libraries` 兜底，缺 pom 时补最小 pom）；
-- 用 Gradle 缓存里已有的 `net.neoforged:*` 构件铺成本地 file 仓库；
-- 按 1.20.1 的模块结构 + Mojang 官方 1.18.2 version json 生成了一份
-  `minecraft-dependencies:1.18.2` 的 module 元数据（仅构建期 classpath，不影响产物）。
+**正解：开代理。** 系统代理 `127.0.0.1:7890` 对两个域名都是 200 / <1s，
+写进 `~/.gradle/gradle.properties` 的 `systemProp.http(s).proxy*` 即可，
+之后 `gradlew.bat build` 一条命令跑通（实测 1m49s，2026-10-18）。
+> 该文件此前配的是 7993（那个端口已不再监听），本次已改为 7890。
 
-这些都在 `%TEMP%` 下，**没有进仓库**。网络恢复后（或代理打开时）删掉 `--init-script` 直接构建即可。
+代理不可用时的临时绕行（已归档到工作区 `docs/build-mirror/`，**未进仓库**）：
+本地 HTTP 镜像（阿里云 → BMCLAPI → 本机 `.minecraft/libraries`，缺 pom 补最小 pom）+
+用 Gradle 缓存铺的 file 仓库 + 一份按 1.20.1 模块结构生成的 `minecraft-dependencies:1.18.2`。
+仅供排错，不要当成日常构建方式。
 
 ---
 
