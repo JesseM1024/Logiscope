@@ -42,9 +42,9 @@ NeoForge 的第一个版本是 MC 1.20.1，且 1.20.1 的 NeoForge 仍沿用 `ne
 | 文件 | 改动 |
 |---|---|
 | `build.gradle` | `legacyForge { enable { forgeVersion = project.forge_version } }`（1.20.1 线用的是 `neoForgeVersion`）；run 目录改为 `1_18_2_forge/`；占位符 `neo_version*` → `forge_version*` |
-| `gradle.properties` | `minecraft_version=1.18.2`；`forge_version=1.18.2-40.3.12`；`forge_version_range=[40.2,)`；`loader_version_range=[40,)`；JDK 17；`mod_version=0.1.0-1.18.2` |
+| `gradle.properties` | `minecraft_version=1.18.2`；`forge_version=1.18.2-40.3.12`；`forge_version_range=[40.2,)`；`loader_version_range=[40,)`；JDK 17；`mod_version=0.1.2-1.18.2-alpha` |
 | `.gitignore` | 加 `1_18_2_forge/` |
-| `dev-check/offline-check.bat` | 合并 jar 指到 `forge-1.18.2-40.3.12-merged.jar`；jar 名指到 `logiscope-0.1.0-1.18.2.jar` |
+| `dev-check/offline-check.bat` | 合并 jar 指到 `forge-1.18.2-40.3.12-merged.jar`；jar 名指到 `logiscope-0.1.2-1.18.2-alpha.jar` |
 
 工具链仍是 MDG `net.neoforged.moddev.legacyforge`（官方支持 Forge 1.17–1.20.1），
 **1.18.2 属于它的支持范围**，所以构建栈与 1.20.1 线同构，只换版本号。
@@ -98,7 +98,7 @@ Draw g = new Draw(pose);   // ScopeScreen#render(PoseStack, int, int, float) 里
 | 项 | 结果 |
 |---|---|
 | `gradlew.bat compileJava` | ✅ 0 错误 |
-| `gradlew.bat build`（含 `reobfJar` SRG 重映射） | ✅ 产出 `build/libs/logiscope-0.1.0-1.18.2.jar`（238 930 B） |
+| `gradlew.bat build`（含 `reobfJar` SRG 重映射） | ✅ 产出 `build/libs/logiscope-0.1.2-1.18.2-alpha.jar`（238 930 B） |
 | 元数据 | ✅ `loaderVersion="[40,)"`、`forge [40.2,)`、`minecraft [1.18.2]` |
 | `dev-check/offline-check.bat` | ✅ 4 步全过：461 条断言 0 失败 / BenchRender / verify-jar（零残留 + 元数据） |
 | 实机 | ⏳ 待用户在 HMCL `1.18.2 + Forge 40.3.12` 实例验证 |
