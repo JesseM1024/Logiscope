@@ -8,8 +8,7 @@ import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.analysis.Val;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TranslatableComponent;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
@@ -31,7 +30,7 @@ import java.util.Set;
  *   4. 断点（换物品 / no_data / 采样中断）一律不连线 —— 连线等于编造数据
  *   5. no_data 的列什么都不画           —— 断档就该看得出来是断档
  *
- * 全程只用 GuiGraphics#fill + drawString，不引入任何图表库。
+ * 全程只用 Draw#fill + drawString，不引入任何图表库。
  * 每帧的复杂度是 O(窗口内采样点数)，且**不产生任何常驻分配**
  * （列聚合用的数组按宽度复用，见 ensureCols）—— 这是"挂机 10 分钟不掉帧"的底气。
  */
@@ -48,7 +47,7 @@ public final class ChartRenderer {
      * 所以颜色是稳定的：某条线不会因为"又冒出一个新物品"而突然换色。
      * 挑色的标准是"在深色底上互相分得开"，而不是好看 —— 观测工具优先看辨得清。
      *
-     * 每个颜色都必须带 0xFF 的 alpha 位 * GuiGraphics#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
+     * 每个颜色都必须带 0xFF 的 alpha 位 * Draw#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
      * 它不像 drawString 那样有 adjustColor 兜底（Font.java:172：alpha 位为 0 就补 0xFF）。
      * 曾出现"图里没有任何线"，根因：调色板写成 0x5DCAA5，alpha=0，线全被画没了。
      * 这个坑从的火花线（0x9BE1CB）就存在，只是当时没人盯着火花线看。
@@ -198,7 +197,7 @@ public final class ChartRenderer {
     /**
      * IO 线的颜色：把物品色**整体提亮**一档（同色系）。
      *
-     * 为什么不用虚线 / 换色相：虚线要自己拼像素（`GuiGraphics` 没有画线 API），
+     * 为什么不用虚线 / 换色相：虚线要自己拼像素（`Draw` 没有画线 API），
      * 而换色相会让"哪条 IO 属于哪个物品"要靠猜。同色系浅一档最直观。
      */
     public static int flowColor(int color) {
@@ -255,7 +254,7 @@ public final class ChartRenderer {
     // 主入口
     // ------------------------------------------------------------------
 
-    public void render(GuiGraphics g, Font font, ChartData data,
+    public void render(Draw g, Font font, ChartData data,
                        int x, int y, int w, int h, View view) {
         this.chartX = x;
         this.chartW = w;
@@ -407,7 +406,7 @@ public final class ChartRenderer {
     // 坐标轴
     // ------------------------------------------------------------------
 
-    private void drawYAxis(GuiGraphics g, Font font, double lo, double hi, double step) {
+    private void drawYAxis(Draw g, Font font, double lo, double hi, double step) {
         int lines = (int) ((hi - lo) / step);
         if (lines > 10) {
             step = (hi - lo) / 5;
@@ -425,7 +424,7 @@ public final class ChartRenderer {
         }
     }
 
-    private void drawTimeAxis(GuiGraphics g, Font font) {
+    private void drawTimeAxis(Draw g, Font font) {
         long span = Math.max(1L, end - start);
         long step = niceTickStep(span / 4);
         // 窗口很短时按 tick 标，稍长就换算成秒 —— '−3t' 比 '−0s' 有意义得多
@@ -464,7 +463,7 @@ public final class ChartRenderer {
      * 几何与语义（断档不连线 / 稀疏列线性插值 / 同列取 min-max）一句话没改，
      * 全部搬进纯类 {@link WaveColumns}（离线可断言、可压测，见 TestChart t29 / BenchRender）。
      */
-    private void drawSeries(GuiGraphics g, List<SeriesPoint> pts, int color) {
+    private void drawSeries(Draw g, List<SeriesPoint> pts, int color) {
         int columns = cols.emit(pts, start, end, plotW, plotX, this::yOf, rects);
         if (columns == 0) {
             return;
@@ -478,7 +477,7 @@ public final class ChartRenderer {
     // 框选
     // ------------------------------------------------------------------
 
-    private void drawSelection(GuiGraphics g, Font font, Selection sel,
+    private void drawSelection(Draw g, Font font, Selection sel,
                                List<ChartData.SeriesRange> stats, ChartData data) {
         int xa = xOf(sel.lo());
         int xb = xOf(sel.hi());
@@ -565,7 +564,7 @@ public final class ChartRenderer {
      * 所在 tick、换算秒，以及每条可见线在这一 tick 的值（G4 验收标准第 2 条）。
      * 取值规则与十字线相同：找该 tick 之前最近的采样点（台阶状数据）。
      */
-    private void drawMarkers(GuiGraphics g, Font font, ChartData data, View view) {
+    private void drawMarkers(Draw g, Font font, ChartData data, View view) {
         List<Long> markers = view.markers();
         if (markers.isEmpty()) {
             return;
@@ -642,7 +641,7 @@ public final class ChartRenderer {
      * 若最近的点离得太远（超过一个像素列的时间，说明这里其实是断档），
      * 就报 "-" —— 宁可显示"不知道"，也不要拿旧值冒充。
      */
-    private void drawCrosshair(GuiGraphics g, Font font, ChartData data, View view) {
+    private void drawCrosshair(Draw g, Font font, ChartData data, View view) {
         int mx = view.mouseX();
         int my = view.mouseY();
         if (mx < plotX || mx >= plotR || my < plotY || my >= plotB) {
@@ -994,11 +993,11 @@ public final class ChartRenderer {
         return v.compareTo(Val.ZERO) > 0 ? "+" + fmtExact(v) : fmtExact(v);
     }
 
-    private static void centered(GuiGraphics g, Font font, String text, int cx, int y, int color) {
+    private static void centered(Draw g, Font font, String text, int cx, int y, int color) {
         g.drawString(font, text, cx - font.width(text) / 2, y, color, false);
     }
 
     private static String tr(String key) {
-        return Component.translatable(key).getString();
+        return new TranslatableComponent(key).getString();
     }
 }

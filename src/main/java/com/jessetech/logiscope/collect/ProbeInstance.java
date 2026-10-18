@@ -12,7 +12,7 @@ import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
@@ -362,7 +362,7 @@ public final class ProbeInstance {
         if (d != null && !d.isBlank()) {
             return d;
         }
-        return Component.translatable("logiscope.label.probe").getString();
+        return new TranslatableComponent("logiscope.label.probe").getString();
     }
 
     /** 列表页显示用的一行描述（槽位 + 维度坐标；带数据追踪时标注条数） */
@@ -376,7 +376,7 @@ public final class ProbeInstance {
             base = target.slotSummary() + " · " + target.anchorText();
         }
         int n = dataTargets.size();
-        return n > 0 ? base + " · " + Component.translatable("logiscope.info.data_count", n).getString() : base;
+        return n > 0 ? base + " · " + new TranslatableComponent("logiscope.info.data_count", n).getString() : base;
     }
 
     // ------------------------------------------------------------------
@@ -929,7 +929,7 @@ public final class ProbeInstance {
             return;
         }
         lastNotifyTick = now;
-        mc.player.displayClientMessage(Component.translatable(key), true);
+        mc.player.displayClientMessage(new TranslatableComponent(key), true);
     }
 
     // ------------------------------------------------------------------

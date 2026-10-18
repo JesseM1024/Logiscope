@@ -1,7 +1,7 @@
 package com.jessetech.logiscope.collect;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
@@ -143,7 +143,7 @@ public final class ContainerAccess {
      */
     public static SlotView make(int menuSlotIndex, int containerSlotIndex, ItemStack stack) {
         boolean empty = stack.isEmpty();
-        ResourceLocation id = BuiltInRegistries.ITEM.getKey(stack.getItem());
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return new SlotView(
                 menuSlotIndex,
                 containerSlotIndex,

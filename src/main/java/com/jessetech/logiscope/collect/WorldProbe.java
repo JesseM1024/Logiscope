@@ -5,13 +5,13 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.client.server.IntegratedServer;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.Container;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.CapabilityItemHandler;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
@@ -178,7 +178,7 @@ public final class WorldProbe {
             if (s.isEmpty()) {
                 continue;
             }
-            String id = BuiltInRegistries.ITEM.getKey(s.getItem()).toString();
+            String id = ForgeRegistries.ITEMS.getKey(s.getItem()).toString();
             if (!id.equals(view.itemId())) {
                 continue;
             }
@@ -295,12 +295,12 @@ public final class WorldProbe {
         if (be == null) {
             return null;
         }
-        IItemHandler direct = be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
+        IItemHandler direct = be.getCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, null).orElse(null);
         if (direct != null) {
             return direct;
         }
         for (Direction side : SIDES) {
-            IItemHandler sided = be.getCapability(ForgeCapabilities.ITEM_HANDLER, side).orElse(null);
+            IItemHandler sided = be.getCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, side).orElse(null);
             if (sided != null) {
                 return sided;
             }

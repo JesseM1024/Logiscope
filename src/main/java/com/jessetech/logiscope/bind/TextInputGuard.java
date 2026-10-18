@@ -75,12 +75,12 @@ public final class TextInputGuard {
     // 事件入口（由主类注册到游戏总线）
     // ------------------------------------------------------------------
 
-    public static void onCharTypedPre(ScreenEvent.CharacterTyped.Pre event) {
+    public static void onCharTypedPre(ScreenEvent.KeyboardCharTypedEvent.Pre event) {
         lastCharConsumed = true;
         lastCharTick = LogiScopeMod.probes().currentTick();
     }
 
-    public static void onCharTypedPost(ScreenEvent.CharacterTyped.Post event) {
+    public static void onCharTypedPost(ScreenEvent.KeyboardCharTypedEvent.Post event) {
         // Post 发出来了 = 这个字符没有人接手
         lastCharConsumed = false;
     }

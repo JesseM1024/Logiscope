@@ -2,7 +2,7 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.collect.ContainerAccess;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.resources.ResourceKey;
@@ -18,7 +18,7 @@ import net.minecraft.world.level.block.entity.BlockEntity;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
-import net.minecraftforge.common.capabilities.ForgeCapabilities;
+import net.minecraftforge.items.CapabilityItemHandler;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
 
@@ -100,7 +100,7 @@ public final class ProbeContext {
             }
             // 界面开着但推不出坐标：拿不到持久身份，关界面只能暂停（已知边界，见 CP9）
             return new Candidate(null, null, true,
-                    Component.translatable("logiscope.anchor.open_menu").getString());
+                    new TranslatableComponent("logiscope.anchor.open_menu").getString());
         }
         BlockHitResult hit = crosshairBlock(mc);
         if (hit == null) {
@@ -213,12 +213,12 @@ public final class ProbeContext {
         if (be == null) {
             return null;
         }
-        IItemHandler direct = be.getCapability(ForgeCapabilities.ITEM_HANDLER, null).orElse(null);
+        IItemHandler direct = be.getCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, null).orElse(null);
         if (direct != null) {
             return direct;
         }
         for (Direction side : SIDES) {
-            IItemHandler sided = be.getCapability(ForgeCapabilities.ITEM_HANDLER, side).orElse(null);
+            IItemHandler sided = be.getCapability(CapabilityItemHandler.ITEM_HANDLER_CAPABILITY, side).orElse(null);
             if (sided != null) {
                 return sided;
             }
@@ -253,7 +253,9 @@ public final class ProbeContext {
         if (!isSafeToSimulateUse(mc.player)) {
             return false;
         }
-        mc.gameMode.useItemOn(mc.player, InteractionHand.MAIN_HAND, hit);
+        // 1.18.2 的 useItemOn 要吃 ClientLevel（1.20.1 起改成了 Level）
+        mc.gameMode.useItemOn(mc.player, (net.minecraft.client.multiplayer.ClientLevel) mc.level,
+                InteractionHand.MAIN_HAND, hit);
         return true;
     }
 

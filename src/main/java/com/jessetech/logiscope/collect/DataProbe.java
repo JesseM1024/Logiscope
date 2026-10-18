@@ -5,7 +5,7 @@ import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.bind.DataTarget;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.FloatTag;
@@ -89,7 +89,7 @@ public final class DataProbe {
         if (want == null || want.isBlank()) {
             return true;
         }
-        ResourceLocation now = BuiltInRegistries.BLOCK_ENTITY_TYPE.getKey(be.getType());
+        ResourceLocation now = ForgeRegistries.BLOCK_ENTITIES.getKey(be.getType());
         return now != null && want.equals(now.toString());
     }
 

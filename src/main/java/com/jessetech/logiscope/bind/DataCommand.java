@@ -4,6 +4,7 @@ import com.jessetech.logiscope.LogiScopeMod;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
+import net.minecraft.network.chat.ChatType;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.MinecraftServer;
@@ -101,8 +102,8 @@ public final class DataCommand {
             requestedAt = clientTicks;
             status = Status.WAITING;
             try {
-                mc.getConnection().sendCommand(
-                        "data get block " + pos.getX() + " " + pos.getY() + " " + pos.getZ());
+                mc.player.chat(
+                        "/data get block " + pos.getX() + " " + pos.getY() + " " + pos.getZ());
             } catch (Exception e) {
                 waiting = false;
                 status = Status.FAIL;
@@ -133,7 +134,7 @@ public final class DataCommand {
     public static void onChatReceived(ClientChatReceivedEvent event) {
         // 1.20.1 无 System 子类型（20.4+ 才拆分）；事件自带 isSystem()，
         // `data get block` 的回执即系统消息
-        if (!event.isSystem()) {
+        if (event.getType() != ChatType.SYSTEM) {
             return;
         }
         if (!waiting || event.isCanceled()) {

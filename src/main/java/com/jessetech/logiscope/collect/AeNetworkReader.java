@@ -3,7 +3,7 @@ package com.jessetech.logiscope.collect;
 import com.jessetech.logiscope.LogiScopeMod;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
-import net.minecraft.core.registries.BuiltInRegistries;
+import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.item.Item;
@@ -66,7 +66,7 @@ public final class AeNetworkReader {
             if (aeUnavailable) {
                 return null;
             }
-            Optional<Item> item = BuiltInRegistries.ITEM.getOptional(new ResourceLocation(itemId));
+            Optional<Item> item = Optional.ofNullable(ForgeRegistries.ITEMS.getValue(new ResourceLocation(itemId)));
             if (item.isEmpty()) {
                 return null;   // 注册表里已经没有这个物品（模组被移除）→ 读不到
             }

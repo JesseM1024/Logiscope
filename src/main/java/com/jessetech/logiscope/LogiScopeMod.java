@@ -69,19 +69,19 @@ public final class LogiScopeMod {
         // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyMapping 不走全局输入，
         // 必须拦 Screen 的按键事件，见 KeyBindings#onScreenKeyPressed
         //
-        // 注意这里用了显式类型实参 <ScreenEvent.KeyPressed.Pre>：
+        // 注意这里用了显式类型实参 <ScreenEvent.KeyboardKeyPressedEvent.Pre>：
         // EventBus#addListener 有多个重载，直接传方法引用会让 javac 推断失败
         // （报 "不兼容的类型: Event无法转换为Pre"）。写明类型即可。
-        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyPressed.Pre>addListener(KeyBindings::onScreenKeyPressed);
+        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardKeyPressedEvent.Pre>addListener(KeyBindings::onScreenKeyPressed);
 
         // 容器界面刚打开时，把"玩家右键的方块"记成持久锚点（维度 + 坐标）
-        MinecraftForge.EVENT_BUS.<ScreenEvent.Init.Post>addListener(KeyBindings::onScreenInit);
+        MinecraftForge.EVENT_BUS.<ScreenEvent.InitScreenEvent.Post>addListener(KeyBindings::onScreenInit);
 
         // 「玩家是不是正在打字」的最后一道通用守卫：
         // 靠 CharacterTyped 的 Pre/Post 计数差判断上一个字符有没有被界面吃掉。
         // 原理见 TextInputGuard 的类注释（含对 KeyboardHandler#charTyped 的核实结论）。
-        MinecraftForge.EVENT_BUS.<ScreenEvent.CharacterTyped.Pre>addListener(TextInputGuard::onCharTypedPre);
-        MinecraftForge.EVENT_BUS.<ScreenEvent.CharacterTyped.Post>addListener(TextInputGuard::onCharTypedPost);
+        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardCharTypedEvent.Pre>addListener(TextInputGuard::onCharTypedPre);
+        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardCharTypedEvent.Post>addListener(TextInputGuard::onCharTypedPost);
 
         // 记录最近一次右键的方块。单人下集成服务端也会收到同一个事件，
         // ContainerAnchor 内部用 isClientSide 过滤掉了。
@@ -113,7 +113,7 @@ public final class LogiScopeMod {
         //     （于是"当前开着的容器"被判成别的世界的方块）；
         //   · ProbeSlots 的 queriedPos/dim —— 新世界坐标相同时会复用旧世界的槽位清单。
         //   两个 reset 方法早就写好了，只是一直没人调。
-        MinecraftForge.EVENT_BUS.<ClientPlayerNetworkEvent.LoggingIn>addListener(e -> {
+        MinecraftForge.EVENT_BUS.<ClientPlayerNetworkEvent.LoggedInEvent>addListener(e -> {
             LogiScopeMod.probes().clearAll();
             DataCommand.reset();
             ContainerAnchor.clearActive();

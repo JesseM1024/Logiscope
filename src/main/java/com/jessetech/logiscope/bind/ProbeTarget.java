@@ -1,6 +1,6 @@
 package com.jessetech.logiscope.bind;
 
-import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.level.Level;
@@ -101,7 +101,7 @@ public record ProbeTarget(
             String dim = dimension.location().getPath();
             anchor = dim + " " + p.getX() + "," + p.getY() + "," + p.getZ();
         } else {
-            anchor = Component.translatable("logiscope.anchor.runtime").getString();
+            anchor = new TranslatableComponent("logiscope.anchor.runtime").getString();
         }
         return slotSummary() + " · " + anchor;
     }
@@ -109,7 +109,7 @@ public record ProbeTarget(
     /** 被监控的槽号列表，形如 {@code 槽 0,1,2}；太长时收成 {@code 槽 0,1,2,+5} */
     public String slotSummary() {
         if (slots.isEmpty()) {
-            return Component.translatable("logiscope.slots.none").getString();
+            return new TranslatableComponent("logiscope.slots.none").getString();
         }
         StringBuilder sb = new StringBuilder();
         int shown = 0;
@@ -124,13 +124,13 @@ public record ProbeTarget(
             sb.append(s.shortLabel());
             shown++;
         }
-        return Component.translatable("logiscope.slots.summary", sb.toString()).getString();
+        return new TranslatableComponent("logiscope.slots.summary", sb.toString()).getString();
     }
 
     /** 目标容器的一行式定位（不含槽位），列表页用 */
     public String anchorText() {
         if (!hasPersistentId()) {
-            return Component.translatable("logiscope.anchor.runtime").getString();
+            return new TranslatableComponent("logiscope.anchor.runtime").getString();
         }
         BlockPos p = pos;
         return dimension.location().getPath() + " " + p.getX() + "," + p.getY() + "," + p.getZ();

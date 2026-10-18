@@ -25,23 +25,22 @@ import com.jessetech.logiscope.collect.ProbeInstance;
 import com.jessetech.logiscope.collect.ProbeManager;
 import com.jessetech.logiscope.collect.ProbeSlots;
 import com.jessetech.logiscope.store.Sample;
+import com.mojang.blaze3d.vertex.PoseStack;
 import net.minecraft.Util;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.registries.BuiltInRegistries;
-import net.minecraft.network.chat.Component;
+import net.minecraftforge.registries.ForgeRegistries;
+import net.minecraft.network.chat.TranslatableComponent;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
 import net.minecraftforge.client.ForgeHooksClient;
-import net.minecraftforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Files;
@@ -381,7 +380,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 「运算」弹窗：压在工具栏 / 波形之上渲染 */
-    private void renderOpPopup(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderOpPopup(Draw g, Layout L, int mouseX, int mouseY) {
         int[] pr = opPopupRect(L);
         if (pr == null) {
             return;
@@ -495,7 +494,7 @@ public final class ScopeScreen extends Screen {
     private final boolean overlayMode;
 
     public ScopeScreen(@Nullable Screen parent, Page page, int probeId) {
-        super(Component.translatable("logiscope.title"));
+        super(new TranslatableComponent("logiscope.title"));
         this.parent = parent;
         this.overlayMode = parent != null;
         this.page = page;
@@ -1243,7 +1242,10 @@ public final class ScopeScreen extends Screen {
     // ==================================================================
 
     @Override
-    public void render(GuiGraphics g, int mouseX, int mouseY, float partialTick) {
+    public void render(PoseStack pose, int mouseX, int mouseY, float partialTick) {
+        // 1.18.2 没有 GuiGraphics：这里把它"synthesize"出来，
+        // 下面一整段沿用 1.20 线的绘制调用（g.fill / g.drawString / g.pose()）。
+        Draw g = new Draw(pose);
         rebuildIfNeeded();
         refreshAnalyze();
         // 悬浮详情每帧重建（鼠标动一下就可能换目标）
@@ -1372,7 +1374,7 @@ public final class ScopeScreen extends Screen {
         return new long[]{start, end};
     }
 
-    private void renderTitle(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderTitle(Draw g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
         int y = L.y();
         boolean overTitle = isIn(mouseX, mouseY, x, y, L.w(), TITLE_H);
@@ -1453,7 +1455,7 @@ public final class ScopeScreen extends Screen {
     // 信息区
     // ------------------------------------------------------------------
 
-    private void renderInfo(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderInfo(Draw g, Layout L, int mouseX, int mouseY) {
         int left = L.x() + PAD;
         int right = L.x() + L.w() - PAD;
         int y = L.infoTop();
@@ -1614,13 +1616,13 @@ public final class ScopeScreen extends Screen {
     // ------------------------------------------------------------------
 
     /** 根页的探针列表（上半部分）。下半部分的存档列表见 renderArchives */
-    private void renderRoot(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderRoot(Draw g, Layout L, int mouseX, int mouseY) {
         renderProbeList(g, L, mouseX, mouseY);
         renderArchives(g, L, mouseX, mouseY);
     }
 
     /** 根页下半：存档列表（读取分析数据）。默认高亮当前/最近一次的存档 */
-    private void renderArchives(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderArchives(Draw g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
         int y = L.archTop();
         List<Archives.Info> head = archiveList;
@@ -1724,7 +1726,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 存档筛选框：空时显示占位符（原标题文字），聚焦时闪光标 */
-    private void renderArchiveFilter(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderArchiveFilter(Draw g, Layout L, int mouseX, int mouseY) {
         int[] r = archFilterRect(L);
         int x = r[0];
         int y = r[1];
@@ -1758,7 +1760,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    private void renderProbeList(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderProbeList(Draw g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
         List<ProbeInstance> list = LogiScopeMod.probes().all();
 
@@ -1861,7 +1863,7 @@ public final class ScopeScreen extends Screen {
                 : selContainerSlots.contains(v.containerSlotIndex());
     }
 
-    private void renderSlotPicker(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderSlotPicker(Draw g, Layout L, int mouseX, int mouseY) {
         int x = L.x();
 
         switch (source) {
@@ -1927,7 +1929,7 @@ public final class ScopeScreen extends Screen {
     // 图例 / 工具栏 / 按钮
     // ------------------------------------------------------------------
 
-    private void renderToolbar(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
+    private void renderToolbar(Draw g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
             renderChip(g, c, mouseX, mouseY, c.enabled() && c.hit(mouseX, mouseY), c.accent());
         }
@@ -1942,7 +1944,7 @@ public final class ScopeScreen extends Screen {
      * 关掉的那层显示灰 —— 每一层开关的状态都直接写在图标上。
      * 字体的明暗只服从一条规则：**两层全关才变暗**（单关一层时这行图例还活着）。
      */
-    private void renderLegend(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
+    private void renderLegend(Draw g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
             if (!c.id().startsWith(SERIES_PREFIX)) {
                 renderChip(g, c, mouseX, mouseY, false, 0);
@@ -1983,7 +1985,7 @@ public final class ScopeScreen extends Screen {
     /**
      * 图例弹出菜单：列在弹窗渲染**之后**调用（压在最上层，不然会被底部按钮盖住）。
      */
-    private void renderLegendPopup(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderLegendPopup(Draw g, Layout L, int mouseX, int mouseY) {
         int[] pr = popupRect(L);
         if (pr == null) {
             return;
@@ -2017,7 +2019,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    private void renderButtons(GuiGraphics g, List<Chip> chips, int mouseX, int mouseY) {
+    private void renderButtons(Draw g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
             // accent 在渲染时求值（不取构造时存的 c.accent()）：
             //   语义色（主界面淡绿 / 回选格淡蓝 / NBT ON 黄）依赖运行状态，
@@ -2190,7 +2192,7 @@ public final class ScopeScreen extends Screen {
      * 两块并存、互不覆盖，"计算结果不影响区间选中的基础信息"就是这么落地的。
      * 纯展示、无命中，不会挡框选。
      */
-    private void renderAnalyzeBox(GuiGraphics g, Layout L) {
+    private void renderAnalyzeBox(Draw g, Layout L) {
         if (page != Page.REPLAY || analyzeLines.isEmpty()) {
             return;
         }
@@ -2237,7 +2239,7 @@ public final class ScopeScreen extends Screen {
         return v.compareTo(Val.ZERO) > 0 ? "+" + fmtNum(v) : fmtNum(v);
     }
 
-    private void renderChip(GuiGraphics g, Chip c, int mouseX, int mouseY, boolean hover, int accent) {
+    private void renderChip(Draw g, Chip c, int mouseX, int mouseY, boolean hover, int accent) {
         int bg = !c.enabled() ? 0xFF1A1A22 : (hover ? 0xFF41415A : 0xFF2A2A38);
         int border = !c.enabled() ? 0xFF2A2A34 : (hover ? 0xFF8A8AC8 : 0xFF4A4A5E);
         int fg = !c.enabled() ? 0xFF6A6A78 : (accent != 0 ? accent : (hover ? 0xFFF0F0FF : 0xFFC8C8D8));
@@ -2251,7 +2253,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 右下角的缩放把手。画三道嵌套的直角线，比画"◢"可靠（不依赖字体有没有那个字形） */
-    private void renderResizeGrip(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderResizeGrip(Draw g, Layout L, int mouseX, int mouseY) {
         int gx = L.x() + L.w() - RESIZE_GRIP;
         int gy = L.y() + L.h() - RESIZE_GRIP;
         boolean hover = isIn(mouseX, mouseY, gx, gy, RESIZE_GRIP, RESIZE_GRIP);
@@ -2281,7 +2283,7 @@ public final class ScopeScreen extends Screen {
      * 首行贴着面板底 —— 与旧逻辑的"挪下去"一致，只是从一行变成了整块。
      * 折行结果按文本缓存：提示每帧都要画，逐字符算宽度不能每帧来一遍。
      */
-    private void renderFlash(GuiGraphics g, int panelTop) {
+    private void renderFlash(Draw g, int panelTop) {
         if (flash.isEmpty() || System.currentTimeMillis() > flashUntil) {
             return;
         }
@@ -2306,7 +2308,7 @@ public final class ScopeScreen extends Screen {
      * 实现 = 静态底条 + 一个从左到右移动的亮斑（15 段梯形 alpha），每帧约 16 次 fill ——
      * 与面板背景同量级，渲染压力可忽略（用户口径：压力大才降级成呼吸光效，实测不需要）。
      */
-    private void renderTopGlow(GuiGraphics g, Layout L) {
+    private void renderTopGlow(Draw g, Layout L) {
         int base = switch (page) {
             case ROOT -> COLOR_MAINSCREEN;
             case PICKER, DATA -> COLOR_BACKSLOT;
@@ -2387,9 +2389,9 @@ public final class ScopeScreen extends Screen {
      * 需要的全是公开 API（都已核实）：
      *   getGuiLeft() / getGuiTop() / getSlotColor(int)
      *   Slot.x / Slot.y / isActive() / isHighlightable()
-     *   renderSlotHighlight(GuiGraphics,int,int,int,int)（public static）
+     *   renderSlotHighlight(Draw,int,int,int,int)（public static）
      */
-    private void renderBackgroundHover(GuiGraphics g, int mouseX, int mouseY, Layout L) {
+    private void renderBackgroundHover(Draw g, int mouseX, int mouseY, Layout L) {
         backgroundHoveredSlot = null;
         AbstractContainerScreen<?> bg = backgroundContainer();
         if (bg == null || overPanel(mouseX, mouseY, L)) {
@@ -2400,7 +2402,7 @@ public final class ScopeScreen extends Screen {
         for (Slot slot : bg.getMenu().slots) {
             // 与 vanilla 的判定保持一致：isActive 决定"能不能交互"，
             // isHighlightable 决定"要不要画高亮"（部分模组用假槽位占位，两样都要看）
-            if (!slot.isActive() || !slot.isHighlightable()) {
+            if (!slot.isActive()) {
                 continue;
             }
             int sx = left + slot.x;
@@ -2409,7 +2411,7 @@ public final class ScopeScreen extends Screen {
                 backgroundHoveredSlot = slot;
                 // 选格模式下由我们自己画"选中/可选中"的框，别叠上原版的高亮
                 if (!cellMode) {
-                    AbstractContainerScreen.renderSlotHighlight(g, sx, sy, 0, bg.getSlotColor(slot.index));
+                    AbstractContainerScreen.renderSlotHighlight(g.pose(), sx, sy, 0, bg.getSlotColor(slot.index));
                 }
                 return;
             }
@@ -2421,7 +2423,7 @@ public final class ScopeScreen extends Screen {
      * 只有这一层能告诉用户"我点到的是哪一格" —— 否则光标禁用了物品交互之后，
      * 点上去毫无反馈，用户会以为坏了。
      */
-    private void renderCellOverlay(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderCellOverlay(Draw g, int mouseX, int mouseY) {
         if (!cellMode) {
             return;
         }
@@ -2432,7 +2434,7 @@ public final class ScopeScreen extends Screen {
         int left = bg.getGuiLeft();
         int top = bg.getGuiTop();
         for (Slot slot : bg.getMenu().slots) {
-            if (!slot.isActive() || !slot.isHighlightable()) {
+            if (!slot.isActive()) {
                 continue;
             }
             int sx = left + slot.x - 1;
@@ -2453,7 +2455,7 @@ public final class ScopeScreen extends Screen {
         }
     }
 
-    private static void ring(GuiGraphics g, int x, int y, int w, int h, int color) {
+    private static void ring(Draw g, int x, int y, int w, int h, int color) {
         g.fill(x, y, x + w, y + 1, color);
         g.fill(x, y + h - 1, x + w, y + h, color);
         g.fill(x, y, x + 1, y + h, color);
@@ -2476,7 +2478,7 @@ public final class ScopeScreen extends Screen {
      * 已知差异：vanilla 在做「拖拽逐格分配」时会把数字画成剩余待分配量
      * （`quickCraftingRemainder`，private，我们读不到），这里只能画完整数量。
      */
-    private void renderCarriedItem(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderCarriedItem(Draw g, int mouseX, int mouseY) {
         AbstractContainerScreen<?> bg = backgroundContainer();
         if (bg == null) {
             return;
@@ -2490,9 +2492,9 @@ public final class ScopeScreen extends Screen {
         g.pose().pushPose();
         g.pose().translate(0.0F, 0.0F, 232.0F);
         g.renderItem(carried, x, y);
-        Font countFont = IClientItemExtensions.of(carried)
-                .getFont(carried, IClientItemExtensions.FontContext.ITEM_COUNT);
-        g.renderItemDecorations(countFont == null ? this.font : countFont, carried, x, y);
+        // 1.18.2 没有 IClientItemExtensions（1.19 才引入），
+        // 物品数量字体一律用界面默认字体 —— 极少数自定义数量字体的模组会显示成默认字形。
+        g.renderItemDecorations(this.font, carried, x, y);
         g.pose().popPose();
     }
 
@@ -2501,7 +2503,7 @@ public final class ScopeScreen extends Screen {
      * 同样是因为 `hoveredSlot` 在背景层恒为 null，vanilla 的 `renderTooltip` 也不干活。
      * 手持物品时按 vanilla 的规矩不显示。
      */
-    private void renderBackgroundTooltip(GuiGraphics g, int mouseX, int mouseY) {
+    private void renderBackgroundTooltip(Draw g, int mouseX, int mouseY) {
         Slot slot = backgroundHoveredSlot;
         AbstractContainerScreen<?> bg = backgroundContainer();
         if (slot == null || bg == null || !slot.hasItem()) {
@@ -2510,7 +2512,8 @@ public final class ScopeScreen extends Screen {
         if (!bg.getMenu().getCarried().isEmpty()) {
             return;
         }
-        g.renderTooltip(this.font, slot.getItem(), mouseX, mouseY);
+        // 1.18.2 的 Screen#renderTooltip 收 PoseStack，不收 GuiGraphics（本项目里由 Draw 包着矩阵）
+        this.renderTooltip(g.pose(), slot.getItem(), mouseX, mouseY);
     }
 
     // ==================================================================
@@ -2874,7 +2877,7 @@ public final class ScopeScreen extends Screen {
         int left = bg.getGuiLeft();
         int top = bg.getGuiTop();
         for (Slot slot : bg.getMenu().slots) {
-            if (!slot.isActive() || !slot.isHighlightable()) {
+            if (!slot.isActive()) {
                 continue;
             }
             int sx = left + slot.x;
@@ -3531,7 +3534,7 @@ public final class ScopeScreen extends Screen {
         // 用户点名：创建这类设备的探针时直接开好，别让人手动按按钮再猜。
         // 判据 = 准星所指方块的注册命名空间（mekanism）；NBT 识别本身仍靠形状（CP24）。
         if (cand.hasAnchor() && mc.level != null && "mekanism".equals(
-                BuiltInRegistries.BLOCK.getKey(mc.level.getBlockState(cand.pos()).getBlock())
+                ForgeRegistries.BLOCKS.getKey(mc.level.getBlockState(cand.pos()).getBlock())
                         .getNamespace())) {
             nbtSlotMode = true;
             say(tr("logiscope.flash.mek_nbt"));
@@ -3962,7 +3965,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 重命名输入框：画在绘图区顶部（浮层，不占常规布局） */
-    private void renderRenameBox(GuiGraphics g, Layout L) {
+    private void renderRenameBox(Draw g, Layout L) {
         if (!renameFocus || !L.hasChart()) {
             return;
         }
@@ -4113,7 +4116,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 画详情框（跟着鼠标，夹在面板内；行多时底部给"x / y 滚轮"提示） */
-    private void renderTip(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderTip(Draw g, Layout L, int mouseX, int mouseY) {
         if (tipLines.isEmpty()) {
             tipRect = null;
             return;
@@ -4304,7 +4307,7 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 画刷新滑条：轨道 + 已选段 + 拖钮 + 右侧档位文字；悬停/拖动时提亮 */
-    private void renderDataRateSlider(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderDataRateSlider(Draw g, Layout L, int mouseX, int mouseY) {
         int[] r = dataSliderRect(L);
         int sx = r[0];
         int sw = r[2];
@@ -4341,7 +4344,7 @@ public final class ScopeScreen extends Screen {
         // 排期不用这里管：tickDataPage 每 tick 会把过期排期拉回来（见那里的注释）
     }
 
-    private void renderDataPage(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+    private void renderDataPage(Draw g, Layout L, int mouseX, int mouseY) {
         DataRects R = dataRects(L);
         int left = L.x() + PAD;
         int width = L.w() - 2 * PAD;
@@ -4499,7 +4502,7 @@ public final class ScopeScreen extends Screen {
      * {@code marker} 非 0 时在右端点画一个小方格，颜色由调用方给（同一语汇，两种含义）：
      * 名称跟着 NBT 走 = 品红；值被标了「按数值读取」 = 黄。
      */
-    private void drawEditCell(GuiGraphics g, int x, int y, int w, String label,
+    private void drawEditCell(Draw g, int x, int y, int w, String label,
                               String value, boolean focused, int marker) {
         g.drawString(this.font, label, x, y - 9, 0xFF8A8AA0, false);
         int border = focused ? 0xFF8A8AC8 : 0xFF4A4A5E;
@@ -4736,11 +4739,11 @@ public final class ScopeScreen extends Screen {
     }
 
     private static String tr(String key) {
-        return Component.translatable(key).getString();
+        return new TranslatableComponent(key).getString();
     }
 
     /** 带参数的翻译（%s 占位）。注意：数字格式化交给调用方，这里只做文本替换 */
     private static String tr(String key, Object... args) {
-        return Component.translatable(key, args).getString();
+        return new TranslatableComponent(key, args).getString();
     }
 }

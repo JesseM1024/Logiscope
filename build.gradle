@@ -1,7 +1,7 @@
 plugins {
     id 'java-library'
-    // 1.20.1 分支：MDG 主插件(net.neoforged.moddev)只支持 1.20.2+，
-    // 1.20.1 用同一家官方的 legacy 插件（支持 Forge 1.17–1.20.1 与 NeoForge 1.20.1）。
+    // 1.18.2 分支：MDG 主插件只支持 NeoForge 1.20.2+，1.18.2 没有 NeoForge，
+    // 走同一家官方的 legacy 插件（官方支持 Forge 1.17–1.20.1）。
     id 'net.neoforged.moddev.legacyforge' version '2.0.147'
     id 'idea'
 }
@@ -13,7 +13,7 @@ base {
     archivesName = mod_id
 }
 
-// 1.20.1 对应 Java 17（master 1.21.1 主线是 21）
+// 1.18.2 对应 Java 17
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
 sourceSets.main.resources {
@@ -27,12 +27,11 @@ repositories {
 }
 
 legacyForge {
-    // NeoForge 1.20.1 线：2.0.147 里要写进 enable { } 块（字节码核实：
-    // LegacyForgeExtension 外层只有 version=Forge 线 / mcpVersion=原版线；
-    // neoForgeVersion / forgeVersion / mcpVersion 三选一在 enable{} 的
-    // LegacyForgeModdingSettings 上）。
+    // 1.18.2 线：Forge 本体（这一代没有 NeoForge）。
+    // 2.0.147 里这三个是 enable { } 块上的三选一属性：
+    //   forgeVersion（Forge 线）/ neoForgeVersion（NeoForge 1.20.1）/ mcpVersion（原版线）。
     enable {
-        neoForgeVersion = project.neo_version
+        forgeVersion = project.forge_version
     }
 
     // 本项目是【纯客户端】模组（@Mod(dist = Dist.CLIENT)），
@@ -46,10 +45,10 @@ legacyForge {
         }
         configureEach {
             // 各版本线独立 run 目录，切分支互不串味：
-            // 本分支（1.20.1）用 1_20_1_neo/，master（1.21.1）仍用默认 run/。
-            // saves / options.txt / mods / logs 互不覆盖。属性名已用 javap 核实
-            // （RunModel.getGameDirectory()，DirectoryProperty）。
-            gameDirectory = project.file('1_20_1_neo')
+            // 本分支（1.18.2）用 1_18_2_forge/，1.20.1 线用 1_20_1_neo/，
+            // master（1.21.1）仍用默认 run/。saves / options.txt / mods / logs 互不覆盖。
+            // 属性名已用 javap 核实（RunModel.getGameDirectory()，DirectoryProperty）。
+            gameDirectory = project.file('1_18_2_forge')
             systemProperty 'forge.logging.markers', 'REGISTRIES'
             logLevel = org.slf4j.event.Level.DEBUG
         }
@@ -95,8 +94,8 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
     var replaceProperties = [
             minecraft_version      : minecraft_version,
             minecraft_version_range: minecraft_version_range,
-            neo_version            : neo_version,
-            neo_version_range      : neo_version_range,
+            forge_version          : forge_version,
+            forge_version_range    : forge_version_range,
             loader_version_range   : loader_version_range,
             mod_id                 : mod_id,
             mod_name               : mod_name,

@@ -15,7 +15,8 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
+import net.minecraftforge.client.ClientRegistry;
+import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import org.jetbrains.annotations.Nullable;
 
@@ -26,7 +27,7 @@ import org.jetbrains.annotations.Nullable;
  * 而本模组的核心场景恰恰是「玩家的容器界面开着」——
  * 此时按键被当前 Screen 吃掉，KeyMapping 完全收不到。
  *
- * 解法：监听 ScreenEvent.KeyPressed.Pre。
+ * 解法：监听 ScreenEvent.KeyboardKeyPressedEvent.Pre。
  * 这个事件在 Screen 处理按键【之前】触发，且可以 cancel，
  * 因此我们既能拿到按键，又能阻止它被原界面继续处理。
  *
@@ -118,11 +119,15 @@ public final class KeyBindings {
 
     /** 由主类在模组总线上调用 */
     public static void register(IEventBus modBus) {
-        modBus.addListener(KeyBindings::onRegisterKeyMappings);
+        modBus.addListener(KeyBindings::onClientSetup);
     }
 
-    private static void onRegisterKeyMappings(RegisterKeyMappingsEvent event) {
-        event.register(OPEN_SCOPE);
+    /**
+     * 1.18.2 没有 RegisterKeyMappingsEvent（那是 1.19 才有的），
+     * 快捷键在 FMLClientSetupEvent 里通过 ClientRegistry 注册。
+     */
+    private static void onClientSetup(FMLClientSetupEvent event) {
+        event.enqueueWork(() -> ClientRegistry.registerKeyBinding(OPEN_SCOPE));
     }
 
     /**
@@ -133,7 +138,7 @@ public final class KeyBindings {
      * 都走 screen 这条分支），而且事件本身不带 action 信息。
      * 不去抖的话，按住快捷键会以每秒 ~30 次的频率把面板开了又关。
      */
-    public static void onScreenKeyPressed(ScreenEvent.KeyPressed.Pre event) {
+    public static void onScreenKeyPressed(ScreenEvent.KeyboardKeyPressedEvent.Pre event) {
         if (!OPEN_SCOPE.matches(event.getKeyCode(), event.getScanCode())) {
             return;
         }
@@ -297,13 +302,13 @@ public final class KeyBindings {
     }
 
     /**
-     * 由 ScreenEvent.Init.Post 调用：
+     * 由 ScreenEvent.InitScreenEvent.Post 调用：
      *   1. 容器界面初始化完成时，把它和"玩家右键的那个方块"关联起来，得到持久身份（维度 + 坐标）
      *   2. 如果是我们刚刚模拟右键开出来的界面，顺手把探针面板压上去
      *
      * 这是"关掉界面之后还能找回来"的唯一可靠时机，见 ContainerAnchor 的类注释。
      */
-    public static void onScreenInit(ScreenEvent.Init.Post event) {
+    public static void onScreenInit(ScreenEvent.InitScreenEvent.Post event) {
         Screen screen = event.getScreen();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
