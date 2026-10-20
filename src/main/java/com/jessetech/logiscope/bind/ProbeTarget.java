@@ -1,9 +1,9 @@
 package com.jessetech.logiscope.bind;
 
-import net.minecraft.network.chat.TranslatableComponent;
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.text.TranslationTextComponent;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -29,7 +29,7 @@ import java.util.List;
  *      · 多人：读不到（客户端方块实体没有内容），于是记 no_data，
  *              等玩家重新打开界面时再拿真实值 —— 两段之间的差值依然有效
  *
- * 注意：vanilla 的 AbstractContainerMenu **不保存方块坐标**，
+ * 注意：vanilla 的 Container **不保存方块坐标**，
  * 持久身份是从右键方块事件（PlayerInteractEvent.RightClickBlock）或准星射线推出来的，
  * 见 ContainerAnchor / ProbeContext。推不出来时它就是 null，此时关掉界面只能暂停。
  *
@@ -41,11 +41,50 @@ import java.util.List;
  * @param dimension  维度 key；拿不到为 null
  * @param pos        方块坐标；拿不到为 null
  */
-public record ProbeTarget(
-        List<SlotRef> slots,
-        @Nullable String deviceName,
-        @Nullable ResourceKey<Level> dimension,
-        @Nullable BlockPos pos) {
+public final class ProbeTarget {
+    private final List<SlotRef> slots;
+    private final @Nullable String deviceName;
+    private final @Nullable RegistryKey<World> dimension;
+    private final @Nullable BlockPos pos;
+
+    public List<SlotRef> slots() {
+        return slots;
+    }
+
+    public String deviceName() {
+        return deviceName;
+    }
+
+    public RegistryKey<World> dimension() {
+        return dimension;
+    }
+
+    public BlockPos pos() {
+        return pos;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        ProbeTarget other = (ProbeTarget) o;
+        return java.util.Objects.equals(this.slots, other.slots) && java.util.Objects.equals(this.deviceName, other.deviceName) && java.util.Objects.equals(this.dimension, other.dimension) && java.util.Objects.equals(this.pos, other.pos);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(slots, deviceName, dimension, pos);
+    }
+
+    @Override
+    public String toString() {
+        return "ProbeTarget[" + "slots=" + slots + ", " + "deviceName=" + deviceName + ", " + "dimension=" + dimension + ", " + "pos=" + pos + "]";
+    }
+
 
     /**
      * 一个被监控的格子。
@@ -55,7 +94,59 @@ public record ProbeTarget(
      * @param itemId             挂上探头那一刻的内容，用于界面显示 + 服务端下标指纹验证
      * @param count              同上
      */
-    public record SlotRef(int menuSlotIndex, int containerSlotIndex, String itemId, int count) {
+    public static final class SlotRef {
+        private final int menuSlotIndex;
+        private final int containerSlotIndex;
+        private final String itemId;
+        private final int count;
+
+        public SlotRef(int menuSlotIndex, int containerSlotIndex, String itemId, int count) {
+            this.menuSlotIndex = menuSlotIndex;
+            this.containerSlotIndex = containerSlotIndex;
+            this.itemId = itemId;
+            this.count = count;
+        }
+
+        public int menuSlotIndex() {
+            return menuSlotIndex;
+        }
+
+        public int containerSlotIndex() {
+            return containerSlotIndex;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public int count() {
+            return count;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SlotRef other = (SlotRef) o;
+            return menuSlotIndex == other.menuSlotIndex
+                    && containerSlotIndex == other.containerSlotIndex
+                    && count == other.count
+                    && java.util.Objects.equals(itemId, other.itemId);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(menuSlotIndex, containerSlotIndex, itemId, count);
+        }
+
+        @Override
+        public String toString() {
+            return "SlotRef[menuSlotIndex=" + menuSlotIndex + ", containerSlotIndex=" + containerSlotIndex + "]";
+        }
 
         public boolean empty() {
             return count <= 0;
@@ -67,12 +158,15 @@ public record ProbeTarget(
         }
     }
 
-    public ProbeTarget {
-        slots = List.copyOf(slots);
+    public ProbeTarget(List<SlotRef> slots, @Nullable String deviceName, @Nullable RegistryKey<World> dimension, @Nullable BlockPos pos) {
+        this.slots = new java.util.ArrayList<>(slots);
+        this.deviceName = deviceName;
+        this.dimension = dimension;
+        this.pos = pos;
     }
 
     /** 还没选格的空目标 */
-    public static final ProbeTarget EMPTY = new ProbeTarget(List.of(), null, null, null);
+    public static final ProbeTarget EMPTY = new ProbeTarget(java.util.Collections.emptyList(), null, null, null);
 
     /** 是否具备"关掉界面之后还能找回来"的持久身份 */
     public boolean hasPersistentId() {
@@ -98,10 +192,10 @@ public record ProbeTarget(
         String anchor;
         if (hasPersistentId()) {
             BlockPos p = pos;
-            String dim = dimension.location().getPath();
+            String dim = dimension.getLocation().getPath();
             anchor = dim + " " + p.getX() + "," + p.getY() + "," + p.getZ();
         } else {
-            anchor = new TranslatableComponent("logiscope.anchor.runtime").getString();
+            anchor = new TranslationTextComponent("logiscope.anchor.runtime").getString();
         }
         return slotSummary() + " · " + anchor;
     }
@@ -109,7 +203,7 @@ public record ProbeTarget(
     /** 被监控的槽号列表，形如 {@code 槽 0,1,2}；太长时收成 {@code 槽 0,1,2,+5} */
     public String slotSummary() {
         if (slots.isEmpty()) {
-            return new TranslatableComponent("logiscope.slots.none").getString();
+            return new TranslationTextComponent("logiscope.slots.none").getString();
         }
         StringBuilder sb = new StringBuilder();
         int shown = 0;
@@ -124,15 +218,15 @@ public record ProbeTarget(
             sb.append(s.shortLabel());
             shown++;
         }
-        return new TranslatableComponent("logiscope.slots.summary", sb.toString()).getString();
+        return new TranslationTextComponent("logiscope.slots.summary", sb.toString()).getString();
     }
 
     /** 目标容器的一行式定位（不含槽位），列表页用 */
     public String anchorText() {
         if (!hasPersistentId()) {
-            return new TranslatableComponent("logiscope.anchor.runtime").getString();
+            return new TranslationTextComponent("logiscope.anchor.runtime").getString();
         }
         BlockPos p = pos;
-        return dimension.location().getPath() + " " + p.getX() + "," + p.getY() + "," + p.getZ();
+        return dimension.getLocation().getPath() + " " + p.getX() + "," + p.getY() + "," + p.getZ();
     }
 }

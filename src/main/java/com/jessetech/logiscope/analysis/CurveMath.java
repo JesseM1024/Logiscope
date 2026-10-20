@@ -46,7 +46,57 @@ public final class CurveMath {
     // 极值
     // ------------------------------------------------------------------
 
-    public record Extremes(Val min, long minTick, Val max, long maxTick) {
+    public static final class Extremes {
+        private final Val min;
+        private final long minTick;
+        private final Val max;
+        private final long maxTick;
+
+        public Extremes(Val min, long minTick, Val max, long maxTick) {
+            this.min = min;
+            this.minTick = minTick;
+            this.max = max;
+            this.maxTick = maxTick;
+        }
+
+        public Val min() {
+            return min;
+        }
+
+        public long minTick() {
+            return minTick;
+        }
+
+        public Val max() {
+            return max;
+        }
+
+        public long maxTick() {
+            return maxTick;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Extremes other = (Extremes) o;
+            return java.util.Objects.equals(this.min, other.min) && java.util.Objects.equals(this.minTick, other.minTick) && java.util.Objects.equals(this.max, other.max) && java.util.Objects.equals(this.maxTick, other.maxTick);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(min, minTick, max, maxTick);
+        }
+
+        @Override
+        public String toString() {
+            return "Extremes[" + "min=" + min + ", " + "minTick=" + minTick + ", " + "max=" + max + ", " + "maxTick=" + maxTick + "]";
+        }
+
     }
 
     public static Extremes extremes(List<SeriesPoint> pts) {
@@ -73,7 +123,51 @@ public final class CurveMath {
     // ------------------------------------------------------------------
 
     /** @param var 总体方差（除以 n；单一采样时为 0） */
-    public record Stats(double mean, double med, double var) {
+    public static final class Stats {
+        private final double mean;
+        private final double med;
+        private final double var;
+
+        public Stats(double mean, double med, double var) {
+            this.mean = mean;
+            this.med = med;
+            this.var = var;
+        }
+
+        public double mean() {
+            return mean;
+        }
+
+        public double med() {
+            return med;
+        }
+
+        public double var() {
+            return var;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Stats other = (Stats) o;
+            return java.util.Objects.equals(this.mean, other.mean) && java.util.Objects.equals(this.med, other.med) && java.util.Objects.equals(this.var, other.var);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(mean, med, var);
+        }
+
+        @Override
+        public String toString() {
+            return "Stats[" + "mean=" + mean + ", " + "med=" + med + ", " + "var=" + var + "]";
+        }
+
     }
 
     public static Stats stats(List<SeriesPoint> pts) {
@@ -105,7 +199,51 @@ public final class CurveMath {
      * @param fall 下降合计（≤ 0）
      * @param gaps 断档处数（那里的变化没有留在观测里，不计入）
      */
-    public record TotalChange(Val rise, Val fall, int gaps) {
+    public static final class TotalChange {
+        private final Val rise;
+        private final Val fall;
+        private final int gaps;
+
+        public TotalChange(Val rise, Val fall, int gaps) {
+            this.rise = rise;
+            this.fall = fall;
+            this.gaps = gaps;
+        }
+
+        public Val rise() {
+            return rise;
+        }
+
+        public Val fall() {
+            return fall;
+        }
+
+        public int gaps() {
+            return gaps;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            TotalChange other = (TotalChange) o;
+            return java.util.Objects.equals(this.rise, other.rise) && java.util.Objects.equals(this.fall, other.fall) && java.util.Objects.equals(this.gaps, other.gaps);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(rise, fall, gaps);
+        }
+
+        @Override
+        public String toString() {
+            return "TotalChange[" + "rise=" + rise + ", " + "fall=" + fall + ", " + "gaps=" + gaps + "]";
+        }
+
 
         /** net = rise + fall（无断档时 == 区间 Δ） */
         public Val net() {
@@ -182,7 +320,63 @@ public final class CurveMath {
      * @param dMean / dVar 变化量的均值 / 总体方差（count == 0 时为 NaN）
      * @param pMean / pVar 周期（相邻两次事件的 tick 间隔）的均值 / 方差（事件 < 2 时为 NaN）
      */
-    public record Events(int count, double dMean, double dVar, double pMean, double pVar) {
+    public static final class Events {
+        private final int count;
+        private final double dMean;
+        private final double dVar;
+        private final double pMean;
+        private final double pVar;
+
+        public Events(int count, double dMean, double dVar, double pMean, double pVar) {
+            this.count = count;
+            this.dMean = dMean;
+            this.dVar = dVar;
+            this.pMean = pMean;
+            this.pVar = pVar;
+        }
+
+        public int count() {
+            return count;
+        }
+
+        public double dMean() {
+            return dMean;
+        }
+
+        public double dVar() {
+            return dVar;
+        }
+
+        public double pMean() {
+            return pMean;
+        }
+
+        public double pVar() {
+            return pVar;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Events other = (Events) o;
+            return java.util.Objects.equals(this.count, other.count) && java.util.Objects.equals(this.dMean, other.dMean) && java.util.Objects.equals(this.dVar, other.dVar) && java.util.Objects.equals(this.pMean, other.pMean) && java.util.Objects.equals(this.pVar, other.pVar);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(count, dMean, dVar, pMean, pVar);
+        }
+
+        @Override
+        public String toString() {
+            return "Events[" + "count=" + count + ", " + "dMean=" + dMean + ", " + "dVar=" + dVar + ", " + "pMean=" + pMean + ", " + "pVar=" + pVar + "]";
+        }
+
     }
 
     /** 数量线：变更事件 = 相邻采样值之差 ≠ 0（断档不计） */

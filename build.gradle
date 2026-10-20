@@ -1,10 +1,22 @@
-plugins {
-    id 'java-library'
-    // 1.18.2 分支：MDG 主插件只支持 NeoForge 1.20.2+，1.18.2 没有 NeoForge，
-    // 走同一家官方的 legacy 插件（官方支持 Forge 1.17–1.20.1）。
-    id 'net.neoforged.moddev.legacyforge' version '2.0.147'
-    id 'idea'
+// ===========================================================================
+//  LogiScope · MC 1.16.5 + Forge 36.2.x
+//
+//  为什么不是 MDG：ModDevGradle 的 legacy 插件官方支持范围是 Forge 1.17–1.20.1，
+//  1.16.5 不在内。这一代只能用 ForgeGradle 5（配套 Gradle 7.6，见 wrapper 配置）。
+// ===========================================================================
+buildscript {
+    repositories {
+        maven { url = 'https://maven.minecraftforge.net' }
+        mavenCentral()
+    }
+    dependencies {
+        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '5.1.+', changing: true
+    }
 }
+
+apply plugin: 'net.minecraftforge.gradle'
+apply plugin: 'java-library'
+apply plugin: 'idea'
 
 version = mod_version
 group = mod_group_id
@@ -13,8 +25,13 @@ base {
     archivesName = mod_id
 }
 
-// 1.18.2 对应 Java 17
-java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+// 1.16.5 是 Java 8 世代：这一行同时是"语法上限"，record / switch 箭头 /
+// isBlank / 模式匹配 在编译期就会被拦下来（移植时必须降到 Java 8 子集）。
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(8)
+    }
+}
 
 sourceSets.main.resources {
     srcDir('src/generated/resources')
@@ -23,70 +40,43 @@ sourceSets.main.resources {
 }
 
 repositories {
-    // MDG legacy 插件已自动带上 Minecraft / Forge / NeoForge 仓库
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net' }
 }
 
-legacyForge {
-    // 1.18.2 线：Forge 本体（这一代没有 NeoForge）。
-    // 2.0.147 里这三个是 enable { } 块上的三选一属性：
-    //   forgeVersion（Forge 线）/ neoForgeVersion（NeoForge 1.20.1）/ mcpVersion（原版线）。
-    enable {
-        forgeVersion = project.forge_version
-    }
+minecraft {
+    // 1.16.5 的官方推荐映射（MCP snapshot）。这一代还没有 Mojang official 映射。
+    mappings channel: 'snapshot', version: '20210309-1.16.5'
 
-    // 本项目是【纯客户端】模组（@Mod(dist = Dist.CLIENT)），
-    // 因此只声明 client 运行配置 —— 服务端/数据生成配置对本项目无意义，
-    // 保留反而会让人误以为存在服务端行为。
+    // 纯客户端模组：只声明 client 运行配置。
     runs {
         client {
-            client()
-            // 需要调试渲染/网络时把下面打开
-            // jvmArguments.addAll '-Dmixin.debug.export=true'
-        }
-        configureEach {
-            // 各版本线独立 run 目录，切分支互不串味：
-            // 本分支（1.18.2）用 1_18_2_forge/，1.20.1 线用 1_20_1_neo/，
-            // master（1.21.1）仍用默认 run/。saves / options.txt / mods / logs 互不覆盖。
-            // 属性名已用 javap 核实（RunModel.getGameDirectory()，DirectoryProperty）。
-            gameDirectory = project.file('1_18_2_forge')
-            systemProperty 'forge.logging.markers', 'REGISTRIES'
-            logLevel = org.slf4j.event.Level.DEBUG
+            workingDirectory project.file('1_16_5_forge')
+            property 'forge.logging.markers', 'REGISTRIES'
+            property 'forge.logging.console.level', 'debug'
+
+            mods {
+                logiscope {
+                    source sourceSets.main
+                }
+            }
         }
     }
-
-    mods {
-        "${mod_id}" {
-            sourceSet(sourceSets.main)
-        }
-    }
-}
-
-configurations {
-    runtimeClasspath.extendsFrom localRuntime
-}
-
-// legacy 线专用：1.20.1 生产环境是 SRG 映射，本地依赖的 mod jar 也需要
-// 从 SRG 重映射到官方映射后才能参与编译/运行（本项目管理内无 mod 依赖，属预防性配置）。
-obfuscation {
-    createRemappingConfiguration(configurations.localRuntime)
 }
 
 dependencies {
-    // 无第三方依赖。本项目刻意只用原版 + NeoForge 的渲染能力，
-    // 不引入图表库，避免依赖地狱。
+    minecraft "net.minecraftforge:forge:${forge_version}"
+    // 只用于 @Nullable 注解（CLASS 保留，不进产物）。FG5 不像 MDG 会自动带进来。
+    compileOnly 'org.jetbrains:annotations:23.0.0'
 }
 
 // ---------------------------------------------------------------------------
 // 生成模组元数据
 //
 // ★ filteringCharset = 'UTF-8' 是必须的 ★
-// ProcessResources 做占位符替换(expand)时默认用「平台默认编码」，
-// 中文 Windows 上是 GBK，会把 UTF-8 模板里的中文转坏（字节被替换成 '?'），
-// 产出非法 UTF-8 文件 → FML 解析 mods.toml 时抛
-//   MalformedInputException: Input length = 2
-// → 游戏报 "File ... is not a valid mod file"
-// 这个坑在另一个项目里已经踩过一次，这里直接规避。
-// （1.20.1 世代元数据文件名是 META-INF/mods.toml，neoforge.mods.toml 是 1.20.4+ 的名字。）
+// ProcessResources 做占位符替换时默认用平台编码，中文 Windows 是 GBK，
+// 会把 UTF-8 模板里的中文转坏，产出非法 UTF-8 → FML 报
+// "File ... is not a valid mod file"（MalformedInputException）。
 // ---------------------------------------------------------------------------
 var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
     filteringCharset = 'UTF-8'
@@ -108,24 +98,37 @@ var generateModMetadata = tasks.register('generateModMetadata', ProcessResources
     into 'build/generated/sources/modMetadata'
 }
 sourceSets.main.resources.srcDir generateModMetadata
-legacyForge.ideSyncTask generateModMetadata
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
 }
 
-// 让运行任务的子进程输出直接接到 Gradle 控制台。
-// 否则游戏崩溃时只会显示"退出码非零"，子进程的 stderr 会被吞掉。
+// ---------------------------------------------------------------------------
+// 离线门禁的 classpath
+//
+// dev-check/offline-check.bat 需要「带映射名的 Minecraft+Forge 类路径」来编译
+// TestChart / BenchRender。FG5 把这份 mapped jar 放在
+// ~/.gradle/caches/forge_gradle/minecraft_user_repo/... 下，路径里带映射版本号，
+// .bat 里硬编码会随 mappings 变动而失效 → 这里复制成固定的 build/merged/。
+// ---------------------------------------------------------------------------
+// 注意：minecraft 配置里不止一个文件（mapped jar / launcher jar / client-extra /
+// accesstransformers / eventbus / coremods），只有 mapped 那个是 joined 的 MC+Forge
+// 类路径；不筛一下会撞 duplicate entry。
+var copyMinecraftDeps = tasks.register('copyMinecraftDeps', Copy) {
+    // includeEmptyDirs = false：mcp_snapshot 的 zip 不是 jar，按扩展名筛掉
+    from(configurations.minecraft) {
+        include '**/*.jar'
+    }
+    into layout.buildDirectory.dir('mcdeps')
+}
+
+tasks.named('build') {
+    dependsOn copyMinecraftDeps
+}
+
+// 让 runClient 的子进程输出直接接到 Gradle 控制台（否则崩溃只剩"退出码非零"）。
 tasks.matching { it.name in ['runClient'] }.configureEach {
     standardOutput = System.out
     errorOutput = System.err
 }
 
-idea {
-    module {
-        // 依赖源码包会多下载几十 MB。想省流量就注释掉这两行，
-        // Minecraft 自己的源码由 MDG 提供，不受影响。
-        downloadSources = true
-        downloadJavadoc = true
-    }
-}

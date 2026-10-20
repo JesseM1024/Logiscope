@@ -27,37 +27,38 @@
 :: 构建
 gradlew.bat build
 
-:: 进游戏自测（会启动一个独立的开发客户端）
+:: 进游戏自测（会启动一个独立的开发客户端，工作目录 = 1_16_5_forge\）
 gradlew.bat runClient
 
-:: 如果 Gradle 运行任务出问题，可生成脱离 Gradle 的启动脚本
-gradlew.bat createLaunchScripts
-::   → build\moddev\runClient.cmd
+:: IDEA 运行配置（ForgeGradle 5 没有 createLaunchScripts，用这个生成 .idea 运行项）
+gradlew.bat genIntellijRuns
 ```
 
 > ⚠️ **Windows 上请用 `gradlew.bat`，不要用 Git Bash 的 `./gradlew`**
 > （cygpath 路径不匹配，会报 `ClassNotFoundException: GradleWrapperMain`）。
 > Git Bash 下的替代写法见下方「构建备忘」。
 
-**环境要求**（本分支 = 1.18.2 线）
+**环境要求**（本分支 = 1.16.5 线）
 
 | 项 | 值 |
 |---|---|
-| JDK | 17（`org.gradle.java.home` 已锁定） |
-| Gradle | 9.2.1（wrapper 自带） |
-| Minecraft | 1.18.2 |
-| Forge | 1.18.2-40.3.12（构建插件用 legacy 线 `net.neoforged.moddev.legacyforge`） |
-| 适配区间 | `loaderVersion=[40,)`、`forge=[40.2,)`、`minecraft=[1.18.2]` —— 40.2.x 的老整合包也能装，见 [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) §二 |
-| 模组版本 | `0.1.2-1.18.2-alpha`（本分支） |
+| JDK | 17 跑 Gradle 守护进程；**编译目标是 Java 8**（`java.toolchain` 锁定，见下） |
+| Gradle | 7.6.4（wrapper 自带，ForgeGradle 5.1 不支持 Gradle 8+） |
+| Minecraft | 1.16.5 |
+| Forge | 1.16.5-36.2.42（构建插件用 **ForgeGradle 5.1**，MDG 不支持 1.16.5） |
+| 映射 | MCP snapshot `20210309-1.16.5`（这一代还没有 Mojang official 映射） |
+| 适配区间 | `loaderVersion=[36,)`、`forge=[36,)`、`minecraft=[1.16.5]` —— 36.0.x / 36.1.x 的老整合包也能装，见 [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md) §二 |
+| 模组版本 | `0.1.2-1.16.5-alpha`（本分支） |
 
 > **版本分支约定**：`main` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
 > `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，jar 名 `logiscope-0.1.2-1.20.1-alpha`）；
-> 本分支 `1.18.2-forge` = MC 1.18.2 + Forge 40.x（JDK 17 / 同一 legacy 插件，jar 名 `logiscope-0.1.2-1.18.2-alpha`）。
-> 移植方案与逐项 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) 与
-> [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md)。
+> `1.18.2-forge` = MC 1.18.2 + Forge 40.x（JDK 17 / legacy 插件，jar 名 `logiscope-0.1.2-1.18.2-alpha`）；
+> 本分支 `1.16.5-forge` = MC 1.16.5 + Forge 36.x（**JDK 8 语法** / ForgeGradle 5，jar 名 `logiscope-0.1.2-1.16.5-alpha`）。
+> 移植方案与逐项 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)、
+> [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) 与 [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md)。
 > 通用 bugfix 默认进 main，再 cherry-pick 到各版本线。
 >
-> **1.18.2 不需要加载器兼容设计**：这一代还没有 NeoForge（NeoForge 首个版本是 1.20.1），
+> **1.16.5 不需要加载器兼容设计**：这一代还没有 NeoForge（NeoForge 首个版本是 1.20.1），
 > 平台上只有 Forge 一家。1.20.1 那条"同一 jar 通吃 NeoForge / Forge"的结论**不可外推**到本分支。
 >
 > **发布 tag 约定**：`<加载器>-<MC版本>-<模组版本>`（例：`neoforge-1.21.1-0.1.1`）；
@@ -78,6 +79,8 @@ gradlew.bat createLaunchScripts
 | [`docs/PROGRESS-HISTORY.md`](docs/PROGRESS-HISTORY.md) | 历轮（一 ~ 十七轮）的结论 / 根因 / 已接受限制 | 查“以前为什么这么做” |
 | [`docs/BACKUP.md`](docs/BACKUP.md) | 回滚与灾难恢复、改动前安全点、**GitHub 发布流程** | 做有风险的改动前 |
 | [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) | **1.20.1 移植方案**：构建插件差异、必撞 API 清单 | 在 `1.20.1-neo` 分支上动手前 |
+| [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) | **1.18.2 移植方案**：legacy MDG、`Draw` 适配层、17 条 API 差异 | 在 `1.18.2-forge` 分支上动手前 |
+| [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md) | **1.16.5 移植方案**：ForgeGradle 5、Java 8 降级清单、`Draw` 重建、API 差异 | 在 `1.16.5-forge` 分支上动手前 |
 
 **最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`；提交前 → `BACKUP.md`。
 
@@ -201,9 +204,10 @@ logiscope/
 这是让 `dev-check/TestChart.java` 能脱离游戏跑断言的前提：
 
 ```bat
-gradlew.bat build
-javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" -d build/dev-check dev-check/TestChart.java
-java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
+gradlew.bat build --offline
+:: build 会顺带跑 copyMinecraftDeps → build\mcdeps\*.jar（离线断言用的类路径）
+:: 门禁一把跑完（461 条断言 + 渲染基准 + jar 验收）
+cmd //c dev-check\offline-check.bat
 ```
 
 波形断点、聚合口径这类逻辑的 bug 在游戏里几乎看不出来，靠断言钉住才是可靠的办法。
@@ -221,6 +225,8 @@ java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-che
 | IDEA 同步后行为异常 | IDEA 会另起一个 Gradle 守护进程重新生成文件 | 同步后用 `python verify-jar.py` 复核一次 |
 | **`createMinecraftArtifacts` 失败 / IJ 同步卡死 / 编辑器 import 全红**（报 `Could not HEAD .../forge-<版本>-userdev.jar`，`Connection timed out` / `Network is unreachable`） | Gradle 解析平台依赖需联网 HEAD 校验元数据，而 `maven.neoforged.net` 从国内直连不可达。**元数据与产物本机有缓存**（`~/.gradle/caches/neoformruntime`），两条互斥解法 | **① 走代理（代理进程在跑时）**：`~/.gradle/gradle.properties` 配 `systemProp.http(s).proxyHost/Port` 指向系统代理（Gradle 官方配法；实测 userdev HEAD 由超时变 200 / 0.4s）。代理关闭时此配置会让联网构建报 `Connection refused`（比超时更快、更好认）——改用 ② 即可。**② 离线**：命令行 `--offline`；IJ 用 Gradle 工具窗口的「离线模式」开关；或放一个路径限定的 `~/.gradle/init.d/logiscope-offline.gradle`（`gradle.startParameter.offline = true` + `currentDir` 判定），使命令行与 IDE 同时自动离线。**这不是代码问题**。离线态下**新增依赖**会报 `No cached version ... available for offline mode`，属预期 |
 | Git Bash 里 javac 报"程序包 xxx 不存在"（类实际已编译） | Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏 | 用 `.bat` 包装（成品：`dev-check\offline-check.bat`），或只用单条目 classpath |
+| **FG5 首次构建卡在 `downloadMcpConfig` / `extractSrg`，或报 `Could not GET .../mcp_config-...zip`** | ForgeGradle 要下载 MC client、mappings 的 zip 与 MCP 配置，源站 `maven.minecraftforge.net` / `libraries.minecraft.net` 从国内常超时 | 开代理后重跑一次即可（本机实测开代理一次通过）；之后整个工具链都在 `~/.gradle/caches/forge_gradle/` 落地，日常构建加 `--offline` 不再联网 |
+| 换映射 / 换 Forge 版本后 `runClient` 报 SRG 名字对不上 | FG5 生成的 mapped jar 按「映射版本」分目录缓存，旧产物不会自动失效 | 删 `~/.gradle/caches/forge_gradle/minecraft_user_repo/` 对应版本目录，重跑 `build` |
 
 详细的排错记录见隔壁项目 `..\neoforge-1.21.1-walkthrough\WALKTHROUGH.md`，
 那份文档把整个工具链的坑都记全了。

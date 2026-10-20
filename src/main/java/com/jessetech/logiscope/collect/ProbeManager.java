@@ -74,8 +74,8 @@ public final class ProbeManager {
         tick++;
         Minecraft mc = Minecraft.getInstance();
         // 状态机用的刻度 = 世界 tick（N12/N13）。主菜单等无世界场合退回客户端节拍。
-        long gameTime = mc.level != null
-                ? ServerClock.worldGameTime(mc.level.getGameTime())
+        long gameTime = mc.world != null
+                ? ServerClock.worldGameTime(mc.world.getGameTime())
                 : tick;
         // 索引循环：删除只会发生在界面事件里（不在 tick 中途），所以不需要快照
         for (ProbeInstance p : probes) {
@@ -96,12 +96,12 @@ public final class ProbeManager {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
-        if (!mc.isLocalServer()) {
+        if (!mc.isIntegratedServerRunning()) {
             return;
         }
         // 1.20.1 的 ServerTickEvent 无 getServer()（20.4+ 才引入）；此处已确认本地集成
-        // 服务端，直接取 mc.getSingleplayerServer() —— 采样线程即当前线程。
-        MinecraftServer server = mc.getSingleplayerServer();
+        // 服务端，直接取 mc.getIntegratedServer() —— 采样线程即当前线程。
+        MinecraftServer server = mc.getIntegratedServer();
         if (server == null) {
             return;
         }
@@ -209,7 +209,7 @@ public final class ProbeManager {
      * 每个世界从零开始，跨世界的"僵尸探针"在结构上不可能出现。
      */
     public void clearAll() {
-        for (ProbeInstance p : List.copyOf(probes)) {
+        for (ProbeInstance p : new java.util.ArrayList<>(probes)) {
             remove(p.id());
         }
         activeId = -1;

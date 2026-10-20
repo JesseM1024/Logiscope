@@ -56,7 +56,7 @@ public final class MarkerList {
 
     /** 快照（升序、不可变）—— 渲染与导出都拿这份，遍历期间不会被并发改坏 */
     public List<Long> toList() {
-        return List.copyOf(ticks);
+        return new java.util.ArrayList<>(ticks);
     }
 
     /** 第一个 >= tick 的下标（列表按 tick 升序，二分） */

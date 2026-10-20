@@ -86,7 +86,45 @@ public final class Analyzer {
     }
 
     /** deltas 的"上一次出现"记录 */
-    private record Last(long tick, Val value) {
+    private static final class Last {
+        private final long tick;
+        private final Val value;
+
+        public Last(long tick, Val value) {
+            this.tick = tick;
+            this.value = value;
+        }
+
+        public long tick() {
+            return tick;
+        }
+
+        public Val value() {
+            return value;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Last other = (Last) o;
+            return java.util.Objects.equals(this.tick, other.tick) && java.util.Objects.equals(this.value, other.value);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(tick, value);
+        }
+
+        @Override
+        public String toString() {
+            return "Last[" + "tick=" + tick + ", " + "value=" + value + "]";
+        }
+
     }
 
     /** 统计摘要，给界面上的数字面板用（跳过 no_data；同 tick 的条目先合计） */
@@ -185,7 +223,51 @@ public final class Analyzer {
     }
 
     /** 单点变化量（自适应数值：整数差保持精确，小数差是 double） */
-    public record Delta(long tick, Val delta, boolean typeChanged) {
+    public static final class Delta {
+        private final long tick;
+        private final Val delta;
+        private final boolean typeChanged;
+
+        public Delta(long tick, Val delta, boolean typeChanged) {
+            this.tick = tick;
+            this.delta = delta;
+            this.typeChanged = typeChanged;
+        }
+
+        public long tick() {
+            return tick;
+        }
+
+        public Val delta() {
+            return delta;
+        }
+
+        public boolean typeChanged() {
+            return typeChanged;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Delta other = (Delta) o;
+            return java.util.Objects.equals(this.tick, other.tick) && java.util.Objects.equals(this.delta, other.delta) && java.util.Objects.equals(this.typeChanged, other.typeChanged);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(tick, delta, typeChanged);
+        }
+
+        @Override
+        public String toString() {
+            return "Delta[" + "tick=" + tick + ", " + "delta=" + delta + ", " + "typeChanged=" + typeChanged + "]";
+        }
+
     }
 
     /**
@@ -200,19 +282,105 @@ public final class Analyzer {
      * @param dataTicks    有数据的**世界 tick** 数（不是样本条数 —— 多格时一个 tick 可能好几条）
      * @param noDataTicks  无数据的 tick 数（一个 tick 最多一条 no_data）
      */
-    public record Summary(
-            String dominantItem,
-            Val min,
-            Val max,
-            Val average,
-            Val first,
-            Val last,
-            Val netChange,
-            int typeChanges,
-            int rises,
-            int falls,
-            int dataTicks,
-            int noDataTicks) {
+    public static final class Summary {
+        private final String dominantItem;
+        private final Val min;
+        private final Val max;
+        private final Val average;
+        private final Val first;
+        private final Val last;
+        private final Val netChange;
+        private final int typeChanges;
+        private final int rises;
+        private final int falls;
+        private final int dataTicks;
+        private final int noDataTicks;
+
+        public Summary(String dominantItem, Val min, Val max, Val average, Val first, Val last, Val netChange, int typeChanges, int rises, int falls, int dataTicks, int noDataTicks) {
+            this.dominantItem = dominantItem;
+            this.min = min;
+            this.max = max;
+            this.average = average;
+            this.first = first;
+            this.last = last;
+            this.netChange = netChange;
+            this.typeChanges = typeChanges;
+            this.rises = rises;
+            this.falls = falls;
+            this.dataTicks = dataTicks;
+            this.noDataTicks = noDataTicks;
+        }
+
+        public String dominantItem() {
+            return dominantItem;
+        }
+
+        public Val min() {
+            return min;
+        }
+
+        public Val max() {
+            return max;
+        }
+
+        public Val average() {
+            return average;
+        }
+
+        public Val first() {
+            return first;
+        }
+
+        public Val last() {
+            return last;
+        }
+
+        public Val netChange() {
+            return netChange;
+        }
+
+        public int typeChanges() {
+            return typeChanges;
+        }
+
+        public int rises() {
+            return rises;
+        }
+
+        public int falls() {
+            return falls;
+        }
+
+        public int dataTicks() {
+            return dataTicks;
+        }
+
+        public int noDataTicks() {
+            return noDataTicks;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Summary other = (Summary) o;
+            return java.util.Objects.equals(this.dominantItem, other.dominantItem) && java.util.Objects.equals(this.min, other.min) && java.util.Objects.equals(this.max, other.max) && java.util.Objects.equals(this.average, other.average) && java.util.Objects.equals(this.first, other.first) && java.util.Objects.equals(this.last, other.last) && java.util.Objects.equals(this.netChange, other.netChange) && java.util.Objects.equals(this.typeChanges, other.typeChanges) && java.util.Objects.equals(this.rises, other.rises) && java.util.Objects.equals(this.falls, other.falls) && java.util.Objects.equals(this.dataTicks, other.dataTicks) && java.util.Objects.equals(this.noDataTicks, other.noDataTicks);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(dominantItem, min, max, average, first, last, netChange, typeChanges, rises, falls, dataTicks, noDataTicks);
+        }
+
+        @Override
+        public String toString() {
+            return "Summary[" + "dominantItem=" + dominantItem + ", " + "min=" + min + ", " + "max=" + max + ", " + "average=" + average + ", " + "first=" + first + ", " + "last=" + last + ", " + "netChange=" + netChange + ", " + "typeChanges=" + typeChanges + ", " + "rises=" + rises + ", " + "falls=" + falls + ", " + "dataTicks=" + dataTicks + ", " + "noDataTicks=" + noDataTicks + "]";
+        }
+
 
         public int totalTicks() {
             return dataTicks + noDataTicks;

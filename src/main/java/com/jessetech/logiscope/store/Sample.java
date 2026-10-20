@@ -32,7 +32,51 @@ import com.jessetech.logiscope.analysis.Val;
  *   时间轴必须留痕。跳过的话，分析层无法区分"什么都没发生"和"我们没看着"，
  *   跨断档的差值会被算成真实变化 —— 那正是这个工具最不能犯的错。
  */
-public record Sample(long tick, String itemId, Val value) {
+public final class Sample {
+    private final long tick;
+    private final String itemId;
+    private final Val value;
+
+    public Sample(long tick, String itemId, Val value) {
+        this.tick = tick;
+        this.itemId = itemId;
+        this.value = value;
+    }
+
+    public long tick() {
+        return tick;
+    }
+
+    public String itemId() {
+        return itemId;
+    }
+
+    public Val value() {
+        return value;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Sample other = (Sample) o;
+        return java.util.Objects.equals(this.tick, other.tick) && java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.value, other.value);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(tick, itemId, value);
+    }
+
+    @Override
+    public String toString() {
+        return "Sample[" + "tick=" + tick + ", " + "itemId=" + itemId + ", " + "value=" + value + "]";
+    }
+
 
     /** 整数值样本（旧构造，绝大多数调用点都是它；2^63 这类超 int 的走 {@link Val#of(double)}） */
     public Sample(long tick, String itemId, long count) {

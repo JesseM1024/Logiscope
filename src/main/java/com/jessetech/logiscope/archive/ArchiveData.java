@@ -28,14 +28,85 @@ import java.util.List;
  * @param markers   波形标记（G4），随存档一起走
  * @param samples   扁平样本（含 no_data / gap 标记样本）
  */
-public record ArchiveData(
-        String name,
-        String created,
-        String world,
-        String probeName,
-        String probeDesc,
-        long firstTick,
-        long lastTick,
-        List<Long> markers,
-        List<Sample> samples) {
+public final class ArchiveData {
+    private final String name;
+    private final String created;
+    private final String world;
+    private final String probeName;
+    private final String probeDesc;
+    private final long firstTick;
+    private final long lastTick;
+    private final List<Long> markers;
+    private final List<Sample> samples;
+
+    public ArchiveData(String name, String created, String world, String probeName, String probeDesc, long firstTick, long lastTick, List<Long> markers, List<Sample> samples) {
+        this.name = name;
+        this.created = created;
+        this.world = world;
+        this.probeName = probeName;
+        this.probeDesc = probeDesc;
+        this.firstTick = firstTick;
+        this.lastTick = lastTick;
+        this.markers = markers;
+        this.samples = samples;
+    }
+
+    public String name() {
+        return name;
+    }
+
+    public String created() {
+        return created;
+    }
+
+    public String world() {
+        return world;
+    }
+
+    public String probeName() {
+        return probeName;
+    }
+
+    public String probeDesc() {
+        return probeDesc;
+    }
+
+    public long firstTick() {
+        return firstTick;
+    }
+
+    public long lastTick() {
+        return lastTick;
+    }
+
+    public List<Long> markers() {
+        return markers;
+    }
+
+    public List<Sample> samples() {
+        return samples;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        ArchiveData other = (ArchiveData) o;
+        return java.util.Objects.equals(this.name, other.name) && java.util.Objects.equals(this.created, other.created) && java.util.Objects.equals(this.world, other.world) && java.util.Objects.equals(this.probeName, other.probeName) && java.util.Objects.equals(this.probeDesc, other.probeDesc) && java.util.Objects.equals(this.firstTick, other.firstTick) && java.util.Objects.equals(this.lastTick, other.lastTick) && java.util.Objects.equals(this.markers, other.markers) && java.util.Objects.equals(this.samples, other.samples);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(name, created, world, probeName, probeDesc, firstTick, lastTick, markers, samples);
+    }
+
+    @Override
+    public String toString() {
+        return "ArchiveData[" + "name=" + name + ", " + "created=" + created + ", " + "world=" + world + ", " + "probeName=" + probeName + ", " + "probeDesc=" + probeDesc + ", " + "firstTick=" + firstTick + ", " + "lastTick=" + lastTick + ", " + "markers=" + markers + ", " + "samples=" + samples + "]";
+    }
+
 }

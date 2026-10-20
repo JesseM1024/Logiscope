@@ -112,8 +112,89 @@ public final class ArchiveFormat {
     // ------------------------------------------------------------------
 
     /** 存档头部的小结（列表页展示用，不建 Sample 对象） */
-    public record Header(String created, String world, String probeName, String probeDesc,
-                         long firstTick, long lastTick, int markerCount, int sampleCount) {
+    public static final class Header {
+        private final String created;
+        private final String world;
+        private final String probeName;
+        private final String probeDesc;
+        private final long firstTick;
+        private final long lastTick;
+        private final int markerCount;
+        private final int sampleCount;
+
+        public Header(String created, String world, String probeName, String probeDesc,
+                      long firstTick, long lastTick, int markerCount, int sampleCount) {
+            this.created = created;
+            this.world = world;
+            this.probeName = probeName;
+            this.probeDesc = probeDesc;
+            this.firstTick = firstTick;
+            this.lastTick = lastTick;
+            this.markerCount = markerCount;
+            this.sampleCount = sampleCount;
+        }
+
+        public String created() {
+            return created;
+        }
+
+        public String world() {
+            return world;
+        }
+
+        public String probeName() {
+            return probeName;
+        }
+
+        public String probeDesc() {
+            return probeDesc;
+        }
+
+        public long firstTick() {
+            return firstTick;
+        }
+
+        public long lastTick() {
+            return lastTick;
+        }
+
+        public int markerCount() {
+            return markerCount;
+        }
+
+        public int sampleCount() {
+            return sampleCount;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Header other = (Header) o;
+            return java.util.Objects.equals(created, other.created)
+                    && java.util.Objects.equals(world, other.world)
+                    && java.util.Objects.equals(probeName, other.probeName)
+                    && java.util.Objects.equals(probeDesc, other.probeDesc)
+                    && firstTick == other.firstTick
+                    && lastTick == other.lastTick
+                    && markerCount == other.markerCount
+                    && sampleCount == other.sampleCount;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(created, world, probeName, probeDesc, firstTick, lastTick, markerCount, sampleCount);
+        }
+
+        @Override
+        public String toString() {
+            return "Header[created=" + created + ", world=" + world + ", probeName=" + probeName
+                    + ", sampleCount=" + sampleCount + "]";
+        }
     }
 
     public static @Nullable ArchiveData fromJson(String text) {
@@ -167,7 +248,7 @@ public final class ArchiveFormat {
     /**
      * 读头部（列表页扫描用）：只要小结，**不把几万条样本建成对象**。
      *
-     * 流式读 * 旧实现是 `JsonParser.parseString(Files.readString(...))` —— 先把整份文件读成字符串、
+     * 流式读 * 旧实现是 `new JsonParser().parse(Files.readString(...))` —— 先把整份文件读成字符串、
      * 再把**每一条样本都建成 JsonObject**，只为取几行头部。存档大时（几万样本）
      * 每次打开面板都要付这份代价，而注释一直写着"只读 JSON 头，几 KB 级"（名实不符）。
      * 现在用 {@link JsonReader} 顺着 token 走：认识的键取值，`samples` 整段
@@ -191,9 +272,14 @@ public final class ArchiveFormat {
             r.beginObject();
             while (r.hasNext()) {
                 switch (r.nextName()) {
-                    case "created" -> created = stringOr(r, "");
-                    case "world" -> world = stringOr(r, "unknown");
-                    case "probe" -> {
+                    case "created":
+                        created = stringOr(r, "");
+                        break;
+                    case "world":
+                        world = stringOr(r, "unknown");
+                        break;
+                    case "probe":
+                    {
                         if (r.peek() == JsonToken.BEGIN_OBJECT) {
                             r.beginObject();
                             while (r.hasNext()) {
@@ -211,7 +297,9 @@ public final class ArchiveFormat {
                             r.skipValue();
                         }
                     }
-                    case "range" -> {
+                    break;
+                    case "range":
+                    {
                         if (r.peek() == JsonToken.BEGIN_OBJECT) {
                             r.beginObject();
                             while (r.hasNext()) {
@@ -229,9 +317,16 @@ public final class ArchiveFormat {
                             r.skipValue();
                         }
                     }
-                    case "markers" -> markerCount = countArray(r);
-                    case "samples" -> sampleCount = countArray(r);
-                    default -> r.skipValue();      // 不认识的键（含将来的新字段）直接跳过
+                    break;
+                    case "markers":
+                        markerCount = countArray(r);
+                        break;
+                    case "samples":
+                        sampleCount = countArray(r);
+                        break;
+                    default:
+                        r.skipValue();      // 不认识的键（含将来的新字段）直接跳过
+                        break;
                 }
             }
             r.endObject();
@@ -313,7 +408,7 @@ public final class ArchiveFormat {
 
     private static @Nullable JsonObject parseObject(String text) {
         try {
-            JsonElement el = JsonParser.parseString(text);
+            JsonElement el = new JsonParser().parse(text);
             return el != null && el.isJsonObject() ? el.getAsJsonObject() : null;
         } catch (Exception e) {
             return null;

@@ -121,7 +121,45 @@ public final class Snbt {
     }
 
     /** 摊平后的一条"路径 = 值" */
-    public record Entry(String path, Node node) {
+    public static final class Entry {
+        private final String path;
+        private final Node node;
+
+        public Entry(String path, Node node) {
+            this.path = path;
+            this.node = node;
+        }
+
+        public String path() {
+            return path;
+        }
+
+        public Node node() {
+            return node;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Entry other = (Entry) o;
+            return java.util.Objects.equals(this.path, other.path) && java.util.Objects.equals(this.node, other.node);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(path, node);
+        }
+
+        @Override
+        public String toString() {
+            return "Entry[" + "path=" + path + ", " + "node=" + node + "]";
+        }
+
 
         public boolean numeric() {
             return node.numeric();
@@ -171,13 +209,25 @@ public final class Snbt {
         c.skipWs();
         int start = c.pos();
         char ch = c.peek();
-        Node n = switch (ch) {
-            case '{' -> parseCompound(c, depth);
-            case '[' -> parseList(c, depth);
-            case '"', '\'' -> parseQuoted(c);
-            case '\0' -> null;
-            default -> parseBare(c);
-        };
+        Node n;
+        switch (ch) {
+            case '{':
+                n = parseCompound(c, depth);
+                break;
+            case '[':
+                n = parseList(c, depth);
+                break;
+            case '"':
+            case '\'':
+                n = parseQuoted(c);
+                break;
+            case '\0':
+                n = null;
+                break;
+            default:
+                n = parseBare(c);
+                break;
+        }
         if (n != null) {
             n.mark(start, c.pos());
         }
@@ -190,7 +240,7 @@ public final class Snbt {
         c.skipWs();
         if (c.peek() == '}') {
             c.next();
-            return new Node(Kind.COMPOUND, map, List.of(), "", 0, false);
+            return new Node(Kind.COMPOUND, map, java.util.Collections.emptyList(), "", 0, false);
         }
         while (true) {
             c.skipWs();
@@ -211,11 +261,11 @@ public final class Snbt {
             }
             if (sep == '}') {
                 c.next();
-                return new Node(Kind.COMPOUND, map, List.of(), "", 0, false);
+                return new Node(Kind.COMPOUND, map, java.util.Collections.emptyList(), "", 0, false);
             }
             if (sep == '\0') {
                 // 文本被截断（聊天框有长度上限时会这样）：有多少算多少
-                return new Node(Kind.COMPOUND, map, List.of(), "", 0, false);
+                return new Node(Kind.COMPOUND, map, java.util.Collections.emptyList(), "", 0, false);
             }
             c.next();
         }
@@ -237,7 +287,7 @@ public final class Snbt {
         c.skipWs();
         if (c.peek() == ']') {
             c.next();
-            return new Node(Kind.LIST, Map.of(), items, "", 0, false);
+            return new Node(Kind.LIST, java.util.Collections.emptyMap(), items, "", 0, false);
         }
         while (true) {
             Node v = parseValue(c, depth + 1);
@@ -252,10 +302,10 @@ public final class Snbt {
             }
             if (sep == ']') {
                 c.next();
-                return new Node(Kind.LIST, Map.of(), items, "", 0, false);
+                return new Node(Kind.LIST, java.util.Collections.emptyMap(), items, "", 0, false);
             }
             if (sep == '\0') {
-                return new Node(Kind.LIST, Map.of(), items, "", 0, false);
+                return new Node(Kind.LIST, java.util.Collections.emptyMap(), items, "", 0, false);
             }
             c.next();
         }
@@ -263,7 +313,7 @@ public final class Snbt {
 
     private static Node parseQuoted(Cursor c) {
         String s = c.readQuotedString();
-        return new Node(Kind.STRING, Map.of(), List.of(), s, 0, false);
+        return new Node(Kind.STRING, java.util.Collections.emptyMap(), java.util.Collections.emptyList(), s, 0, false);
     }
 
     /** 裸串 / 数字（带后缀）：读到分隔符为止 */
@@ -275,9 +325,9 @@ public final class Snbt {
         }
         Double num = parseNumber(tok);
         if (num != null) {
-            return new Node(Kind.NUMBER, Map.of(), List.of(), trimSuffix(tok), num, true);
+            return new Node(Kind.NUMBER, java.util.Collections.emptyMap(), java.util.Collections.emptyList(), trimSuffix(tok), num, true);
         }
-        return new Node(Kind.STRING, Map.of(), List.of(), tok, 0, false);
+        return new Node(Kind.STRING, java.util.Collections.emptyMap(), java.util.Collections.emptyList(), tok, 0, false);
     }
 
     /**
@@ -331,13 +381,16 @@ public final class Snbt {
             return;
         }
         switch (n.kind) {
-            case COMPOUND -> {
+            case COMPOUND:
+            {
                 for (Map.Entry<String, Node> e : n.children.entrySet()) {
                     flattenInto(e.getValue(), path.isEmpty() ? e.getKey() : path + "." + e.getKey(),
                             out, depth + 1);
                 }
             }
-            case LIST -> {
+            break;
+            case LIST:
+            {
                 for (int i = 0; i < n.items.size(); i++) {
                     flattenInto(n.items.get(i), path + "[" + i + "]", out, depth + 1);
                 }
@@ -345,11 +398,14 @@ public final class Snbt {
                     out.add(new Entry(path, n));
                 }
             }
-            default -> {
+            break;
+            default:
+            {
                 if (!path.isEmpty()) {
                     out.add(new Entry(path, n));
                 }
             }
+            break;
         }
     }
 
@@ -358,7 +414,51 @@ public final class Snbt {
     // ------------------------------------------------------------------
 
     /** 路径里的一段：{@code key} 或 {@code [index]} */
-    public record Token(@Nullable String key, int index, boolean isIndex) {
+    public static final class Token {
+        private final @Nullable String key;
+        private final int index;
+        private final boolean isIndex;
+
+        public Token(@Nullable String key, int index, boolean isIndex) {
+            this.key = key;
+            this.index = index;
+            this.isIndex = isIndex;
+        }
+
+        public String key() {
+            return key;
+        }
+
+        public int index() {
+            return index;
+        }
+
+        public boolean isIndex() {
+            return isIndex;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Token other = (Token) o;
+            return java.util.Objects.equals(this.key, other.key) && java.util.Objects.equals(this.index, other.index) && java.util.Objects.equals(this.isIndex, other.isIndex);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(key, index, isIndex);
+        }
+
+        @Override
+        public String toString() {
+            return "Token[" + "key=" + key + ", " + "index=" + index + ", " + "isIndex=" + isIndex + "]";
+        }
+
     }
 
     /**
@@ -367,7 +467,7 @@ public final class Snbt {
      */
     public static List<Token> parsePath(String path) {
         List<Token> out = new ArrayList<>();
-        if (path == null || path.isBlank()) {
+        if (path == null || path.trim().isEmpty()) {
             return out;
         }
         int i = 0;
@@ -381,12 +481,12 @@ public final class Snbt {
             if (ch == '[') {
                 int end = path.indexOf(']', i);
                 if (end < 0) {
-                    return List.of();
+                    return java.util.Collections.emptyList();
                 }
                 try {
                     out.add(new Token(null, Integer.parseInt(path.substring(i + 1, end).trim()), true));
                 } catch (NumberFormatException e) {
-                    return List.of();
+                    return java.util.Collections.emptyList();
                 }
                 i = end + 1;
                 continue;
@@ -459,10 +559,18 @@ public final class Snbt {
                     char esc = s.charAt(i + 1);
                     i += 2;
                     switch (esc) {
-                        case 'n' -> sb.append('\n');
-                        case 't' -> sb.append('\t');
-                        case 'r' -> sb.append('\r');
-                        default -> sb.append(esc);
+                        case 'n':
+                            sb.append('\n');
+                            break;
+                        case 't':
+                            sb.append('\t');
+                            break;
+                        case 'r':
+                            sb.append('\r');
+                            break;
+                        default:
+                            sb.append(esc);
+                            break;
                     }
                     continue;
                 }

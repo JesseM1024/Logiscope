@@ -40,7 +40,7 @@ public final class Archives {
 
     /** 存档根目录：{@code .minecraft/logiscope/}（runClient 下 = run/logiscope/） */
     public static Path rootDir() {
-        return Minecraft.getInstance().gameDirectory.toPath().resolve("logiscope");
+        return Minecraft.getInstance().gameDir.toPath().resolve("logiscope");
     }
 
     // ------------------------------------------------------------------
@@ -63,7 +63,7 @@ public final class Archives {
                 samples.get(0).tick(),
                 samples.get(samples.size() - 1).tick(),
                 p.markers().toList(),
-                List.copyOf(samples));
+                new java.util.ArrayList<>(samples));
         writeFiles(rootDir().resolve(data.name()), data);
         return data;
     }
@@ -71,22 +71,22 @@ public final class Archives {
     /** 写一份存档（JSON + CSV）。目录不存在就创建 */
     public static void writeFiles(Path dir, ArchiveData data) throws IOException {
         Files.createDirectories(dir);
-        Files.writeString(dir.resolve("recording.json"), ArchiveFormat.toJson(data), StandardCharsets.UTF_8);
+        Files.write(dir.resolve("recording.json"), ArchiveFormat.toJson(data).getBytes(StandardCharsets.UTF_8));
         StringBuilder csv = new StringBuilder();
         for (String line : ArchiveFormat.csvLines(data)) {
             csv.append(line).append('\n');
         }
-        Files.writeString(dir.resolve("recording.csv"), csv.toString(), StandardCharsets.UTF_8);
+        Files.write(dir.resolve("recording.csv"), csv.toString().getBytes(StandardCharsets.UTF_8));
     }
 
     /** 世界名：单人 = 存档名（level name）；多人 = "multiplayer"；拿不到 = "unknown" */
     private static String worldName() {
         Minecraft mc = Minecraft.getInstance();
-        MinecraftServer server = mc.getSingleplayerServer();
+        MinecraftServer server = mc.getIntegratedServer();
         if (server != null) {
-            return server.getWorldData().getLevelName();
+            return server.getServerConfiguration().getWorldName();
         }
-        return mc.getCurrentServer() != null ? "multiplayer" : "unknown";
+        return mc.getCurrentServerData() != null ? "multiplayer" : "unknown";
     }
 
     // ------------------------------------------------------------------
@@ -94,9 +94,99 @@ public final class Archives {
     // ------------------------------------------------------------------
 
     /** 存档列表里的一行小结（不载入样本） */
-    public record Info(String dirName, String displayName, String created, String world,
-                       String probeName, String probeDesc, long firstTick, long lastTick,
-                       int markerCount, int sampleCount, Path dir) {
+    public static final class Info {
+        private final String dirName;
+        private final String displayName;
+        private final String created;
+        private final String world;
+        private final String probeName;
+        private final String probeDesc;
+        private final long firstTick;
+        private final long lastTick;
+        private final int markerCount;
+        private final int sampleCount;
+        private final Path dir;
+
+        public Info(String dirName, String displayName, String created, String world, String probeName, String probeDesc, long firstTick, long lastTick, int markerCount, int sampleCount, Path dir) {
+            this.dirName = dirName;
+            this.displayName = displayName;
+            this.created = created;
+            this.world = world;
+            this.probeName = probeName;
+            this.probeDesc = probeDesc;
+            this.firstTick = firstTick;
+            this.lastTick = lastTick;
+            this.markerCount = markerCount;
+            this.sampleCount = sampleCount;
+            this.dir = dir;
+        }
+
+        public String dirName() {
+            return dirName;
+        }
+
+        public String displayName() {
+            return displayName;
+        }
+
+        public String created() {
+            return created;
+        }
+
+        public String world() {
+            return world;
+        }
+
+        public String probeName() {
+            return probeName;
+        }
+
+        public String probeDesc() {
+            return probeDesc;
+        }
+
+        public long firstTick() {
+            return firstTick;
+        }
+
+        public long lastTick() {
+            return lastTick;
+        }
+
+        public int markerCount() {
+            return markerCount;
+        }
+
+        public int sampleCount() {
+            return sampleCount;
+        }
+
+        public Path dir() {
+            return dir;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Info other = (Info) o;
+            return java.util.Objects.equals(this.dirName, other.dirName) && java.util.Objects.equals(this.displayName, other.displayName) && java.util.Objects.equals(this.created, other.created) && java.util.Objects.equals(this.world, other.world) && java.util.Objects.equals(this.probeName, other.probeName) && java.util.Objects.equals(this.probeDesc, other.probeDesc) && java.util.Objects.equals(this.firstTick, other.firstTick) && java.util.Objects.equals(this.lastTick, other.lastTick) && java.util.Objects.equals(this.markerCount, other.markerCount) && java.util.Objects.equals(this.sampleCount, other.sampleCount) && java.util.Objects.equals(this.dir, other.dir);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(dirName, displayName, created, world, probeName, probeDesc, firstTick, lastTick, markerCount, sampleCount, dir);
+        }
+
+        @Override
+        public String toString() {
+            return "Info[" + "dirName=" + dirName + ", " + "displayName=" + displayName + ", " + "created=" + created + ", " + "world=" + world + ", " + "probeName=" + probeName + ", " + "probeDesc=" + probeDesc + ", " + "firstTick=" + firstTick + ", " + "lastTick=" + lastTick + ", " + "markerCount=" + markerCount + ", " + "sampleCount=" + sampleCount + ", " + "dir=" + dir + "]";
+        }
+
     }
 
     /** 自定义名称的文件名：有它就用它当"名称"，没有就退回探针名 / 目录名 */
@@ -107,7 +197,7 @@ public final class Archives {
         Path f = dir.resolve(NAME_FILE);
         try {
             if (Files.isRegularFile(f)) {
-                String n = Files.readString(f, StandardCharsets.UTF_8).trim();
+                String n = new String(Files.readAllBytes(f), StandardCharsets.UTF_8).trim();
                 if (!n.isEmpty()) {
                     return n;
                 }
@@ -133,7 +223,7 @@ public final class Archives {
             Files.deleteIfExists(f);
             return true;
         }
-        Files.writeString(f, trimmed, StandardCharsets.UTF_8);
+        Files.write(f, trimmed.getBytes(StandardCharsets.UTF_8));
         return true;
     }
 
@@ -144,7 +234,7 @@ public final class Archives {
     public static List<Info> scan() {
         Path root = rootDir();
         if (!Files.isDirectory(root)) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         List<Info> out = new ArrayList<>();
         try (Stream<Path> dirs = Files.list(root)) {
@@ -167,7 +257,7 @@ public final class Archives {
             });
         } catch (IOException e) {
             LogiScopeMod.LOGGER.warn("[LogiScope] archive scan failed: {}", e.toString());
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         out.sort(Comparator.comparing(Info::created).reversed());
         return out;
@@ -175,7 +265,7 @@ public final class Archives {
 
     /** 载入一份存档（读 JSON → 全量数据） */
     public static ArchiveData load(Info info) throws IOException {
-        String text = Files.readString(info.dir().resolve("recording.json"), StandardCharsets.UTF_8);
+        String text = new String(Files.readAllBytes(info.dir().resolve("recording.json")), StandardCharsets.UTF_8);
         ArchiveData data = ArchiveFormat.fromJson(text);
         if (data == null) {
             throw new IOException("malformed archive: " + info.dirName());

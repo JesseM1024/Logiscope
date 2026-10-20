@@ -38,11 +38,93 @@ import java.util.Locale;
 public final class NbtSlotLayout {
 
     /** 列表里一个元素：槽位号 + 物品 + 数量 */
-    public record Entry(int slot, @Nullable String itemId, int count) {
+    public static final class Entry {
+        private final int slot;
+        private final @Nullable String itemId;
+        private final int count;
+
+        public Entry(int slot, @Nullable String itemId, int count) {
+            this.slot = slot;
+            this.itemId = itemId;
+            this.count = count;
+        }
+
+        public int slot() {
+            return slot;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public int count() {
+            return count;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Entry other = (Entry) o;
+            return java.util.Objects.equals(this.slot, other.slot) && java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.count, other.count);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(slot, itemId, count);
+        }
+
+        @Override
+        public String toString() {
+            return "Entry[" + "slot=" + slot + ", " + "itemId=" + itemId + ", " + "count=" + count + "]";
+        }
+
     }
 
     /** 检测到的布局：列表在 NBT 里的路径（如 {@code Items}）+ 当前元素 */
-    public record Layout(String listPath, List<Entry> entries) {
+    public static final class Layout {
+        private final String listPath;
+        private final List<Entry> entries;
+
+        public Layout(String listPath, List<Entry> entries) {
+            this.listPath = listPath;
+            this.entries = entries;
+        }
+
+        public String listPath() {
+            return listPath;
+        }
+
+        public List<Entry> entries() {
+            return entries;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Layout other = (Layout) o;
+            return java.util.Objects.equals(this.listPath, other.listPath) && java.util.Objects.equals(this.entries, other.entries);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(listPath, entries);
+        }
+
+        @Override
+        public String toString() {
+            return "Layout[" + "listPath=" + listPath + ", " + "entries=" + entries + "]";
+        }
+
     }
 
     /** NBT 里表示槽位号的字段名（忽略大小写） */
@@ -116,7 +198,7 @@ public final class NbtSlotLayout {
     public static List<Entry> byItem(@Nullable Snbt.Node root, @Nullable String listPath,
                                      @Nullable String itemId) {
         List<Entry> out = new ArrayList<>();
-        if (itemId == null || itemId.isBlank()) {
+        if (itemId == null || itemId.trim().isEmpty()) {
             return out;
         }
         for (Entry e : entriesAt(root, listPath)) {
@@ -141,19 +223,19 @@ public final class NbtSlotLayout {
 
     /** 取某个列表路径下的全部元素（路径为空/找不到 → 空表） */
     public static List<Entry> entriesAt(@Nullable Snbt.Node root, @Nullable String listPath) {
-        if (root == null || listPath == null || listPath.isBlank()) {
-            return List.of();
+        if (root == null || listPath == null || listPath.trim().isEmpty()) {
+            return java.util.Collections.emptyList();
         }
         Snbt.Node node = root;
         for (Snbt.Token t : Snbt.parsePath(listPath)) {
             if (!t.isIndex()) {
                 node = node.children().get(t.key());
                 if (node == null) {
-                    return List.of();
+                    return java.util.Collections.emptyList();
                 }
             } else {
                 if (t.index() < 0 || t.index() >= node.items().size()) {
-                    return List.of();
+                    return java.util.Collections.emptyList();
                 }
                 node = node.items().get(t.index());
             }
@@ -181,7 +263,7 @@ public final class NbtSlotLayout {
             }
             return;
         }
-        for (var e : node.children().entrySet()) {
+        for (java.util.Map.Entry<String, Snbt.Node> e : node.children().entrySet()) {
             String child = path.isEmpty() ? e.getKey() : path + "." + e.getKey();
             walk(e.getValue(), child, out);
         }
@@ -194,16 +276,16 @@ public final class NbtSlotLayout {
      */
     private static List<Entry> readEntries(@Nullable Snbt.Node list) {
         if (list == null || list.kind() != Snbt.Kind.LIST || list.items().isEmpty()) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         List<Entry> out = new ArrayList<>(list.items().size());
         for (Snbt.Node el : list.items()) {
             if (el == null || el.kind() != Snbt.Kind.COMPOUND) {
-                return List.of();
+                return java.util.Collections.emptyList();
             }
             Integer slot = intField(el, SLOT_KEYS);
             if (slot == null) {
-                return List.of();
+                return java.util.Collections.emptyList();
             }
             Snbt.Node itemNode = firstChild(el, ITEM_KEYS);
             Snbt.Node idHolder = itemNode != null ? itemNode : el;
@@ -249,7 +331,7 @@ public final class NbtSlotLayout {
         if (compound == null || compound.kind() != Snbt.Kind.COMPOUND) {
             return null;
         }
-        for (var e : compound.children().entrySet()) {
+        for (java.util.Map.Entry<String, Snbt.Node> e : compound.children().entrySet()) {
             String lower = e.getKey().toLowerCase(Locale.ROOT);
             for (String k : keys) {
                 if (lower.equals(k)) {

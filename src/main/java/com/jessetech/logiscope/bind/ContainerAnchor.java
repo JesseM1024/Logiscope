@@ -1,8 +1,8 @@
 package com.jessetech.logiscope.bind;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.World;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import org.jetbrains.annotations.Nullable;
 
@@ -10,16 +10,16 @@ import org.jetbrains.annotations.Nullable;
  * 绑定层：把"玩家刚刚打开的界面"对应到一个「维度 + 方块坐标」锚点上。
  *
  * 【为什么需要它】
- * vanilla 的 AbstractContainerMenu 不保存方块坐标。客户端能拿到的只有：
+ * vanilla 的 Container 不保存方块坐标。客户端能拿到的只有：
  *   · ClientboundOpenScreenPacket —— 只有菜单类型和标题，没有坐标
  *   · Minecraft#hitResult —— 屏幕打开期间不更新，不可靠
  * 唯一可靠的时机是**右键方块的那一瞬间**：
- *   PlayerInteractEvent.RightClickBlock 在客户端也会触发（MultiPlayerGameMode#useItemOn 里
+ *   PlayerInteractEvent.RightClickBlock 在客户端也会触发（PlayerController#useItemOn 里
  *   调 CommonHooks#onRightClickBlock，已核实），它带着 event.getPos()。
  *
  * 【时序】
  *   右键方块 → RightClickBlock（记 pending，带 tick 时间戳）
- *            → 服务端回 OpenScreen → ScreenEvent.InitScreenEvent.Post（把 pending 提升为 active）
+ *            → 服务端回 OpenScreen → GuiScreenEvent.InitGuiEvent.Post（把 pending 提升为 active）
  *
  * 【有效期】
  * pending 只在 FRESH_TICKS 内有效。超过就认为是"上一次无关的右键"，
@@ -31,7 +31,45 @@ public final class ContainerAnchor {
     private static final int FRESH_TICKS = 100;
 
     /** 一个持久锚点：维度 + 方块坐标 */
-    public record Anchor(ResourceKey<Level> dimension, BlockPos pos) {
+    public static final class Anchor {
+        private final RegistryKey<World> dimension;
+        private final BlockPos pos;
+
+        public Anchor(RegistryKey<World> dimension, BlockPos pos) {
+            this.dimension = dimension;
+            this.pos = pos;
+        }
+
+        public RegistryKey<World> dimension() {
+            return dimension;
+        }
+
+        public BlockPos pos() {
+            return pos;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Anchor other = (Anchor) o;
+            return java.util.Objects.equals(this.dimension, other.dimension) && java.util.Objects.equals(this.pos, other.pos);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(dimension, pos);
+        }
+
+        @Override
+        public String toString() {
+            return "Anchor[" + "dimension=" + dimension + ", " + "pos=" + pos + "]";
+        }
+
     }
 
     private static Anchor pending;
@@ -56,16 +94,16 @@ public final class ContainerAnchor {
      * 单人下集成服务端也会触发同一个事件，必须用 isClientSide 过滤掉服务端那次。
      */
     public static void onRightClickBlock(PlayerInteractEvent.RightClickBlock event) {
-        Level level = event.getWorld();
-        if (level == null || !level.isClientSide()) {
+        World level = event.getWorld();
+        if (level == null || !level.isRemote()) {
             return;
         }
-        pending = new Anchor(level.dimension(), event.getPos().immutable());
+        pending = new Anchor(level.getDimensionKey(), event.getPos().toImmutable());
         pendingAt = clk;
     }
 
     /**
-     * 由 ScreenEvent.InitScreenEvent.Post 调用：容器界面刚初始化完，把 pending 提升为 active。
+     * 由 GuiScreenEvent.InitGuiEvent.Post 调用：容器界面刚初始化完，把 pending 提升为 active。
      * 这时的 pending 就是"玩家为了打开这个界面而右键的那个方块"。
      *
      * 幂等保护 * Screen#rebuildWidgets 也会发 Init.Post（例如原版背包界面切配方书时会重建成控件）。

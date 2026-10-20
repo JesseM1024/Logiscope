@@ -1,13 +1,13 @@
 package com.jessetech.logiscope.collect;
 
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.Container;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.inventory.IInventory;
+import net.minecraft.world.World;
+import net.minecraft.tileentity.TileEntity;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -21,7 +21,7 @@ import java.util.List;
  * 但需求里有一类目标根本没有界面（准星对准一台只有物品栏、没有 GUI 的机器），
  * 这时只能退回"按下标列表选格"——而**列表本身也得有内容**：
  * 机器里有几格、每格现在装着什么，客户端一概不知道（内容只在 GUI 打开时同步）。
- * 所以这份清单必须由服务端线程读出来（Container 或 ItemHandler 能力），
+ * 所以这份清单必须由服务端线程读出来（IInventory 或 ItemHandler 能力），
  * 再异步交回客户端。
  *
  * 【为什么可以用静态单例】
@@ -39,7 +39,7 @@ public final class ProbeSlots {
         UNKNOWN,
         /** 查到了：是不是容器看 {@link #slots()} 是否为空 */
         OK,
-        /** 这个方块既不是 Container 也没有 item handler —— 它根本不含物品栏 */
+        /** 这个方块既不是 IInventory 也没有 item handler —— 它根本不含物品栏 */
         NONE,
         /** 区块没加载 / 不在单人存档 */
         UNAVAILABLE
@@ -48,11 +48,11 @@ public final class ProbeSlots {
     /** 单次列清单的上限，防御性地挡住某个模组报出几千个槽位 */
     private static final int MAX_SLOTS = 512;
 
-    private static volatile List<ContainerAccess.SlotView> slots = List.of();
+    private static volatile List<ContainerAccess.SlotView> slots = java.util.Collections.emptyList();
     private static volatile Status status = Status.UNKNOWN;
     private static volatile boolean pending;
 
-    private static volatile ResourceKey<Level> queriedDim;
+    private static volatile RegistryKey<World> queriedDim;
     private static volatile BlockPos queriedPos;
 
     private ProbeSlots() {
@@ -77,7 +77,7 @@ public final class ProbeSlots {
      * 请求（或复用）某个坐标的槽位清单。**每客户端 tick 调一次即可**，
      * 目标没变且已经拿到结果时直接返回。
      */
-    public static void request(@Nullable ResourceKey<Level> dim, @Nullable BlockPos pos) {
+    public static void request(@Nullable RegistryKey<World> dim, @Nullable BlockPos pos) {
         if (dim == null || pos == null) {
             reset();
             return;
@@ -89,24 +89,24 @@ public final class ProbeSlots {
             return;
         }
         queriedDim = dim;
-        queriedPos = pos.immutable();
+        queriedPos = pos.toImmutable();
         pending = true;
         status = Status.UNKNOWN;
-        slots = List.of();
+        slots = java.util.Collections.emptyList();
 
         Minecraft mc = Minecraft.getInstance();
-        IntegratedServer server = mc.getSingleplayerServer();
+        IntegratedServer server = mc.getIntegratedServer();
         if (server == null) {
             pending = false;
             status = Status.UNAVAILABLE;
             return;
         }
-        ResourceKey<Level> d = queriedDim;
+        RegistryKey<World> d = queriedDim;
         BlockPos p = queriedPos;
         try {
             server.execute(() -> {
                 List<ContainerAccess.SlotView> out = readNow(server, d, p);
-                slots = out == null ? List.of() : out;
+                slots = out == null ? java.util.Collections.emptyList() : out;
                 status = out == null ? Status.NONE : Status.OK;
                 pending = false;
             });
@@ -117,7 +117,7 @@ public final class ProbeSlots {
     }
 
     public static void reset() {
-        slots = List.of();
+        slots = java.util.Collections.emptyList();
         status = Status.UNKNOWN;
         pending = false;
         queriedDim = null;
@@ -127,26 +127,27 @@ public final class ProbeSlots {
     /** 必须在服务端线程执行 ；null = 这个方块不含物品栏 */
     @Nullable
     private static List<ContainerAccess.SlotView> readNow(net.minecraft.server.MinecraftServer server,
-                                                          ResourceKey<Level> dim, BlockPos pos) {
-        ServerLevel level = server.getLevel(dim);
-        if (level == null || !level.isLoaded(pos)) {
+                                                          RegistryKey<World> dim, BlockPos pos) {
+        ServerWorld level = server.getWorld(dim);
+        if (level == null || !level.isBlockLoaded(pos)) {
             return null;
         }
-        BlockEntity be = level.getBlockEntity(pos);
+        TileEntity be = level.getTileEntity(pos);
         if (be == null) {
             return null;
         }
         List<ContainerAccess.SlotView> out = new ArrayList<>();
 
-        if (be instanceof Container container) {
-            int n = Math.min(container.getContainerSize(), MAX_SLOTS);
+        if (be instanceof IInventory) {
+            IInventory container = (IInventory) be;
+            int n = Math.min(container.getSizeInventory(), MAX_SLOTS);
             for (int i = 0; i < n; i++) {
-                out.add(ContainerAccess.make(-1, i, container.getItem(i)));
+                out.add(ContainerAccess.make(-1, i, container.getStackInSlot(i)));
             }
             return out;
         }
 
-        var handler = WorldProbe.itemHandler(level, pos, be);
+        net.minecraftforge.items.IItemHandler handler = WorldProbe.itemHandler(level, pos, be);
         if (handler == null) {
             return null;
         }

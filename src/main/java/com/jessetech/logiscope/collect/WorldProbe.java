@@ -2,15 +2,15 @@ package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.bind.ProbeTarget;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.server.IntegratedServer;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.server.integrated.IntegratedServer;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.Direction;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.Container;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.inventory.IInventory;
+import net.minecraft.item.ItemStack;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.items.CapabilityItemHandler;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
@@ -36,14 +36,58 @@ import java.util.List;
  *     1. **下标映射验证**（模组机器的菜单槽下标不可信，见下）
  *     2. **一次同步读取**（{@link #readOnServer}，只能在服务端线程调）
  *
- * 为什么只能单人用 *   多人服务器上，客户端手里的 ClientLevel 虽然有那个方块，但方块实体的内容
+ * 为什么只能单人用 *   多人服务器上，客户端手里的 ClientWorld 虽然有那个方块，但方块实体的内容
  *   根本不在客户端 —— 容器内容只会通过菜单包同步，界面一关就没了。
  *   所以多人下调用方会退化成记录 no_data（这是设计，不是 bug）。
  */
 public final class WorldProbe {
 
     /** 下标验证结果：与 {@code target.slots()} **同序**的容器内下标；-1 = 这一格没验证出来 */
-    private record Mapping(ProbeTarget target, int[] indexes, MappingStatus status) {
+    private static final class Mapping {
+        private final ProbeTarget target;
+        private final int[] indexes;
+        private final MappingStatus status;
+
+        public Mapping(ProbeTarget target, int[] indexes, MappingStatus status) {
+            this.target = target;
+            this.indexes = indexes;
+            this.status = status;
+        }
+
+        public ProbeTarget target() {
+            return target;
+        }
+
+        public int[] indexes() {
+            return indexes;
+        }
+
+        public MappingStatus status() {
+            return status;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Mapping other = (Mapping) o;
+            return java.util.Objects.equals(this.target, other.target) && java.util.Objects.equals(this.indexes, other.indexes) && java.util.Objects.equals(this.status, other.status);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(target, indexes, status);
+        }
+
+        @Override
+        public String toString() {
+            return "Mapping[" + "target=" + target + ", " + "indexes=" + indexes + ", " + "status=" + status + "]";
+        }
+
     }
 
     private volatile Mapping mapping;
@@ -69,7 +113,7 @@ public final class WorldProbe {
         VERIFIED,
         /** 至少有一格的下标不可信（内容匹配有歧义，例如对着空格子挂探头） */
         UNVERIFIED,
-        /** 这台机器既不是 Container 也没有 item handler，关界面后必然读不到 */
+        /** 这台机器既不是 IInventory 也没有 item handler，关界面后必然读不到 */
         UNAVAILABLE
     }
 
@@ -89,7 +133,7 @@ public final class WorldProbe {
      *   3. 否则这一格标记为未验证 —— 宁可明确告诉用户"不可信"，也不要瞎猜
      *
      * 注意匹配只在挂探头这一刻做一次：下标是结构性信息，内容只是用来"指认"它，
-     * 之后内容怎么变都不影响。vanilla Container 路径直接跳过匹配（vanilla 保证下标）。
+     * 之后内容怎么变都不影响。vanilla IInventory 路径直接跳过匹配（vanilla 保证下标）。
      *
      * @param menuViews 与 {@code target.slots()} 同序的菜单快照；无菜单时为 null
      */
@@ -98,11 +142,11 @@ public final class WorldProbe {
             return;
         }
         Minecraft mc = Minecraft.getInstance();
-        IntegratedServer server = mc.getSingleplayerServer();
+        IntegratedServer server = mc.getIntegratedServer();
         if (server == null) {
             return;
         }
-        List<ContainerAccess.SlotView> copy = menuViews == null ? null : List.copyOf(menuViews);
+        List<ContainerAccess.SlotView> copy = menuViews == null ? null : new java.util.ArrayList<>(menuViews);
         try {
             server.execute(() -> mapping = verifyNow(server, target, copy));
         } catch (Throwable ignored) {
@@ -117,15 +161,16 @@ public final class WorldProbe {
         int[] idx = new int[n];
         Arrays.fill(idx, -1);
 
-        ServerLevel level = server.getLevel(target.dimension());
-        if (level == null || !level.isLoaded(target.pos())) {
+        ServerWorld level = server.getWorld(target.dimension());
+        if (level == null || !level.isBlockLoaded(target.pos())) {
             return new Mapping(target, idx, MappingStatus.UNAVAILABLE);
         }
-        BlockEntity be = level.getBlockEntity(target.pos());
+        TileEntity be = level.getTileEntity(target.pos());
 
-        // vanilla Container：getContainerSlot() 就是容器内下标，vanilla 保证，直接可信
-        if (be instanceof Container container) {
-            int size = container.getContainerSize();
+        // vanilla IInventory：getContainerSlot() 就是容器内下标，vanilla 保证，直接可信
+        if (be instanceof IInventory) {
+            IInventory container = (IInventory) be;
+            int size = container.getSizeInventory();
             boolean ok = true;
             for (int i = 0; i < n; i++) {
                 int c = target.slots().get(i).containerSlotIndex();
@@ -229,22 +274,22 @@ public final class WorldProbe {
      *   相比之下 no_data 是**看得出来**的断档。两害相权，宁可断档。
      */
     @Nullable
-    public List<ContainerAccess.SlotView> readOnServer(ServerLevel level, ProbeTarget target) {
+    public List<ContainerAccess.SlotView> readOnServer(ServerWorld level, ProbeTarget target) {
         if (level == null || target == null || !target.hasPersistentId()) {
             return null;
         }
-        if (!level.isLoaded(target.pos())) {
+        if (!level.isBlockLoaded(target.pos())) {
             // 区块真卸载了才读不到。试过更严的"方块 tick 范围"判据，用户判定
             // **不需要**：那会让"走出模拟距离"也变成 no_data，而"关掉 GUI 继续采"
             // 才是要的行为 —— 已回退（见 PROGRESS 的对应小节）。
             return null;
         }
-        BlockEntity be = level.getBlockEntity(target.pos());
+        TileEntity be = level.getTileEntity(target.pos());
         if (be == null) {
             return null;
         }
 
-        Container container = be instanceof Container c ? c : null;
+        IInventory container = be instanceof IInventory ? (IInventory) be : null;
         IItemHandler handler = container == null ? itemHandler(level, target.pos(), be) : null;
         if (container == null && handler == null) {
             return null;
@@ -257,18 +302,18 @@ public final class WorldProbe {
             if (idx < 0) {
                 return null;
             }
-            // ---- 路径 1：原版 Container（原版箱子/熔炉、漏斗，以及实现该接口的模组）----
+            // ---- 路径 1：原版 IInventory（原版箱子/熔炉、漏斗，以及实现该接口的模组）----
             // 下标语义由 vanilla 保证：菜单槽的 getContainerSlot() 就是容器内下标
             if (container != null) {
-                if (idx >= container.getContainerSize()) {
+                if (idx >= container.getSizeInventory()) {
                     return null;
                 }
-                out.add(ContainerAccess.make(-1, idx, container.getItem(idx)));
+                out.add(ContainerAccess.make(-1, idx, container.getStackInSlot(idx)));
                 continue;
             }
             // ---- 路径 2：Forge 的物品 capability（模组机器的主通道）----
             // 实测（javap 反查）：Sophisticated Storage 的 StorageBlockEntity 与
-            // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 Container**——
+            // Mekanism 的 TileEntityEnergizedSmelter 都**不实现原版 IInventory**——
             // 它们的容器内容只在界面打开期间由菜单包同步，界面一关客户端手里就没了。
             // 但为了能和漏斗/管道交互，模组机器几乎都会注册 ItemHandler.BLOCK 能力。
             // 下标用 verifyIndex 验证过的；验证不了时退回 getContainerSlot()。
@@ -277,7 +322,7 @@ public final class WorldProbe {
             }
             out.add(ContainerAccess.make(-1, idx, handler.getStackInSlot(idx)));
         }
-        return List.copyOf(out);
+        return new java.util.ArrayList<>(out);
     }
 
     /**
@@ -290,7 +335,7 @@ public final class WorldProbe {
      * 而这条查询走 Forge 的能力缓存，成本可以忽略。
      */
     @Nullable
-    static IItemHandler itemHandler(ServerLevel level, BlockPos pos, @Nullable BlockEntity be) {
+    static IItemHandler itemHandler(ServerWorld level, BlockPos pos, @Nullable TileEntity be) {
         // 1.20.1 走方块实体的 LazyOptional 通道（见 ProbeContext#itemHandler 注释）
         if (be == null) {
             return null;

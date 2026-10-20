@@ -33,8 +33,75 @@ import java.util.List;
  * @param flowMin  流量线的最小值（没流量时为 0）
  * @param flowMax  流量线的最大值（没流量时为 0）
  */
-public record Series(String itemId, List<SeriesPoint> points, List<SeriesPoint> flow,
-                     Val min, Val max, Val flowMin, Val flowMax) {
+public final class Series {
+    private final String itemId;
+    private final List<SeriesPoint> points;
+    private final List<SeriesPoint> flow;
+    private final Val min;
+    private final Val max;
+    private final Val flowMin;
+    private final Val flowMax;
+
+    public Series(String itemId, List<SeriesPoint> points, List<SeriesPoint> flow, Val min, Val max, Val flowMin, Val flowMax) {
+        this.itemId = itemId;
+        this.points = points;
+        this.flow = flow;
+        this.min = min;
+        this.max = max;
+        this.flowMin = flowMin;
+        this.flowMax = flowMax;
+    }
+
+    public String itemId() {
+        return itemId;
+    }
+
+    public List<SeriesPoint> points() {
+        return points;
+    }
+
+    public List<SeriesPoint> flow() {
+        return flow;
+    }
+
+    public Val min() {
+        return min;
+    }
+
+    public Val max() {
+        return max;
+    }
+
+    public Val flowMin() {
+        return flowMin;
+    }
+
+    public Val flowMax() {
+        return flowMax;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        Series other = (Series) o;
+        return java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.points, other.points) && java.util.Objects.equals(this.flow, other.flow) && java.util.Objects.equals(this.min, other.min) && java.util.Objects.equals(this.max, other.max) && java.util.Objects.equals(this.flowMin, other.flowMin) && java.util.Objects.equals(this.flowMax, other.flowMax);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(itemId, points, flow, min, max, flowMin, flowMax);
+    }
+
+    @Override
+    public String toString() {
+        return "Series[" + "itemId=" + itemId + ", " + "points=" + points + ", " + "flow=" + flow + ", " + "min=" + min + ", " + "max=" + max + ", " + "flowMin=" + flowMin + ", " + "flowMax=" + flowMax + "]";
+    }
+
 
     /** 最近一次读到的数量（图例上用） */
     public Val lastCount() {

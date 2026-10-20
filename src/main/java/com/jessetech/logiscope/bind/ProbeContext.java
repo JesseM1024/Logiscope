@@ -2,22 +2,22 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.collect.ContainerAccess;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.TranslatableComponent;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.Container;
-import net.minecraft.world.InteractionHand;
-import net.minecraft.world.MenuProvider;
-import net.minecraft.world.entity.player.Player;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.item.context.UseOnContext;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
-import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.BlockHitResult;
-import net.minecraft.world.phys.HitResult;
+import net.minecraft.util.text.TranslationTextComponent;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.Direction;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.inventory.IInventory;
+import net.minecraft.util.Hand;
+import net.minecraft.inventory.container.INamedContainerProvider;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.item.ItemUseContext;
+import net.minecraft.world.World;
+import net.minecraft.tileentity.TileEntity;
+import net.minecraft.block.BlockState;
+import net.minecraft.util.math.BlockRayTraceResult;
+import net.minecraft.util.math.RayTraceResult;
 import net.minecraftforge.items.CapabilityItemHandler;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
@@ -54,7 +54,7 @@ import java.lang.reflect.Method;
  * 这是所有容器方块为了做客户端预测都必须回答的问题，比 `getMenuProvider` 可靠得多。
  * `getMenuProvider` 保留为**快速肯定判据**（非空就直接算"有界面"，省一次预测）。
  *
- * "是不是容器方块实体" 的判定是 `Container` 或 ItemHandler 能力 *   和采集层 {@code WorldProbe#readNow} 的两条读取路径严格对齐：
+ * "是不是容器方块实体" 的判定是 `IInventory` 或 ItemHandler 能力 *   和采集层 {@code WorldProbe#readNow} 的两条读取路径严格对齐：
  *   能读到值的方块，才算"可探测的容器"。这样不会出现"界面说能探测、实际读不到"。
  */
 public final class ProbeContext {
@@ -67,8 +67,57 @@ public final class ProbeContext {
      * @param menuOpen  此刻是不是有容器界面开着（决定选格页能不能走"可视化选格"）
      * @param label     给人看的来源描述
      */
-    public record Candidate(@Nullable ResourceKey<Level> dimension, @Nullable BlockPos pos,
-                            boolean menuOpen, String label) {
+    public static final class Candidate {
+        private final @Nullable RegistryKey<World> dimension;
+        private final @Nullable BlockPos pos;
+        private final boolean menuOpen;
+        private final String label;
+
+        public Candidate(@Nullable RegistryKey<World> dimension, @Nullable BlockPos pos, boolean menuOpen, String label) {
+            this.dimension = dimension;
+            this.pos = pos;
+            this.menuOpen = menuOpen;
+            this.label = label;
+        }
+
+        public RegistryKey<World> dimension() {
+            return dimension;
+        }
+
+        public BlockPos pos() {
+            return pos;
+        }
+
+        public boolean menuOpen() {
+            return menuOpen;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Candidate other = (Candidate) o;
+            return java.util.Objects.equals(this.dimension, other.dimension) && java.util.Objects.equals(this.pos, other.pos) && java.util.Objects.equals(this.menuOpen, other.menuOpen) && java.util.Objects.equals(this.label, other.label);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(dimension, pos, menuOpen, label);
+        }
+
+        @Override
+        public String toString() {
+            return "Candidate[" + "dimension=" + dimension + ", " + "pos=" + pos + ", " + "menuOpen=" + menuOpen + ", " + "label=" + label + "]";
+        }
+
 
         public boolean hasAnchor() {
             return dimension != null && pos != null;
@@ -89,72 +138,72 @@ public final class ProbeContext {
      */
     @Nullable
     public static Candidate current(Minecraft mc) {
-        if (mc.player == null || mc.level == null) {
+        if (mc.player == null || mc.world == null) {
             return null;
         }
         if (ContainerAccess.hasForeignContainerOpen()) {
             ContainerAnchor.Anchor a = ContainerAnchor.activeFor(ContainerAccess.currentContainerId());
             if (a != null) {
                 // 设备名从锚点坐标现取（方块名只用于显示，取不到也无所谓）
-                return new Candidate(a.dimension(), a.pos(), true, blockName(mc.level, a.pos()));
+                return new Candidate(a.dimension(), a.pos(), true, blockName(mc.world, a.pos()));
             }
             // 界面开着但推不出坐标：拿不到持久身份，关界面只能暂停（已知边界，见 CP9）
             return new Candidate(null, null, true,
-                    new TranslatableComponent("logiscope.anchor.open_menu").getString());
+                    new TranslationTextComponent("logiscope.anchor.open_menu").getString());
         }
-        BlockHitResult hit = crosshairBlock(mc);
+        BlockRayTraceResult hit = crosshairBlock(mc);
         if (hit == null) {
             return null;
         }
-        BlockPos pos = hit.getBlockPos();
+        BlockPos pos = hit.getPos();
         // 探测资格放宽到"有方块实体"（无容器的 BE 走"无容器格，可监测 NBT"）
-        if (!isProbeTarget(mc.level, pos)) {
+        if (!isProbeTarget(mc.world, pos)) {
             return null;
         }
-        return new Candidate(mc.level.dimension(), pos.immutable(), false, blockName(mc.level, pos));
+        return new Candidate(mc.world.getDimensionKey(), pos.toImmutable(), false, blockName(mc.world, pos));
     }
 
     /** 准星指着的方块；没有或没指到方块返回 null */
     @Nullable
-    public static BlockHitResult crosshairBlock(Minecraft mc) {
-        HitResult hit = mc.hitResult;
-        if (hit == null || hit.getType() != HitResult.Type.BLOCK) {
+    public static BlockRayTraceResult crosshairBlock(Minecraft mc) {
+        RayTraceResult hit = mc.objectMouseOver;
+        if (hit == null || hit.getType() != RayTraceResult.Type.BLOCK) {
             return null;
         }
-        return (BlockHitResult) hit;
+        return (BlockRayTraceResult) hit;
     }
 
     /**
      * 这个方块右键之后会不会打开一个界面 —— **快速肯定判据**。
      *
-     * `BlockState#getMenuProvider(Level, BlockPos)` 是 public 的
+     * `BlockState#getMenuProvider(World, BlockPos)` 是 public 的
      * （BlockState 继承 BlockBehaviour.BlockStateBase，那一层把 protected 的
-     * `BlockBehaviour#getMenuProvider(BlockState, Level, BlockPos)` 包成了 public）。
+     * `BlockBehaviour#getMenuProvider(BlockState, World, BlockPos)` 包成了 public）。
      *
      * **它只对原版箱子这类方块有效**：原版熔炉/木桶和几乎所有模组机器都不覆写它。
      * 所以本方法**只能当"非空 ⇒ 一定有界面"来用**，返回 false 不代表没界面 ——
      * 那一步要问 {@link #wouldConsumeClick}。
      */
-    public static boolean hasMenuProvider(Level level, BlockPos pos) {
-        BlockState state = level.getBlockState(pos);
-        MenuProvider provider = state.getMenuProvider(level, pos);
-        return provider != null;
+    public static boolean hasMenuProvider(World level, BlockPos pos) {
+        // 1.16.5 没有 BlockState#getMenuProvider（1.17+ 才有）：
+        // 这一代只能靠下面的"会不会消费右键"行为判据，静态快速通道在本版本返回 false。
+        return false;
     }
 
     /**
      * "这个方块会不会消费一次右键"的直接问法 —— 判断有没有界面的主判据 *
-     * 做法：直接在客户端调一次 `BlockState#useWithoutItem(Level, Player, BlockHitResult)`。
+     * 做法：直接在客户端调一次 `BlockState#useWithoutItem(World, PlayerEntity, BlockRayTraceResult)`。
      * 所有容器方块都必须实现它（客户端返回 SUCCESS 以做预测，服务端才真的开菜单），
      * 所以它比任何静态判据都准：
      *
      * | 方块 | 客户端 `useWithoutItem` 返回 |
      * |---|---|
-     * | 原版箱子 / 熔炉 / 木桶 | `SUCCESS`（第一行就是 `if (level.isClientSide()) return SUCCESS`） |
+     * | 原版箱子 / 熔炉 / 木桶 | `SUCCESS`（第一行就是 `if (level.isRemote()) return SUCCESS`） |
      * | 精妙存储箱子 | `SUCCESS`（javap 核实：`getfield isClientSide` → `getstatic SUCCESS`） |
      * | Mekanism 机器 | 有 `HasGui` 属性 → `SUCCESS`；没有 → `PASS`（javap 核实） |
      * | 真的没有界面的机器 | `PASS` |
      *
-     * 为什么是"直接调"而不是"发一次右键再看结果" * `MultiPlayerGameMode#useItemOn` 会在**方块 use 返回 PASS 之后**继续走到
+     * 为什么是"直接调"而不是"发一次右键再看结果" * `PlayerController#useItemOn` 会在**方块 use 返回 PASS 之后**继续走到
      * `itemstack.useOn(...)` —— 玩家手里拿着扳手对着"没有界面的机器"按快捷键时，
      * 那一步会**真的改动机器**（用户 T15 的顾虑）。直接问一次不会发任何包，
      * 所以"判定为无界面"这条路**完全不碰物品逻辑**。
@@ -166,9 +215,9 @@ public final class ProbeContext {
      *
      * @return true = 会消费（大概率有界面）；false = PASS/异常之外的"明确没消费"
      */
-    public static boolean wouldConsumeClick(Level level, BlockPos pos, BlockHitResult hit, Player player) {
+    public static boolean wouldConsumeClick(World level, BlockPos pos, BlockRayTraceResult hit, PlayerEntity player) {
         try {
-            return level.getBlockState(pos).use(level, player, InteractionHand.MAIN_HAND, hit).consumesAction();
+            return level.getBlockState(pos).onBlockActivated(level, player, Hand.MAIN_HAND, hit).isSuccessOrConsume();
         } catch (Throwable t) {
             return true;
         }
@@ -177,39 +226,39 @@ public final class ProbeContext {
     /**
      * 这个方块是不是**可探测目标**。
      *
-     * 旧判据（{@code Container} / ItemHandler 能力）会把 MEK 管道这类方块挡在门外 ——
+     * 旧判据（{@code IInventory} / ItemHandler 能力）会把 MEK 管道这类方块挡在门外 ——
      * 实测：终极加压管道 `data get block` 明明有数据，按 F9 却没反应。原因：
      * 它的物品在 transmitter 内部网络里流动，**不对外暴露 ItemHandler 能力**，
-     * BE 也不是 `Container` —— 但 NBT 监测（数据页 / NBT 锚点）对它完全可用。
+     * BE 也不是 `IInventory` —— 但 NBT 监测（数据页 / NBT 锚点）对它完全可用。
      * 用户口径：既然 NBT 可监测，"有没有容器"就不再是探测资格的一部分。
      *
      * 普通方块（石头 / 拉杆 / 门）没有 BE → 仍然拒绝，"对非目标方块一个包都不发"
      * 的保证保持不变。
      */
-    public static boolean isProbeTarget(Level level, BlockPos pos) {
-        return level.getBlockEntity(pos) != null;
+    public static boolean isProbeTarget(World level, BlockPos pos) {
+        return level.getTileEntity(pos) != null;
     }
 
     /**
-     * 这个方块是不是"能读到物品的容器"（原版 Container 或 NeoForge ItemHandler 能力）。
+     * 这个方块是不是"能读到物品的容器"（原版 IInventory 或 NeoForge ItemHandler 能力）。
      *
      * 起它只回答一个问题："值不值得**模拟右键**开 GUI"*   探测资格见 {@link #isProbeTarget}（放宽到有 BE 即可）。两者分离的原因：
      *   有 BE 但没有容器的方块（床、告示牌、MEK 管道…）如果也走"模拟右键"，
      *   对床按 F9 会真的触发睡觉 —— 右键模拟必须只对真容器做。
      */
-    public static boolean isContainerLike(Level level, BlockPos pos) {
-        BlockEntity be = level.getBlockEntity(pos);
+    public static boolean isContainerLike(World level, BlockPos pos) {
+        TileEntity be = level.getTileEntity(pos);
         if (be == null) {
             return false;
         }
-        return be instanceof Container || itemHandler(level, pos) != null;
+        return be instanceof IInventory || itemHandler(level, pos) != null;
     }
 
     @Nullable
-    private static IItemHandler itemHandler(Level level, BlockPos pos) {
-        // 1.20.1 无 Level#getCapability(cap, pos, side)（20.4+ 的 Capabilities 注册表提供），
+    private static IItemHandler itemHandler(World level, BlockPos pos) {
+        // 1.20.1 无 World#getCapability(cap, pos, side)（20.4+ 的 Capabilities 注册表提供），
         // 走方块实体的 LazyOptional 通道
-        BlockEntity be = level.getBlockEntity(pos);
+        TileEntity be = level.getTileEntity(pos);
         if (be == null) {
             return null;
         }
@@ -235,7 +284,7 @@ public final class ProbeContext {
      *
      * 为什么必须模拟真实交互：**只有服务端能开菜单**（`ServerPlayer#openMenu` +
      * `ClientboundOpenScreenPacket`）。纯客户端模组没有别的合法通道，
-     * 而 `MultiPlayerGameMode#useItemOn` 正是 vanilla 右键走的同一条路。
+     * 而 `PlayerController#useItemOn` 正是 vanilla 右键走的同一条路。
      *
      * 用一个保守的前置条件把副作用挡掉 *   `performUseItemOn` 里的顺序是：`RightClickBlock 事件` → **`itemstack.onItemUseFirst`**
      *   → 方块 use → 物品 use。第一条是"物品抢在方块前面"，任何装了扳手/工具类物品的玩家
@@ -246,28 +295,28 @@ public final class ProbeContext {
      * @return true = 已经发出交互（界面会在 1~3 tick 后由服务端打开）；
      *         false = 手上物品可能抢走这次交互，没有发出 —— 调用方应提示用户空手再试
      */
-    public static boolean tryOpenContainerGui(Minecraft mc, BlockHitResult hit) {
-        if (mc.player == null || mc.gameMode == null) {
+    public static boolean tryOpenContainerGui(Minecraft mc, BlockRayTraceResult hit) {
+        if (mc.player == null || mc.playerController == null) {
             return false;
         }
         if (!isSafeToSimulateUse(mc.player)) {
             return false;
         }
-        // 1.18.2 的 useItemOn 要吃 ClientLevel（1.20.1 起改成了 Level）
-        mc.gameMode.useItemOn(mc.player, (net.minecraft.client.multiplayer.ClientLevel) mc.level,
-                InteractionHand.MAIN_HAND, hit);
+        // 1.18.2 的 useItemOn 要吃 ClientWorld（1.20.1 起改成了 World）
+        mc.playerController.func_217292_a(mc.player, (net.minecraft.client.world.ClientWorld) mc.world,
+                Hand.MAIN_HAND, hit);
         return true;
     }
 
     /** 手上物品会不会覆写 `onItemUseFirst`（= 会不会抢走这次右键） */
-    private static boolean isSafeToSimulateUse(Player player) {
-        ItemStack held = player.getMainHandItem();
+    private static boolean isSafeToSimulateUse(PlayerEntity player) {
+        ItemStack held = player.getHeldItem(Hand.MAIN_HAND);
         if (held.isEmpty()) {
             return true;
         }
         try {
             Method m = held.getItem().getClass()
-                    .getMethod("onItemUseFirst", ItemStack.class, UseOnContext.class);
+                    .getMethod("onItemUseFirst", ItemStack.class, ItemUseContext.class);
             // 没覆写时得到的是接口 IForgeItem 上的 default 方法（声明类是 net.minecraftforge.*），
             // 覆写了就落在模组自己的类上。只看声明类，不调用。
             String declaring = m.getDeclaringClass().getName();
@@ -284,9 +333,9 @@ public final class ProbeContext {
     // ==================================================================
 
     /** 方块名（用于选格页头部显示"我们在配置哪台设备"） */
-    public static String blockName(Level level, BlockPos pos) {
+    public static String blockName(World level, BlockPos pos) {
         try {
-            return level.getBlockState(pos).getBlock().getName().getString();
+            return level.getBlockState(pos).getBlock().getTranslatedName().getString();
         } catch (Throwable t) {
             return "?";
         }

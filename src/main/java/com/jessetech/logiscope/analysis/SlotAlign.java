@@ -42,7 +42,51 @@ public final class SlotAlign {
      * @param menuSlotIndex 菜单槽下标（无 GUI 型容器为 -1），用来把结果对回界面上的勾选状态
      * @param itemId        物品 id；空格子传 null 或空串
      */
-    public record Cell(int ordinal, int menuSlotIndex, String itemId) {
+    public static final class Cell {
+        private final int ordinal;
+        private final int menuSlotIndex;
+        private final String itemId;
+
+        public Cell(int ordinal, int menuSlotIndex, String itemId) {
+            this.ordinal = ordinal;
+            this.menuSlotIndex = menuSlotIndex;
+            this.itemId = itemId;
+        }
+
+        public int ordinal() {
+            return ordinal;
+        }
+
+        public int menuSlotIndex() {
+            return menuSlotIndex;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Cell other = (Cell) o;
+            return java.util.Objects.equals(this.ordinal, other.ordinal) && java.util.Objects.equals(this.menuSlotIndex, other.menuSlotIndex) && java.util.Objects.equals(this.itemId, other.itemId);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(ordinal, menuSlotIndex, itemId);
+        }
+
+        @Override
+        public String toString() {
+            return "Cell[" + "ordinal=" + ordinal + ", " + "menuSlotIndex=" + menuSlotIndex + ", " + "itemId=" + itemId + "]";
+        }
+
     }
 
     /**
@@ -56,9 +100,64 @@ public final class SlotAlign {
      * @param pairs      确认的配对数
      * @param unresolved 无法唯一确定的格数（多解 / 不在任何最优对齐里）
      */
-    public record Result(Map<Integer, Integer> byOrdinal, Map<Integer, Integer> bySlot,
-                         Integer shift, int pairs, int unresolved) {
-        public static final Result EMPTY = new Result(Map.of(), Map.of(), null, 0, 0);
+    public static final class Result {
+        private final Map<Integer, Integer> byOrdinal;
+        private final Map<Integer, Integer> bySlot;
+        private final Integer shift;
+        private final int pairs;
+        private final int unresolved;
+
+        public Result(Map<Integer, Integer> byOrdinal, Map<Integer, Integer> bySlot, Integer shift, int pairs, int unresolved) {
+            this.byOrdinal = byOrdinal;
+            this.bySlot = bySlot;
+            this.shift = shift;
+            this.pairs = pairs;
+            this.unresolved = unresolved;
+        }
+
+        public Map<Integer, Integer> byOrdinal() {
+            return byOrdinal;
+        }
+
+        public Map<Integer, Integer> bySlot() {
+            return bySlot;
+        }
+
+        public Integer shift() {
+            return shift;
+        }
+
+        public int pairs() {
+            return pairs;
+        }
+
+        public int unresolved() {
+            return unresolved;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Result other = (Result) o;
+            return java.util.Objects.equals(this.byOrdinal, other.byOrdinal) && java.util.Objects.equals(this.bySlot, other.bySlot) && java.util.Objects.equals(this.shift, other.shift) && java.util.Objects.equals(this.pairs, other.pairs) && java.util.Objects.equals(this.unresolved, other.unresolved);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(byOrdinal, bySlot, shift, pairs, unresolved);
+        }
+
+        @Override
+        public String toString() {
+            return "Result[" + "byOrdinal=" + byOrdinal + ", " + "bySlot=" + bySlot + ", " + "shift=" + shift + ", " + "pairs=" + pairs + ", " + "unresolved=" + unresolved + "]";
+        }
+
+        public static final Result EMPTY = new Result(java.util.Collections.emptyMap(), java.util.Collections.emptyMap(), null, 0, 0);
     }
 
     /**
@@ -76,7 +175,57 @@ public final class SlotAlign {
      * @param empty              是不是空格子（**必须显式给**：空格子的 itemId 常被填成
      *                           {@code minecraft:air}，用"字符串空不空"判不出来）
      */
-    public record Pick(int ordinal, int containerSlotIndex, String itemId, boolean empty) {
+    public static final class Pick {
+        private final int ordinal;
+        private final int containerSlotIndex;
+        private final String itemId;
+        private final boolean empty;
+
+        public Pick(int ordinal, int containerSlotIndex, String itemId, boolean empty) {
+            this.ordinal = ordinal;
+            this.containerSlotIndex = containerSlotIndex;
+            this.itemId = itemId;
+            this.empty = empty;
+        }
+
+        public int ordinal() {
+            return ordinal;
+        }
+
+        public int containerSlotIndex() {
+            return containerSlotIndex;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public boolean empty() {
+            return empty;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Pick other = (Pick) o;
+            return java.util.Objects.equals(this.ordinal, other.ordinal) && java.util.Objects.equals(this.containerSlotIndex, other.containerSlotIndex) && java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.empty, other.empty);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(ordinal, containerSlotIndex, itemId, empty);
+        }
+
+        @Override
+        public String toString() {
+            return "Pick[" + "ordinal=" + ordinal + ", " + "containerSlotIndex=" + containerSlotIndex + ", " + "itemId=" + itemId + ", " + "empty=" + empty + "]";
+        }
+
     }
 
     /**
@@ -103,7 +252,7 @@ public final class SlotAlign {
                     ? pick.containerSlotIndex() : null;
         }
         String want = pick.itemId();
-        if (want == null || want.isBlank()) {
+        if (want == null || want.trim().isEmpty()) {
             return null;
         }
         Integer byOrdinal = align.byOrdinal().get(pick.ordinal());
@@ -171,7 +320,7 @@ public final class SlotAlign {
         int n = cells == null ? 0 : cells.size();
         int m = entries == null ? 0 : entries.size();
         if (n == 0 || m == 0) {
-            return new Result(Map.of(), Map.of(), null, 0, n);
+            return new Result(java.util.Collections.emptyMap(), java.util.Collections.emptyMap(), null, 0, n);
         }
 
         boolean[][] eq = new boolean[n][m];
@@ -179,7 +328,7 @@ public final class SlotAlign {
             String a = cells.get(i).itemId();
             for (int j = 0; j < m; j++) {
                 String b = entries.get(j).itemId();
-                eq[i][j] = a != null && !a.isBlank() && a.equals(b);
+                eq[i][j] = a != null && !a.trim().isEmpty() && a.equals(b);
             }
         }
 

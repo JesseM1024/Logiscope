@@ -7,8 +7,8 @@ import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.analysis.Val;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
-import net.minecraft.network.chat.TranslatableComponent;
+import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.util.text.TranslationTextComponent;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.Arrays;
@@ -48,7 +48,7 @@ public final class ChartRenderer {
      * 挑色的标准是"在深色底上互相分得开"，而不是好看 —— 观测工具优先看辨得清。
      *
      * 每个颜色都必须带 0xFF 的 alpha 位 * Draw#fill 的颜色是 ARGB，alpha 为 0 就是**完全透明**——
-     * 它不像 drawString 那样有 adjustColor 兜底（Font.java:172：alpha 位为 0 就补 0xFF）。
+     * 它不像 drawString 那样有 adjustColor 兜底（FontRenderer.java:172：alpha 位为 0 就补 0xFF）。
      * 曾出现"图里没有任何线"，根因：调色板写成 0x5DCAA5，alpha=0，线全被画没了。
      * 这个坑从的火花线（0x9BE1CB）就存在，只是当时没人盯着火花线看。
      */
@@ -142,7 +142,45 @@ public final class ChartRenderer {
     // ------------------------------------------------------------------
 
     /** 用户框选出来的一段 tick 区间（G4 的标注会建在它上面） */
-    public record Selection(long fromTick, long toTick) {
+    public static final class Selection {
+        private final long fromTick;
+        private final long toTick;
+
+        public Selection(long fromTick, long toTick) {
+            this.fromTick = fromTick;
+            this.toTick = toTick;
+        }
+
+        public long fromTick() {
+            return fromTick;
+        }
+
+        public long toTick() {
+            return toTick;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Selection other = (Selection) o;
+            return java.util.Objects.equals(this.fromTick, other.fromTick) && java.util.Objects.equals(this.toTick, other.toTick);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(fromTick, toTick);
+        }
+
+        @Override
+        public String toString() {
+            return "Selection[" + "fromTick=" + fromTick + ", " + "toTick=" + toTick + "]";
+        }
+
 
         public long lo() {
             return Math.min(fromTick, toTick);
@@ -173,18 +211,93 @@ public final class ChartRenderer {
      * @param markers        波形标记（G4）：用户右键打的记号（tick 升序）
      * @param mouseX/mouseY  真实鼠标坐标，用来画十字线读数
      */
-    public record View(
-            long startTick,
-            long endTick,
-            Set<String> hidden,
-            /** 开了 IO 线（单 tick 净流量）的物品 —— 图例里"物品 → IO"子行的开关 */
-            Set<String> ioShown,
-            @Nullable Selection selection,
-            boolean draft,
-            List<ChartData.SeriesRange> selectionStats,
-            List<Long> markers,
-            int mouseX,
-            int mouseY) {
+    public static final class View {
+        private final long startTick;
+        private final long endTick;
+        private final Set<String> hidden;
+        private final Set<String> ioShown;
+        private final @Nullable Selection selection;
+        private final boolean draft;
+        private final List<ChartData.SeriesRange> selectionStats;
+        private final List<Long> markers;
+        private final int mouseX;
+        private final int mouseY;
+
+        public View(long startTick, long endTick, Set<String> hidden, Set<String> ioShown, @Nullable Selection selection, boolean draft, List<ChartData.SeriesRange> selectionStats, List<Long> markers, int mouseX, int mouseY) {
+            this.startTick = startTick;
+            this.endTick = endTick;
+            this.hidden = hidden;
+            this.ioShown = ioShown;
+            this.selection = selection;
+            this.draft = draft;
+            this.selectionStats = selectionStats;
+            this.markers = markers;
+            this.mouseX = mouseX;
+            this.mouseY = mouseY;
+        }
+
+        public long startTick() {
+            return startTick;
+        }
+
+        public long endTick() {
+            return endTick;
+        }
+
+        public Set<String> hidden() {
+            return hidden;
+        }
+
+        public Set<String> ioShown() {
+            return ioShown;
+        }
+
+        public Selection selection() {
+            return selection;
+        }
+
+        public boolean draft() {
+            return draft;
+        }
+
+        public List<ChartData.SeriesRange> selectionStats() {
+            return selectionStats;
+        }
+
+        public List<Long> markers() {
+            return markers;
+        }
+
+        public int mouseX() {
+            return mouseX;
+        }
+
+        public int mouseY() {
+            return mouseY;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            View other = (View) o;
+            return java.util.Objects.equals(this.startTick, other.startTick) && java.util.Objects.equals(this.endTick, other.endTick) && java.util.Objects.equals(this.hidden, other.hidden) && java.util.Objects.equals(this.ioShown, other.ioShown) && java.util.Objects.equals(this.selection, other.selection) && java.util.Objects.equals(this.draft, other.draft) && java.util.Objects.equals(this.selectionStats, other.selectionStats) && java.util.Objects.equals(this.markers, other.markers) && java.util.Objects.equals(this.mouseX, other.mouseX) && java.util.Objects.equals(this.mouseY, other.mouseY);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(startTick, endTick, hidden, ioShown, selection, draft, selectionStats, markers, mouseX, mouseY);
+        }
+
+        @Override
+        public String toString() {
+            return "View[" + "startTick=" + startTick + ", " + "endTick=" + endTick + ", " + "hidden=" + hidden + ", " + "ioShown=" + ioShown + ", " + "selection=" + selection + ", " + "draft=" + draft + ", " + "selectionStats=" + selectionStats + ", " + "markers=" + markers + ", " + "mouseX=" + mouseX + ", " + "mouseY=" + mouseY + "]";
+        }
+
     }
 
     public static int colorOf(int seriesIndex, String itemId) {
@@ -254,7 +367,7 @@ public final class ChartRenderer {
     // 主入口
     // ------------------------------------------------------------------
 
-    public void render(Draw g, Font font, ChartData data,
+    public void render(Draw g, FontRenderer font, ChartData data,
                        int x, int y, int w, int h, View view) {
         this.chartX = x;
         this.chartW = w;
@@ -324,7 +437,7 @@ public final class ChartRenderer {
             // 框选照样要画 —— 否则"窗口里恰好没数据"时拖动没有任何反馈，
             // 曾有"框选无反馈"的误判：没数据 + 没反馈
             if (view.selection() != null) {
-                drawSelection(g, font, view.selection(), List.of(), data);
+                drawSelection(g, font, view.selection(), java.util.Collections.emptyList(), data);
             }
             return;
         }
@@ -387,7 +500,7 @@ public final class ChartRenderer {
         // ---- 框选 ----
         Selection sel = view.selection();
         if (sel != null) {
-            drawSelection(g, font, sel, view.draft() ? List.of() : view.selectionStats(), data);
+            drawSelection(g, font, sel, view.draft() ? java.util.Collections.emptyList() : view.selectionStats(), data);
         }
 
         // ---- 波形标记（G4）----
@@ -399,14 +512,14 @@ public final class ChartRenderer {
         // ---- 右上角：窗口信息 ----
         long span = Math.max(1L, end - start);
         String win = fmtSecs(span) + " / " + span + "t";
-        g.drawString(font, win, plotR - 4 - font.width(win), plotY + 3, COLOR_LABEL, false);
+        g.drawString(font, win, plotR - 4 - font.getStringWidth(win), plotY + 3, COLOR_LABEL, false);
     }
 
     // ------------------------------------------------------------------
     // 坐标轴
     // ------------------------------------------------------------------
 
-    private void drawYAxis(Draw g, Font font, double lo, double hi, double step) {
+    private void drawYAxis(Draw g, FontRenderer font, double lo, double hi, double step) {
         int lines = (int) ((hi - lo) / step);
         if (lines > 10) {
             step = (hi - lo) / 5;
@@ -420,11 +533,11 @@ public final class ChartRenderer {
             // 只有**纵轴**用科学计数法（需求）：它要容纳 8 位数量级的刻度，
             // 而读数（十字线、框选统计、面板数字）一律给精确值（见 fmtExact）。
             String lb = fmtAxis(v);
-            g.drawString(font, lb, plotX - 3 - font.width(lb), yy - 3, COLOR_LABEL, false);
+            g.drawString(font, lb, plotX - 3 - font.getStringWidth(lb), yy - 3, COLOR_LABEL, false);
         }
     }
 
-    private void drawTimeAxis(Draw g, Font font) {
+    private void drawTimeAxis(Draw g, FontRenderer font) {
         long span = Math.max(1L, end - start);
         long step = niceTickStep(span / 4);
         // 窗口很短时按 tick 标，稍长就换算成秒 —— '−3t' 比 '−0s' 有意义得多
@@ -440,7 +553,7 @@ public final class ChartRenderer {
             String lb = asSeconds
                     ? "-" + Math.round((end - t) / tps) + "s"
                     : "-" + (end - t) + "t";
-            if (xx + 2 + font.width(lb) < plotR) {
+            if (xx + 2 + font.getStringWidth(lb) < plotR) {
                 g.drawString(font, lb, xx + 2, plotB + 2, COLOR_LABEL, false);
             }
         }
@@ -477,7 +590,7 @@ public final class ChartRenderer {
     // 框选
     // ------------------------------------------------------------------
 
-    private void drawSelection(Draw g, Font font, Selection sel,
+    private void drawSelection(Draw g, FontRenderer font, Selection sel,
                                List<ChartData.SeriesRange> stats, ChartData data) {
         int xa = xOf(sel.lo());
         int xb = xOf(sel.hi());
@@ -526,9 +639,9 @@ public final class ChartRenderer {
             return;
         }
 
-        int width = font.width(head.toString());
+        int width = font.getStringWidth(head.toString());
         for (int i = 0; i < n; i++) {
-            width = Math.max(width, font.width(rows[i]) + 9);
+            width = Math.max(width, font.getStringWidth(rows[i]) + 9);
         }
         int boxH = (n + 2) * 10 + 2;
         int bx = plotX + 4;
@@ -564,7 +677,7 @@ public final class ChartRenderer {
      * 所在 tick、换算秒，以及每条可见线在这一 tick 的值（G4 验收标准第 2 条）。
      * 取值规则与十字线相同：找该 tick 之前最近的采样点（台阶状数据）。
      */
-    private void drawMarkers(Draw g, Font font, ChartData data, View view) {
+    private void drawMarkers(Draw g, FontRenderer font, ChartData data, View view) {
         List<Long> markers = view.markers();
         if (markers.isEmpty()) {
             return;
@@ -622,7 +735,7 @@ public final class ChartRenderer {
         }
 
         String text = sb.toString();
-        int tw = font.width(text);
+        int tw = font.getStringWidth(text);
         int tx = Math.max(plotX + 2, Math.min(mx + 3, plotR - 3 - tw));
         int ty = plotY + 6;
         g.fill(tx - 2, ty - 2, tx + tw + 3, ty + 10, 0xE0181822);
@@ -641,7 +754,7 @@ public final class ChartRenderer {
      * 若最近的点离得太远（超过一个像素列的时间，说明这里其实是断档），
      * 就报 "-" —— 宁可显示"不知道"，也不要拿旧值冒充。
      */
-    private void drawCrosshair(Draw g, Font font, ChartData data, View view) {
+    private void drawCrosshair(Draw g, FontRenderer font, ChartData data, View view) {
         int mx = view.mouseX();
         int my = view.mouseY();
         if (mx < plotX || mx >= plotR || my < plotY || my >= plotB) {
@@ -691,7 +804,7 @@ public final class ChartRenderer {
         }
 
         String text = sb.toString();
-        int tw = font.width(text);
+        int tw = font.getStringWidth(text);
         int tx = Math.max(plotX + 2, Math.min(mx + 3, plotR - 3 - tw));
         int ty = plotB - 12;
         g.fill(tx - 2, ty - 2, tx + tw + 3, ty + 10, 0xE0181822);
@@ -971,7 +1084,7 @@ public final class ChartRenderer {
      * 当前世界的 tick 速率（tick/秒）。
      *
      * 时间轴上的"秒"必须按它换算 —— 固定按 20 算的话 `/tick rate 200` 下
-     * 1 秒会被标成 10 秒。1.20.1 已知限制：无 Level#tickRateManager（1.21 引入），
+     * 1 秒会被标成 10 秒。1.20.1 已知限制：无 World#tickRateManager（1.21 引入），
      * 服务端也不同步 tick 速率 —— vanilla 固定 20 t/s；第三方改速场景下秒数按 20
      * 标称，不引入推算值。
      */
@@ -993,11 +1106,11 @@ public final class ChartRenderer {
         return v.compareTo(Val.ZERO) > 0 ? "+" + fmtExact(v) : fmtExact(v);
     }
 
-    private static void centered(Draw g, Font font, String text, int cx, int y, int color) {
-        g.drawString(font, text, cx - font.width(text) / 2, y, color, false);
+    private static void centered(Draw g, FontRenderer font, String text, int cx, int y, int color) {
+        g.drawString(font, text, cx - font.getStringWidth(text) / 2, y, color, false);
     }
 
     private static String tr(String key) {
-        return new TranslatableComponent(key).getString();
+        return new TranslationTextComponent(key).getString();
     }
 }

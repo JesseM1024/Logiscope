@@ -9,7 +9,7 @@ import com.jessetech.logiscope.collect.ProbeSlots;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerInteractEvent;
@@ -66,22 +66,22 @@ public final class LogiScopeMod {
         // 见 docs/PORT-1.20.1.md）。
         ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, LogiScopeConfig.SPEC);
 
-        // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyMapping 不走全局输入，
+        // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyBinding 不走全局输入，
         // 必须拦 Screen 的按键事件，见 KeyBindings#onScreenKeyPressed
         //
-        // 注意这里用了显式类型实参 <ScreenEvent.KeyboardKeyPressedEvent.Pre>：
+        // 注意这里用了显式类型实参 <GuiScreenEvent.KeyboardKeyPressedEvent.Pre>：
         // EventBus#addListener 有多个重载，直接传方法引用会让 javac 推断失败
         // （报 "不兼容的类型: Event无法转换为Pre"）。写明类型即可。
-        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardKeyPressedEvent.Pre>addListener(KeyBindings::onScreenKeyPressed);
+        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardKeyPressedEvent.Pre>addListener(KeyBindings::onScreenKeyPressed);
 
         // 容器界面刚打开时，把"玩家右键的方块"记成持久锚点（维度 + 坐标）
-        MinecraftForge.EVENT_BUS.<ScreenEvent.InitScreenEvent.Post>addListener(KeyBindings::onScreenInit);
+        MinecraftForge.EVENT_BUS.<GuiScreenEvent.InitGuiEvent.Post>addListener(KeyBindings::onScreenInit);
 
         // 「玩家是不是正在打字」的最后一道通用守卫：
         // 靠 CharacterTyped 的 Pre/Post 计数差判断上一个字符有没有被界面吃掉。
         // 原理见 TextInputGuard 的类注释（含对 KeyboardHandler#charTyped 的核实结论）。
-        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardCharTypedEvent.Pre>addListener(TextInputGuard::onCharTypedPre);
-        MinecraftForge.EVENT_BUS.<ScreenEvent.KeyboardCharTypedEvent.Post>addListener(TextInputGuard::onCharTypedPost);
+        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardCharTypedEvent.Pre>addListener(TextInputGuard::onCharTypedPre);
+        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardCharTypedEvent.Post>addListener(TextInputGuard::onCharTypedPost);
 
         // 记录最近一次右键的方块。单人下集成服务端也会收到同一个事件，
         // ContainerAnchor 内部用 isClientSide 过滤掉了。
@@ -120,7 +120,7 @@ public final class LogiScopeMod {
             ProbeSlots.reset();
         });
 
-        // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
+        // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyBinding 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来
         MinecraftForge.EVENT_BUS.<TickEvent.ClientTickEvent>addListener(KeyBindings::onClientTick);
 

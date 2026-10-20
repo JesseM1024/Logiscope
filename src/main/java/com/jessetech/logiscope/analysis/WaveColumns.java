@@ -25,7 +25,7 @@ import java.util.List;
  *
  * 【值是 double】采样值本身是自适应的（{@link Val}：整数 long 精确 / 小数
  * double），但**画图只需要浮点** —— 这里一律走 {@code value.asDouble()}：
- *   · 列缓冲保持 {@code double[]}，逐列聚合零分配（{@code Val} 是不可变 record，
+ *   · 列缓冲保持 {@code double[]}，逐列聚合零分配（{@code Val} 是不可变值类，
  *     逐列新建对象就是每帧几百次分配，禁止）；
  *   · 精度损失只影响"画在哪个像素"，不影响读数（读数在界面层从 Val 取精确形式）。
  *

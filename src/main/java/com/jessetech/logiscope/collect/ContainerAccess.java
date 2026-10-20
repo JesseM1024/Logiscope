@@ -2,11 +2,11 @@ package com.jessetech.logiscope.collect;
 
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.world.entity.player.Inventory;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.ItemStack;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.inventory.container.Container;
+import net.minecraft.inventory.container.Slot;
+import net.minecraft.item.ItemStack;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -17,14 +17,14 @@ import java.util.List;
  *
  * 原理：玩家打开任意容器时，服务端会通过
  *   ClientboundContainerSetContentPacket / ClientboundContainerSetSlotPacket
- *   把槽位内容同步下来，落在 AbstractContainerMenu.slots（public 字段）里。
+ *   把槽位内容同步下来，落在 Container.slots（public 字段）里。
  *   所以本模组【不需要发任何网络包、不需要服务端配合】，
- *   直接读 player.containerMenu.slots.get(i).getItem() 就是当前真实内容。
+ *   直接读 player.containerMenu.inventorySlots.get(i).getStackInSlot() 就是当前真实内容。
  *
  * 代价（必须写清楚，否则会误判成 bug）：
  *   1. 同步只在**界面打开着**的这段时间有效。界面一关，客户端这边就没有内容了。
  *      ——关掉界面之后的取值走 WorldProbe（集成服务端），见那个类。
- *   2. 若某个模组不用 AbstractContainerMenu 承载内容（例如自绘界面 + 自定义包），
+ *   2. 若某个模组不用 Container 承载内容（例如自绘界面 + 自定义包），
  *      它的槽位在本模组看来可能是空的。这是"只读客户端同步数据"的固有边界。
  *   3. 与真实值存在一个网络往返的延迟（约 1 个 tick 量级），做速率分析时要记住这点。
  */
@@ -36,18 +36,18 @@ public final class ContainerAccess {
     /** 当前是否有「外部设备容器」打开（排除玩家自己的背包） */
     public static boolean hasForeignContainerOpen() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.player != null && mc.player.containerMenu != mc.player.inventoryMenu;
+        return mc.player != null && mc.player.openContainer != mc.player.container;
     }
 
-    public static AbstractContainerMenu currentMenu() {
+    public static Container currentMenu() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.player == null ? null : mc.player.containerMenu;
+        return mc.player == null ? null : mc.player.openContainer;
     }
 
     /** 当前菜单的容器 ID；没有菜单时返回 -1 */
     public static int currentContainerId() {
-        AbstractContainerMenu menu = currentMenu();
-        return menu == null ? -1 : menu.containerId;
+        Container menu = currentMenu();
+        return menu == null ? -1 : menu.windowId;
     }
 
     /**
@@ -60,15 +60,15 @@ public final class ContainerAccess {
      * 它变成"点到自己背包的格子也会被当成设备槽"，语义就错了。
      *
      * 判定依据：vanilla 给玩家背包建的槽位是 {@code new Slot(player.getInventory(), i, x, y)}，
-     * 也就是 {@code slot.container} 恰好是玩家的 Inventory 实例（`Slot.container` 是 public 字段）。
+     * 也就是 {@code slot.inventory} 恰好是玩家的 PlayerInventory 实例（`Slot.container` 是 public 字段）。
      */
     public static boolean isPlayerSlot(Slot slot) {
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             return false;
         }
-        Inventory inv = mc.player.getInventory();
-        return slot.container == inv;
+        PlayerInventory inv = mc.player.inventory;
+        return slot.inventory == inv;
     }
 
     /**
@@ -93,24 +93,24 @@ public final class ContainerAccess {
         if (!hasForeignContainerOpen()) {
             return out;
         }
-        AbstractContainerMenu menu = currentMenu();
+        Container menu = currentMenu();
         if (menu == null) {
             return out;
         }
-        for (int i = 0; i < menu.slots.size(); i++) {
-            Slot slot = menu.slots.get(i);
+        for (int i = 0; i < menu.inventorySlots.size(); i++) {
+            Slot slot = menu.inventorySlots.get(i);
             if (!isSelectable(slot)) {
                 continue;
             }
-            out.add(make(i, slot.getContainerSlot(), slot.getItem()));
+            out.add(make(i, slot.getSlotIndex(), slot.getStack()));
         }
         return out;
     }
 
     /** 读单个菜单槽位；越界或没有菜单时返回 null */
     public static SlotView read(int slotIndex) {
-        AbstractContainerMenu menu = currentMenu();
-        if (menu == null || slotIndex < 0 || slotIndex >= menu.slots.size()) {
+        Container menu = currentMenu();
+        if (menu == null || slotIndex < 0 || slotIndex >= menu.inventorySlots.size()) {
             return null;
         }
         return toView(menu, slotIndex);
@@ -118,13 +118,13 @@ public final class ContainerAccess {
 
     /** 按容器内下标反查菜单槽；找不到返回 null */
     public static SlotView findByContainerIndex(int containerSlotIndex) {
-        AbstractContainerMenu menu = currentMenu();
+        Container menu = currentMenu();
         if (menu == null) {
             return null;
         }
-        for (int i = 0; i < menu.slots.size(); i++) {
-            Slot slot = menu.slots.get(i);
-            if (!isSelectable(slot) || slot.getContainerSlot() != containerSlotIndex) {
+        for (int i = 0; i < menu.inventorySlots.size(); i++) {
+            Slot slot = menu.inventorySlots.get(i);
+            if (!isSelectable(slot) || slot.getSlotIndex() != containerSlotIndex) {
                 continue;
             }
             return toView(menu, i);
@@ -132,9 +132,9 @@ public final class ContainerAccess {
         return null;
     }
 
-    private static SlotView toView(AbstractContainerMenu menu, int index) {
-        Slot slot = menu.slots.get(index);
-        return make(index, slot.getContainerSlot(), slot.getItem());
+    private static SlotView toView(Container menu, int index) {
+        Slot slot = menu.inventorySlots.get(index);
+        return make(index, slot.getSlotIndex(), slot.getStack());
     }
 
     /**
@@ -156,7 +156,63 @@ public final class ContainerAccess {
      * 槽位的一次只读快照。
      * 刻意不持有 ItemStack 引用 —— 存储层与游戏对象解耦，方便离线分析与导出。
      */
-    public record SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, int count, boolean empty) {
+    public static final class SlotView {
+        private final int menuSlotIndex;
+        private final int containerSlotIndex;
+        private final String itemId;
+        private final int count;
+        private final boolean empty;
+
+        public SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, int count, boolean empty) {
+            this.menuSlotIndex = menuSlotIndex;
+            this.containerSlotIndex = containerSlotIndex;
+            this.itemId = itemId;
+            this.count = count;
+            this.empty = empty;
+        }
+
+        public int menuSlotIndex() {
+            return menuSlotIndex;
+        }
+
+        public int containerSlotIndex() {
+            return containerSlotIndex;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public int count() {
+            return count;
+        }
+
+        public boolean empty() {
+            return empty;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SlotView other = (SlotView) o;
+            return java.util.Objects.equals(this.menuSlotIndex, other.menuSlotIndex) && java.util.Objects.equals(this.containerSlotIndex, other.containerSlotIndex) && java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.count, other.count) && java.util.Objects.equals(this.empty, other.empty);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(menuSlotIndex, containerSlotIndex, itemId, count, empty);
+        }
+
+        @Override
+        public String toString() {
+            return "SlotView[" + "menuSlotIndex=" + menuSlotIndex + ", " + "containerSlotIndex=" + containerSlotIndex + ", " + "itemId=" + itemId + ", " + "count=" + count + ", " + "empty=" + empty + "]";
+        }
+
 
         /** 给界面显示用的短名称，去掉命名空间前缀 */
         public String shortName() {

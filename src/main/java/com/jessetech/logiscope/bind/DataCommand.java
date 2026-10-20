@@ -2,15 +2,15 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeMod;
 import net.minecraft.client.Minecraft;
-import net.minecraft.core.BlockPos;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.chat.ChatType;
-import net.minecraft.network.chat.Component;
-import net.minecraft.resources.ResourceKey;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.nbt.CompoundNBT;
+import net.minecraft.util.text.ChatType;
+import net.minecraft.util.text.ITextComponent;
+import net.minecraft.util.RegistryKey;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.world.World;
+import net.minecraft.tileentity.TileEntity;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import org.jetbrains.annotations.Nullable;
 
@@ -23,7 +23,7 @@ import org.jetbrains.annotations.Nullable;
  *
  * 命令路（多人，需要权限）—— 直读的**降级路径**：
  *   多人下客户端进程里没有方块实体，原版又没有"读完整 NBT"的包，只能
- *   `data get block`：先查 `player.hasPermissions(2)`，没有就如实说"没有权限"，
+ *   `data get block`：先查 `player.hasPermissionLevel(2)`，没有就如实说"没有权限"，
  *   不发出去被服务端打回。回执抓到后**吞掉**，不在聊天框刷屏。
  *
  * 【与采样的关系】两条路都只是"看一眼"；真正逐 tick 的采样走
@@ -70,13 +70,13 @@ public final class DataCommand {
      * 请求一次设备的完整 NBT。
      * 单人 → 服务端线程直读（免权限）；多人 → 降级为命令（需权限）。
      */
-    public static void request(@Nullable ResourceKey<Level> dim, @Nullable BlockPos pos) {
+    public static void request(@Nullable RegistryKey<World> dim, @Nullable BlockPos pos) {
         Minecraft mc = Minecraft.getInstance();
         if (dim == null || pos == null) {
             status = Status.FAIL;
             return;
         }
-        MinecraftServer server = mc.getSingleplayerServer();
+        MinecraftServer server = mc.getIntegratedServer();
         if (server != null) {
             // ---- 直读：提交到服务端线程，结果直接写 volatile 字段 ----
             waiting = true;
@@ -97,12 +97,12 @@ public final class DataCommand {
             return;
         }
         // ---- 多人降级：命令路（需要权限）----
-        if (mc.player != null && mc.player.hasPermissions(2) && mc.getConnection() != null) {
+        if (mc.player != null && mc.player.hasPermissionLevel(2) && mc.getConnection() != null) {
             waiting = true;
             requestedAt = clientTicks;
             status = Status.WAITING;
             try {
-                mc.player.chat(
+                mc.player.sendChatMessage(
                         "/data get block " + pos.getX() + " " + pos.getY() + " " + pos.getZ());
             } catch (Exception e) {
                 waiting = false;
@@ -117,17 +117,17 @@ public final class DataCommand {
 
     /** 在**服务端线程**上读方块实体的 SNBT 文本。没有方块实体 / 维度不对返回 null */
     @Nullable
-    private static String readOnServer(MinecraftServer server, ResourceKey<Level> dim, BlockPos pos) {
-        ServerLevel level = server.getLevel(dim);
+    private static String readOnServer(MinecraftServer server, RegistryKey<World> dim, BlockPos pos) {
+        ServerWorld level = server.getWorld(dim);
         if (level == null) {
             return null;
         }
-        BlockEntity be = level.getBlockEntity(pos);
+        TileEntity be = level.getTileEntity(pos);
         if (be == null) {
             return null;
         }
-        CompoundTag tag = be.saveWithoutMetadata();
-        return tag.getAsString();
+        CompoundNBT tag = be.write(new CompoundNBT());
+        return tag.toString();
     }
 
     /** 系统消息到达（仅多人命令路会走到这里）：收下回执并吞掉，不刷聊天框 */
@@ -141,7 +141,7 @@ public final class DataCommand {
             return;
         }
         waiting = false;
-        Component msg = event.getMessage();
+        ITextComponent msg = event.getMessage();
         String s = msg.getString();
         text = s;
         // `data get block` 成功的回复一定带一个复合标签；不带的都是错误信息
@@ -160,23 +160,37 @@ public final class DataCommand {
 
     /** 状态对应的一句人话（界面直接用） */
     public static String statusKey() {
-        return switch (status) {
-            case IDLE -> "logiscope.data.status.idle";
-            case WAITING -> "logiscope.data.status.waiting";
-            case OK -> "logiscope.data.status.ok";
-            case NO_PERMISSION -> "logiscope.data.status.no_permission";
-            case FAIL -> "logiscope.data.status.fail";
-        };
+        switch (status) {
+            case IDLE:
+                return "logiscope.data.status.idle";
+            case WAITING:
+                return "logiscope.data.status.waiting";
+            case OK:
+                return "logiscope.data.status.ok";
+            case NO_PERMISSION:
+                return "logiscope.data.status.no_permission";
+            case FAIL:
+                return "logiscope.data.status.fail";
+                        default:
+                            return "logiscope.data.status.fail";
+        }
     }
 
     public static int statusColor() {
-        return switch (status) {
-            case OK -> 0xFF5DCAA5;
-            case WAITING -> 0xFFEF9F27;
-            case NO_PERMISSION -> 0xFFE8A0C8;
-            case FAIL -> 0xFFE86A6A;
-            case IDLE -> 0xFF8A8AA0;
-        };
+        switch (status) {
+            case OK:
+                return 0xFF5DCAA5;
+            case WAITING:
+                return 0xFFEF9F27;
+            case NO_PERMISSION:
+                return 0xFFE8A0C8;
+            case FAIL:
+                return 0xFFE86A6A;
+            case IDLE:
+                return 0xFF8A8AA0;
+                        default:
+                            return 0xFF8A8AA0;
+        }
     }
 
     /** 进世界时清残留：上一局的 NBT 文本与状态不应带到下一局（与 clearAll 同一时刻调用） */

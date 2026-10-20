@@ -47,7 +47,45 @@ public final class Aggregator {
      * @param itemId 物品 id（{@link #EMPTY_ITEM} 表示"全空"这一档）
      * @param count  所有装着该物品的格子的数量之和
      */
-    public record Totals(String itemId, Val count) {
+    public static final class Totals {
+        private final String itemId;
+        private final Val count;
+
+        public Totals(String itemId, Val count) {
+            this.itemId = itemId;
+            this.count = count;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public Val count() {
+            return count;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Totals other = (Totals) o;
+            return java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.count, other.count);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(itemId, count);
+        }
+
+        @Override
+        public String toString() {
+            return "Totals[" + "itemId=" + itemId + ", " + "count=" + count + "]";
+        }
+
 
         /** 数量为 0 / 全空 —— 是"读到值是 0"，不是"没读到"（后者是 no_data） */
         public boolean empty() {

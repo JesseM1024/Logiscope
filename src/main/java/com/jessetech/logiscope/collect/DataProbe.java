@@ -4,18 +4,18 @@ import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.bind.DataTarget;
-import net.minecraft.core.BlockPos;
+import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.nbt.CompoundTag;
-import net.minecraft.nbt.DoubleTag;
-import net.minecraft.nbt.FloatTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.NumericTag;
-import net.minecraft.nbt.StringTag;
-import net.minecraft.nbt.Tag;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.nbt.CompoundNBT;
+import net.minecraft.nbt.DoubleNBT;
+import net.minecraft.nbt.FloatNBT;
+import net.minecraft.nbt.ListNBT;
+import net.minecraft.nbt.NumberNBT;
+import net.minecraft.nbt.StringNBT;
+import net.minecraft.nbt.INBT;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.tileentity.TileEntity;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -43,8 +43,8 @@ public final class DataProbe {
      * 照常返回 null —— 上层记 no_data，不假装是 0。
      */
     @Nullable
-    public Val readNumber(ServerLevel level, DataTarget target) {
-        Tag tag = navigate(readRoot(level, target.pos()), Snbt.parsePath(target.valuePath()));
+    public Val readNumber(ServerWorld level, DataTarget target) {
+        INBT tag = navigate(readRoot(level, target.pos()), Snbt.parsePath(target.valuePath()));
         return target.forceNumeric() ? asValForced(tag) : asVal(tag);
     }
 
@@ -60,22 +60,22 @@ public final class DataProbe {
      *
      * 判据 = 方块实体类型：锚点建档时从 `data get block` 的 SNBT 根上记下 `id`，
      * 这里用 `BlockEntityType.getKey(be.getType())` 比 —— 两处是同一个字符串
-     * （`BlockEntity#saveId` 写的正是它）。记不到类型（beType 为空）就退回老行为。
+     * （`TileEntity#saveId` 写的正是它）。记不到类型（beType 为空）就退回老行为。
      *
      * @return null = 这台设备现在读不到（方块实体没了 / 区块不在 / 换了设备）→ 上层记 no_data；
      *         非 null = 这一刻的值（元素不存在时是 `count = 0` 的空条目）
      */
     @Nullable
-    public NbtSlotLayout.Entry readSlotAnchor(ServerLevel level, DataTarget target) {
-        BlockEntity be = level.getBlockEntity(target.pos());
+    public NbtSlotLayout.Entry readSlotAnchor(ServerWorld level, DataTarget target) {
+        TileEntity be = level.getTileEntity(target.pos());
         if (be == null) {
             return null;
         }
         if (!sameBlockEntityType(be, target.beType())) {
             return null;
         }
-        CompoundTag root = be.saveWithoutMetadata();
-        Snbt.Node tree = Snbt.parse(root.getAsString());
+        CompoundNBT root = be.write(new CompoundNBT());
+        Snbt.Node tree = Snbt.parse(root.toString());
         NbtSlotLayout.Entry e = NbtSlotLayout.bySlot(tree, target.valuePath(), target.nbtSlot());
         if (e == null) {
             // 格子空了（机器把元素从列表里删掉了）：数量 0，名称沿用选择时记下的那个
@@ -85,19 +85,19 @@ public final class DataProbe {
     }
 
     /** 现在这块地方的方块实体，还是锚点建档时那一种吗（记不到类型时一律当作"是"） */
-    private static boolean sameBlockEntityType(BlockEntity be, @Nullable String want) {
-        if (want == null || want.isBlank()) {
+    private static boolean sameBlockEntityType(TileEntity be, @Nullable String want) {
+        if (want == null || want.trim().isEmpty()) {
             return true;
         }
-        ResourceLocation now = ForgeRegistries.BLOCK_ENTITIES.getKey(be.getType());
+        ResourceLocation now = ForgeRegistries.TILE_ENTITIES.getKey(be.getType());
         return now != null && want.equals(now.toString());
     }
 
     /** 按路径取字符串（给"名称来自 NBT"的场景用） */
     @Nullable
-    public String readString(ServerLevel level, String path, BlockPos pos) {
-        Tag tag = navigate(readRoot(level, pos), Snbt.parsePath(path));
-        return tag instanceof StringTag s ? s.getAsString() : null;
+    public String readString(ServerWorld level, String path, BlockPos pos) {
+        INBT tag = navigate(readRoot(level, pos), Snbt.parsePath(path));
+        return tag instanceof StringNBT ? ((StringNBT) tag).getString() : null;
     }
 
     /**
@@ -105,38 +105,41 @@ public final class DataProbe {
      *
      * 用 `saveWithoutMetadata`（不含 id/x/y/z 之外的元数据）而不是 `saveWithFullMetadata`：
      * 前者是"数据内容"，后者还带方块实体的额外元信息 —— 取值只要前者。
-     * registryAccess 是 1.21 的新要求（`Level#registryAccess()`，已核实）。
+     * registryAccess 是 1.21 的新要求（`World#registryAccess()`，已核实）。
      */
     @Nullable
-    private CompoundTag readRoot(ServerLevel level, BlockPos pos) {
+    private CompoundNBT readRoot(ServerWorld level, BlockPos pos) {
         // 曾试过的"方块 tick 判据"已回退：仍按原样读；
         // 区块真卸载时 getBlockEntity 拿不到方块实体 → 返回 null。
-        BlockEntity be = level.getBlockEntity(pos);
+        TileEntity be = level.getTileEntity(pos);
         if (be == null) {
             return null;
         }
-        return be.saveWithoutMetadata();
+        return be.write(new CompoundNBT());
     }
 
     /** 沿路径走。任一段不存在就返回 null（不猜、不返回 0） */
     @Nullable
-    public static Tag navigate(@Nullable Tag root, List<Snbt.Token> path) {
-        Tag cur = root;
+    public static INBT navigate(@Nullable INBT root, List<Snbt.Token> path) {
+        INBT cur = root;
         for (Snbt.Token tok : path) {
             if (cur == null) {
                 return null;
             }
             if (tok.isIndex()) {
-                if (cur instanceof ListTag list) {
+                if (cur instanceof ListNBT) {
+                    ListNBT list = (ListNBT) cur;
                     cur = tok.index() >= 0 && tok.index() < list.size() ? list.get(tok.index()) : null;
-                } else if (cur instanceof CompoundTag c) {
+                } else if (cur instanceof CompoundNBT) {
+                    CompoundNBT c = (CompoundNBT) cur;
                     // 少数模组把数组存成 {"0":..,"1":..}：容忍这种情况
                     cur = c.get(String.valueOf(tok.index()));
                 } else {
                     cur = null;
                 }
             } else {
-                cur = cur instanceof CompoundTag c && c.contains(tok.key()) ? c.get(tok.key()) : null;
+                cur = cur instanceof CompoundNBT && ((CompoundNBT) cur).contains(tok.key())
+                        ? ((CompoundNBT) cur).get(tok.key()) : null;
             }
         }
         return cur;
@@ -148,14 +151,15 @@ public final class DataProbe {
      * 这正是"追踪创造能量立方"那条实测需求的根。
      */
     @Nullable
-    public static Val asVal(@Nullable Tag tag) {
-        if (!(tag instanceof NumericTag n)) {
+    public static Val asVal(@Nullable INBT tag) {
+        if (!(tag instanceof NumberNBT)) {
             return null;
         }
-        if (tag instanceof FloatTag || tag instanceof DoubleTag) {
-            return Val.of(n.getAsDouble());
+        NumberNBT n = (NumberNBT) tag;
+        if (tag instanceof FloatNBT || tag instanceof DoubleNBT) {
+            return Val.of(n.getDouble());
         }
-        return Val.of(n.getAsLong());
+        return Val.of(n.getLong());
     }
 
     /**
@@ -164,11 +168,11 @@ public final class DataProbe {
      * 空值 → null = 读不到（上层记 no_data）。
      */
     @Nullable
-    public static Val asValForced(@Nullable Tag tag) {
+    public static Val asValForced(@Nullable INBT tag) {
         Val v = asVal(tag);
         if (v != null) {
             return v;
         }
-        return tag instanceof StringTag s ? Val.parseNumericText(s.getAsString()) : null;
+        return tag instanceof StringNBT ? Val.parseNumericText(((StringNBT) tag).getString()) : null;
     }
 }

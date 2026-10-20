@@ -1,13 +1,10 @@
-// 插件仓库：默认走 Gradle Plugin Portal。国内若解析慢，取消下面镜像注释。
+// 1.16.5 线：ForgeGradle 5 走 buildscript classpath（见 build.gradle），
+// 不用 Gradle 的 plugins {} 块 —— FG5 没有 plugin marker。
+// foojay 工具链解析插件在 Gradle 7.6 上不适用，本机构建也不需要（JDK 8 已装）。
 pluginManagement {
     repositories {
-        // maven { url = 'https://maven.aliyun.com/repository/gradle-plugin' }
         gradlePluginPortal()
     }
-}
-
-plugins {
-    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
 }
 
 rootProject.name = 'logiscope'

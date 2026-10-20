@@ -25,21 +25,22 @@ import com.jessetech.logiscope.collect.ProbeInstance;
 import com.jessetech.logiscope.collect.ProbeManager;
 import com.jessetech.logiscope.collect.ProbeSlots;
 import com.jessetech.logiscope.store.Sample;
-import com.mojang.blaze3d.vertex.PoseStack;
-import net.minecraft.Util;
-import net.minecraft.client.KeyMapping;
+import com.mojang.blaze3d.matrix.MatrixStack;
+import net.minecraft.util.Util;
+import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.Font;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.core.BlockPos;
+import net.minecraft.client.gui.AbstractGui;
+import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.inventory.ContainerScreen;
+import net.minecraft.util.math.BlockPos;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.network.chat.TranslatableComponent;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.inventory.AbstractContainerMenu;
-import net.minecraft.world.inventory.Slot;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.text.TranslationTextComponent;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.inventory.container.Container;
+import net.minecraft.inventory.container.Slot;
+import net.minecraft.item.ItemStack;
+import net.minecraft.world.World;
 import net.minecraftforge.client.ForgeHooksClient;
 import org.jetbrains.annotations.Nullable;
 
@@ -244,7 +245,7 @@ public final class ScopeScreen extends Screen {
 
     // ---- 悬浮详情：长列表用滚轮翻，避免"只有个 +N 看不出是啥" ----
     private String tipTitle = "";
-    private List<String> tipLines = List.of();
+    private List<String> tipLines = java.util.Collections.emptyList();
     private int tipScroll;
     private int tipKey;
     private int tipKeyShown;
@@ -260,7 +261,7 @@ public final class ScopeScreen extends Screen {
     /** 检测到的物品列表路径（如 Items） */
     private String nbtSlotListPath = "";
     /** 检测到的元素（slot / 物品 / 数量），用于"按内容反查 slot 号" */
-    private List<NbtSlotLayout.Entry> nbtSlotEntries = List.of();
+    private List<NbtSlotLayout.Entry> nbtSlotEntries = java.util.Collections.emptyList();
     /** AE 网络模式：菜单是 AE 的 ME 存储界面家族时启用 —— 点格 = 选"网络中的物品" */
     private boolean aeMode;
     /** AE 模式选中的物品 registry id（覆写语义：「完成」= 替换全部 AE 目标） */
@@ -308,7 +309,7 @@ public final class ScopeScreen extends Screen {
     /** 追踪目标列表的滚动位置（目标可以攒很多，固定两三行放不下） */
     private int dataTgtScroll;
     /** `data get block` 解析出来的"路径 = 值"列表 */
-    private List<Snbt.Entry> dataEntries = List.of();
+    private List<Snbt.Entry> dataEntries = java.util.Collections.emptyList();
     /** 上一次解析用的原文（变了才重解析） */
     private String dataParsedFrom = "";
     /** 自动刷新：下一次发命令的客户端 tick。速率 = `LogiScopeConfig.dataRefreshTicks`（0 = 不刷新） */
@@ -316,14 +317,14 @@ public final class ScopeScreen extends Screen {
     /** 刷新滑条是否正被拖动：按住后鼠标拖动改档位，松手结束 */
     private boolean dataSliderDrag;
     /** 命令原文按当前宽度折行后的结果（缓存：宽度或原文变了才重算） */
-    private List<String> dataTextLines = List.of();
+    private List<String> dataTextLines = java.util.Collections.emptyList();
     /** 与 {@link #dataTextLines} 一一对应的**源文本起始偏移**（悬浮高亮按它定位） */
-    private List<Integer> dataTextStarts = List.of();
+    private List<Integer> dataTextStarts = java.util.Collections.emptyList();
     private String dataTextCachedFrom = "";
     private int dataTextCachedWidth = -1;
     /** 计算结果（框选 + 曲线 + 对象 + 运算 四元组变化时才重算，其余帧直接用缓存） */
     private String analyzeTitle = "";
-    private List<String> analyzeLines = List.of();
+    private List<String> analyzeLines = java.util.Collections.emptyList();
     private long aLo = Long.MIN_VALUE;
     private long aHi;
     private String aItem = "";
@@ -340,15 +341,22 @@ public final class ScopeScreen extends Screen {
     private static final int OP_FALL_EVENTS = 6;
 
     private static String opKey(int op) {
-        return switch (op) {
-            case OP_EXTREMES -> "logiscope.calc.op.extremes";
-            case OP_STATS -> "logiscope.calc.op.stats";
-            case OP_TOTAL -> "logiscope.calc.op.total";
-            case OP_EVENTS -> "logiscope.calc.op.events";
-            case OP_RISE_EVENTS -> "logiscope.calc.op.rise_events";
-            case OP_FALL_EVENTS -> "logiscope.calc.op.fall_events";
-            default -> "logiscope.calc.op.none";
-        };
+        switch (op) {
+            case OP_EXTREMES:
+                return "logiscope.calc.op.extremes";
+            case OP_STATS:
+                return "logiscope.calc.op.stats";
+            case OP_TOTAL:
+                return "logiscope.calc.op.total";
+            case OP_EVENTS:
+                return "logiscope.calc.op.events";
+            case OP_RISE_EVENTS:
+                return "logiscope.calc.op.rise_events";
+            case OP_FALL_EVENTS:
+                return "logiscope.calc.op.fall_events";
+            default:
+                return "logiscope.calc.op.none";
+        }
     }
 
     private static final int[] OP_VALUES = {OP_NONE, OP_EXTREMES, OP_STATS, OP_TOTAL,
@@ -366,7 +374,7 @@ public final class ScopeScreen extends Screen {
             }
             int w = 0;
             for (int op : OP_VALUES) {
-                w = Math.max(w, this.font.width(tr(opKey(op))) + 30);
+                w = Math.max(w, this.font.getStringWidth(tr(opKey(op))) + 30);
             }
             int h = OP_VALUES.length * POPUP_ROW_H + 4;
             int x = Math.min(c.x(), L.x() + L.w() - w - 4);
@@ -451,7 +459,7 @@ public final class ScopeScreen extends Screen {
     /** 根页下半存档列表的滚动位置 */
     private int scrollArchives;
     /** 根页展示的存档清单（init 时扫一次；导出/删除后手动失效） */
-    private List<Archives.Info> archiveList = List.of();
+    private List<Archives.Info> archiveList = java.util.Collections.emptyList();
     /** 存档筛选框的文字：非空时存档列表只显示名称/文件夹包含它的条目 */
     private String archFilter = "";
     /** 筛选框是否有键盘焦点（聚焦时按键进框；Esc 清空并收起，Enter 保留并收起） */
@@ -462,7 +470,7 @@ public final class ScopeScreen extends Screen {
     // 派生数据的缓存：只在 SampleStore 的 version 变化后重算（见 SampleStore#version）
     private ChartData chartData = ChartData.EMPTY;
     private Analyzer.Summary summary = Analyzer.Summary.EMPTY;
-    private List<ChartData.SeriesRange> selectionStats = List.of();
+    private List<ChartData.SeriesRange> selectionStats = java.util.Collections.emptyList();
     private long builtVersion = Long.MIN_VALUE;
     private int builtProbeId = Integer.MIN_VALUE;
 
@@ -471,8 +479,8 @@ public final class ScopeScreen extends Screen {
     private Slot backgroundHoveredSlot;
 
     /** 这一 tick 的清单快照（选格页用） */
-    private List<ContainerAccess.SlotView> menuSlots = List.of();
-    private List<ContainerAccess.SlotView> worldSlots = List.of();
+    private List<ContainerAccess.SlotView> menuSlots = java.util.Collections.emptyList();
+    private List<ContainerAccess.SlotView> worldSlots = java.util.Collections.emptyList();
     private Source source = Source.NONE;
     /**
      * 这一 tick 有没有"可探测的容器"（决定「＋ 创建探针」能不能点）。
@@ -486,7 +494,7 @@ public final class ScopeScreen extends Screen {
     private String flash = "";
     private long flashUntil;
     /** 提示折行后的行（按 {@link #flash} 缓存：文本没变就不重算） */
-    private List<String> flashLines = List.of();
+    private List<String> flashLines = java.util.Collections.emptyList();
     private String flashWrappedFrom = null;
 
     @Nullable
@@ -494,7 +502,7 @@ public final class ScopeScreen extends Screen {
     private final boolean overlayMode;
 
     public ScopeScreen(@Nullable Screen parent, Page page, int probeId) {
-        super(new TranslatableComponent("logiscope.title"));
+        super(new TranslationTextComponent("logiscope.title"));
         this.parent = parent;
         this.overlayMode = parent != null;
         this.page = page;
@@ -507,26 +515,26 @@ public final class ScopeScreen extends Screen {
 
     /** 压在当前容器界面上打开 */
     public static void openOverlay(Minecraft mc, Page page, int probeId) {
-        ScopeScreen scope = new ScopeScreen(mc.screen, page, probeId);
+        ScopeScreen scope = new ScopeScreen(mc.currentScreen, page, probeId);
         ForgeHooksClient.pushGuiLayer(mc, scope);
         // pushGuiLayer 不会替你释放鼠标（那是 Minecraft#setScreen 干的活），
         //   不手动释放的话界面上根本看不到光标，面板就没法点、没法拖、没法框选。
-        mc.mouseHandler.releaseMouse();
-        KeyMapping.releaseAll();
+        mc.mouseHelper.ungrabMouse();
+        KeyBinding.unPressAllKeys();
     }
 
     /** 没有容器界面可压时，当普通界面打开（例如关掉界面后只看波形） */
     public static void openStandalone(Minecraft mc, Page page, int probeId) {
-        mc.setScreen(new ScopeScreen(null, page, probeId));
+        mc.displayGuiScreen(new ScopeScreen(null, page, probeId));
     }
 
     /**
      * 准星指着"有容器方块实体但没有 GUI"的设备时（需求 3）：
      * 直接新建一个绑定到它的探针实例，并进入选格页 —— 没有菜单，所以走列表选格。
      */
-    public static void openWorldCreate(Minecraft mc, ResourceKey<Level> dim, BlockPos pos, String label) {
+    public static void openWorldCreate(Minecraft mc, RegistryKey<World> dim, BlockPos pos, String label) {
         ProbeManager mgr = LogiScopeMod.probes();
-        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), label, dim, pos));
+        ProbeInstance created = mgr.create(new ProbeTarget(java.util.Collections.emptyList(), label, dim, pos));
         if (created == null) {
             flashOnOpen("logiscope.flash.too_many_probes");
             openStandalone(mc, Page.ROOT, -1);
@@ -547,7 +555,7 @@ public final class ScopeScreen extends Screen {
         if (overlayMode) {
             ForgeHooksClient.popGuiLayer(mc);
         } else {
-            mc.setScreen(null);
+            mc.displayGuiScreen(null);
         }
     }
 
@@ -743,14 +751,14 @@ public final class ScopeScreen extends Screen {
         if (source != Source.MENU) {
             return;
         }
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         if (bg == null) {
             return;
         }
         Set<Integer> derived = new LinkedHashSet<>();
-        for (Slot slot : bg.getMenu().slots) {
-            if (selMenuSlots.contains(slot.index) && ContainerAccess.isSelectable(slot)) {
-                derived.add(slot.getContainerSlot());
+        for (Slot slot : bg.getContainer().inventorySlots) {
+            if (selMenuSlots.contains(slot.slotNumber) && ContainerAccess.isSelectable(slot)) {
+                derived.add(slot.getSlotIndex());
             }
         }
         selContainerSlots.clear();
@@ -777,8 +785,8 @@ public final class ScopeScreen extends Screen {
     }
 
     @Nullable
-    private AbstractContainerScreen<?> backgroundContainer() {
-        return parent instanceof AbstractContainerScreen<?> container ? container : null;
+    private ContainerScreen<?> backgroundContainer() {
+        return parent instanceof ContainerScreen ? (ContainerScreen<?>) parent : null;
     }
 
     @Nullable
@@ -825,12 +833,12 @@ public final class ScopeScreen extends Screen {
      * 不做的话，某个物品消失又出现时会莫名其妙地保持隐藏，玩家找不到原因。
      */
     private void pruneHidden() {
-        for (String id : List.copyOf(hiddenItems)) {
+        for (String id : new java.util.ArrayList<>(hiddenItems)) {
             if (chartData.byItem(id) == null) {
                 hiddenItems.remove(id);
             }
         }
-        for (String id : List.copyOf(ioShown)) {
+        for (String id : new java.util.ArrayList<>(ioShown)) {
             if (chartData.byItem(id) == null) {
                 ioShown.remove(id);
             }
@@ -842,17 +850,135 @@ public final class ScopeScreen extends Screen {
     }
 
     private void refreshSelectionStats() {
-        selectionStats = selection == null ? List.of() : chartData.ranges(selection.lo(), selection.hi());
+        selectionStats = selection == null ? java.util.Collections.emptyList() : chartData.ranges(selection.lo(), selection.hi());
     }
 
     // ==================================================================
     // 布局：渲染与命中判定共用这一份
     // ==================================================================
 
-    private record Item(String id, String label, boolean enabled) {
+    private static final class Item {
+        private final String id;
+        private final String label;
+        private final boolean enabled;
+
+        public Item(String id, String label, boolean enabled) {
+            this.id = id;
+            this.label = label;
+            this.enabled = enabled;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Item other = (Item) o;
+            return java.util.Objects.equals(this.id, other.id) && java.util.Objects.equals(this.label, other.label) && java.util.Objects.equals(this.enabled, other.enabled);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(id, label, enabled);
+        }
+
+        @Override
+        public String toString() {
+            return "Item[" + "id=" + id + ", " + "label=" + label + ", " + "enabled=" + enabled + "]";
+        }
+
     }
 
-    private record Chip(String id, String label, int x, int y, int w, int h, boolean enabled, int accent) {
+    private static final class Chip {
+        private final String id;
+        private final String label;
+        private final int x;
+        private final int y;
+        private final int w;
+        private final int h;
+        private final boolean enabled;
+        private final int accent;
+
+        public Chip(String id, String label, int x, int y, int w, int h, boolean enabled, int accent) {
+            this.id = id;
+            this.label = label;
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
+            this.enabled = enabled;
+            this.accent = accent;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public int x() {
+            return x;
+        }
+
+        public int y() {
+            return y;
+        }
+
+        public int w() {
+            return w;
+        }
+
+        public int h() {
+            return h;
+        }
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public int accent() {
+            return accent;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Chip other = (Chip) o;
+            return java.util.Objects.equals(this.id, other.id) && java.util.Objects.equals(this.label, other.label) && java.util.Objects.equals(this.x, other.x) && java.util.Objects.equals(this.y, other.y) && java.util.Objects.equals(this.w, other.w) && java.util.Objects.equals(this.h, other.h) && java.util.Objects.equals(this.enabled, other.enabled) && java.util.Objects.equals(this.accent, other.accent);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(id, label, x, y, w, h, enabled, accent);
+        }
+
+        @Override
+        public String toString() {
+            return "Chip[" + "id=" + id + ", " + "label=" + label + ", " + "x=" + x + ", " + "y=" + y + ", " + "w=" + w + ", " + "h=" + h + ", " + "enabled=" + enabled + ", " + "accent=" + accent + "]";
+        }
+
 
         boolean hit(double mx, double my) {
             return mx >= x && mx < x + w && my >= y && my < y + h;
@@ -867,7 +993,51 @@ public final class ScopeScreen extends Screen {
      * 图例弹出菜单的一行。{@code kind}：0 = 数量（存量线）, 1 = IO（净流量线）,
      * 2 = 分析（回放页的"选中这条曲线"扩展点，见 {@link #replaySelectedItem}）。
      */
-    private record PopupRow(int kind, String label, boolean on) {
+    private static final class PopupRow {
+        private final int kind;
+        private final String label;
+        private final boolean on;
+
+        public PopupRow(int kind, String label, boolean on) {
+            this.kind = kind;
+            this.label = label;
+            this.on = on;
+        }
+
+        public int kind() {
+            return kind;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        public boolean on() {
+            return on;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PopupRow other = (PopupRow) o;
+            return java.util.Objects.equals(this.kind, other.kind) && java.util.Objects.equals(this.label, other.label) && java.util.Objects.equals(this.on, other.on);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(kind, label, on);
+        }
+
+        @Override
+        public String toString() {
+            return "PopupRow[" + "kind=" + kind + ", " + "label=" + label + ", " + "on=" + on + "]";
+        }
+
         static final int QUANTITY = 0;
         static final int IO = 1;
         static final int ANALYZE = 2;
@@ -876,13 +1046,123 @@ public final class ScopeScreen extends Screen {
     /**
      * 一帧布局。{@code archTop/archRows} 只有根页非 0：根页下半 = 存档列表（G5）。
      */
-    private record Layout(
-            int x, int y, int w, int h,
-            int infoTop, int infoRows,
-            int listTop, int listRows,
-            int archTop, int archRows,
-            int chartTop, int chartH,
-            List<Chip> toolbar, List<Chip> legend, List<Chip> buttons) {
+    private static final class Layout {
+        private final int x;
+        private final int y;
+        private final int w;
+        private final int h;
+        private final int infoTop;
+        private final int infoRows;
+        private final int listTop;
+        private final int listRows;
+        private final int archTop;
+        private final int archRows;
+        private final int chartTop;
+        private final int chartH;
+        private final List<Chip> toolbar;
+        private final List<Chip> legend;
+        private final List<Chip> buttons;
+
+        public Layout(int x, int y, int w, int h, int infoTop, int infoRows, int listTop, int listRows, int archTop, int archRows, int chartTop, int chartH, List<Chip> toolbar, List<Chip> legend, List<Chip> buttons) {
+            this.x = x;
+            this.y = y;
+            this.w = w;
+            this.h = h;
+            this.infoTop = infoTop;
+            this.infoRows = infoRows;
+            this.listTop = listTop;
+            this.listRows = listRows;
+            this.archTop = archTop;
+            this.archRows = archRows;
+            this.chartTop = chartTop;
+            this.chartH = chartH;
+            this.toolbar = toolbar;
+            this.legend = legend;
+            this.buttons = buttons;
+        }
+
+        public int x() {
+            return x;
+        }
+
+        public int y() {
+            return y;
+        }
+
+        public int w() {
+            return w;
+        }
+
+        public int h() {
+            return h;
+        }
+
+        public int infoTop() {
+            return infoTop;
+        }
+
+        public int infoRows() {
+            return infoRows;
+        }
+
+        public int listTop() {
+            return listTop;
+        }
+
+        public int listRows() {
+            return listRows;
+        }
+
+        public int archTop() {
+            return archTop;
+        }
+
+        public int archRows() {
+            return archRows;
+        }
+
+        public int chartTop() {
+            return chartTop;
+        }
+
+        public int chartH() {
+            return chartH;
+        }
+
+        public List<Chip> toolbar() {
+            return toolbar;
+        }
+
+        public List<Chip> legend() {
+            return legend;
+        }
+
+        public List<Chip> buttons() {
+            return buttons;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            Layout other = (Layout) o;
+            return java.util.Objects.equals(this.x, other.x) && java.util.Objects.equals(this.y, other.y) && java.util.Objects.equals(this.w, other.w) && java.util.Objects.equals(this.h, other.h) && java.util.Objects.equals(this.infoTop, other.infoTop) && java.util.Objects.equals(this.infoRows, other.infoRows) && java.util.Objects.equals(this.listTop, other.listTop) && java.util.Objects.equals(this.listRows, other.listRows) && java.util.Objects.equals(this.archTop, other.archTop) && java.util.Objects.equals(this.archRows, other.archRows) && java.util.Objects.equals(this.chartTop, other.chartTop) && java.util.Objects.equals(this.chartH, other.chartH) && java.util.Objects.equals(this.toolbar, other.toolbar) && java.util.Objects.equals(this.legend, other.legend) && java.util.Objects.equals(this.buttons, other.buttons);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(x, y, w, h, infoTop, infoRows, listTop, listRows, archTop, archRows, chartTop, chartH, toolbar, legend, buttons);
+        }
+
+        @Override
+        public String toString() {
+            return "Layout[" + "x=" + x + ", " + "y=" + y + ", " + "w=" + w + ", " + "h=" + h + ", " + "infoTop=" + infoTop + ", " + "infoRows=" + infoRows + ", " + "listTop=" + listTop + ", " + "listRows=" + listRows + ", " + "archTop=" + archTop + ", " + "archRows=" + archRows + ", " + "chartTop=" + chartTop + ", " + "chartH=" + chartH + ", " + "toolbar=" + toolbar + ", " + "legend=" + legend + ", " + "buttons=" + buttons + "]";
+        }
+
 
         boolean hasChart() {
             return chartH >= MIN_CHART_H;
@@ -899,7 +1179,7 @@ public final class ScopeScreen extends Screen {
         List<Chip> buttons = place(btnRows, left, buttonsTop, 44, 12);
 
         // ---- 图例（方块按钮之上，图表页 / 回放页有）----
-        List<Chip> legend = List.of();
+        List<Chip> legend = java.util.Collections.emptyList();
         int legendH = 0;
         if ((page == Page.CHART || page == Page.REPLAY) && !chartData.series().isEmpty()) {
             List<List<Item>> rows = capRows(wrap(legendItems(), cw, 0, 20), MAX_LEGEND_ROWS);
@@ -912,7 +1192,7 @@ public final class ScopeScreen extends Screen {
         int infoRows = infoRows();
 
         // ---- 图表页 / 回放页：工具栏 + 波形 ----
-        List<Chip> toolbar = List.of();
+        List<Chip> toolbar = java.util.Collections.emptyList();
         int chartTop = 0;
         int chartH = 0;
         if (page == Page.CHART || page == Page.REPLAY) {
@@ -952,8 +1232,81 @@ public final class ScopeScreen extends Screen {
     // ------------------------------------------------------------------
 
     /** DATA 页三段式：NBT 原文 / 值列表 / 追踪目标列表 */
-    private record DataRects(int textTop, int textH, int listTop, int listRows,
-                             int tgtTop, int tgtRows, int editTop, int cellW) {
+    private static final class DataRects {
+        private final int textTop;
+        private final int textH;
+        private final int listTop;
+        private final int listRows;
+        private final int tgtTop;
+        private final int tgtRows;
+        private final int editTop;
+        private final int cellW;
+
+        public DataRects(int textTop, int textH, int listTop, int listRows, int tgtTop, int tgtRows, int editTop, int cellW) {
+            this.textTop = textTop;
+            this.textH = textH;
+            this.listTop = listTop;
+            this.listRows = listRows;
+            this.tgtTop = tgtTop;
+            this.tgtRows = tgtRows;
+            this.editTop = editTop;
+            this.cellW = cellW;
+        }
+
+        public int textTop() {
+            return textTop;
+        }
+
+        public int textH() {
+            return textH;
+        }
+
+        public int listTop() {
+            return listTop;
+        }
+
+        public int listRows() {
+            return listRows;
+        }
+
+        public int tgtTop() {
+            return tgtTop;
+        }
+
+        public int tgtRows() {
+            return tgtRows;
+        }
+
+        public int editTop() {
+            return editTop;
+        }
+
+        public int cellW() {
+            return cellW;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            DataRects other = (DataRects) o;
+            return java.util.Objects.equals(this.textTop, other.textTop) && java.util.Objects.equals(this.textH, other.textH) && java.util.Objects.equals(this.listTop, other.listTop) && java.util.Objects.equals(this.listRows, other.listRows) && java.util.Objects.equals(this.tgtTop, other.tgtTop) && java.util.Objects.equals(this.tgtRows, other.tgtRows) && java.util.Objects.equals(this.editTop, other.editTop) && java.util.Objects.equals(this.cellW, other.cellW);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(textTop, textH, listTop, listRows, tgtTop, tgtRows, editTop, cellW);
+        }
+
+        @Override
+        public String toString() {
+            return "DataRects[" + "textTop=" + textTop + ", " + "textH=" + textH + ", " + "listTop=" + listTop + ", " + "listRows=" + listRows + ", " + "tgtTop=" + tgtTop + ", " + "tgtRows=" + tgtRows + ", " + "editTop=" + editTop + ", " + "cellW=" + cellW + "]";
+        }
+
     }
 
     private DataRects dataRects(Layout L) {
@@ -976,7 +1329,8 @@ public final class ScopeScreen extends Screen {
     private List<Item> buttonItems() {
         List<Item> out = new ArrayList<>();
         switch (page) {
-            case ROOT -> {
+            case ROOT:
+            {
                 ProbeManager mgr = LogiScopeMod.probes();
                 out.add(new Item("create", tr("logiscope.btn.create_probe"),
                         !mgr.isFull() && hasTarget));
@@ -985,7 +1339,9 @@ public final class ScopeScreen extends Screen {
                 out.add(new Item("open_folder", tr("logiscope.btn.open_folder"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
-            case PICKER -> {
+            break;
+            case PICKER:
+            {
                 boolean menu = source == Source.MENU;
                 // NBT 追踪是**显式开关**// 原因（需求原文）：错误地自动启用 NBT 追踪，会让"机械手"这类
                 // 形状相似但没有真正 slot 语义的设备**没法按常规路径追踪**。
@@ -1008,7 +1364,9 @@ public final class ScopeScreen extends Screen {
                 out.add(new Item("to_root", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
-            case CHART -> {
+            break;
+            case CHART:
+            {
                 ProbeInstance p = currentProbe();
                 boolean running = p != null && (p.state() == ProbeInstance.State.RECORDING
                         || p.state() == ProbeInstance.State.FOLLOWING);
@@ -1026,17 +1384,21 @@ public final class ScopeScreen extends Screen {
                 out.add(new Item("pick", tr("logiscope.btn.pick_cells"), true));
                 out.add(new Item("list", tr("logiscope.btn.to_list"), true));
             }
-            case REPLAY -> {
+            break;
+            case REPLAY:
+            {
                 out.add(new Item("rename", tr("logiscope.btn.rename"), replayArchive != null));
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
-            case DATA -> {
+            break;
+            case DATA:
+            {
                 ProbeInstance dsrc = dataSrcProbe();
                 out.add(new Item("data_refresh", tr("logiscope.btn.data_refresh"), true));
                 // 确认添加：把当前 值/路径 + 名称 变成一个追踪目标（可以攒多个）
                 out.add(new Item("data_confirm", tr("logiscope.btn.data_confirm"),
-                        dsrc != null && !dataPath.isBlank()));
+                        dsrc != null && !dataPath.trim().isEmpty()));
                 // 「完成」：与选格页的 done 同一个 id、同一条处理路径 // 仅追 NBT 的探针不用"回选格再完成"了 —— 在这里直接提交并进图表页。
                 // 置灰条件与选格页一致：选了格子、或已经攒了数据目标。
                 out.add(new Item("done", tr("logiscope.btn.done"),
@@ -1044,6 +1406,7 @@ public final class ScopeScreen extends Screen {
                 out.add(new Item("data_back", tr("logiscope.btn.to_picker"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
+            break;
         }
         return out;
     }
@@ -1132,7 +1495,7 @@ public final class ScopeScreen extends Screen {
             List<PopupRow> rows = popupRows(legendPopup);
             int w = 0;
             for (PopupRow r : rows) {
-                w = Math.max(w, this.font.width(r.label()) + 30);
+                w = Math.max(w, this.font.getStringWidth(r.label()) + 30);
             }
             int h = rows.size() * POPUP_ROW_H + 4;
             int x = Math.min(c.x(), L.x() + L.w() - w - 4);
@@ -1152,7 +1515,7 @@ public final class ScopeScreen extends Screen {
         List<Item> row = new ArrayList<>();
         int used = 0;
         for (Item it : items) {
-            int w = Math.max(minW, this.font.width(it.label()) + padW);
+            int w = Math.max(minW, this.font.getStringWidth(it.label()) + padW);
             if (!row.isEmpty() && used + CHIP_GAP + w > avail) {
                 rows.add(row);
                 row = new ArrayList<>();
@@ -1173,7 +1536,7 @@ public final class ScopeScreen extends Screen {
         for (List<Item> row : rows) {
             int x = left;
             for (Item it : row) {
-                int w = Math.max(minW, this.font.width(it.label()) + padW);
+                int w = Math.max(minW, this.font.getStringWidth(it.label()) + padW);
                 out.add(new Chip(it.id(), it.label(), x, y, w, CHIP_H, it.enabled(), accentFor(it.id())));
                 x += w + CHIP_GAP;
             }
@@ -1242,7 +1605,7 @@ public final class ScopeScreen extends Screen {
     // ==================================================================
 
     @Override
-    public void render(PoseStack pose, int mouseX, int mouseY, float partialTick) {
+    public void render(MatrixStack pose, int mouseX, int mouseY, float partialTick) {
         // 1.18.2 没有 GuiGraphics：这里把它"synthesize"出来，
         // 下面一整段沿用 1.20 线的绘制调用（g.fill / g.drawString / g.pose()）。
         Draw g = new Draw(pose);
@@ -1251,7 +1614,7 @@ public final class ScopeScreen extends Screen {
         // 悬浮详情每帧重建（鼠标动一下就可能换目标）
         tipKey = 0;
         tipTitle = "";
-        tipLines = List.of();
+        tipLines = java.util.Collections.emptyList();
         Layout L = layout();
         int x = L.x();
         int y = L.y();
@@ -1275,9 +1638,15 @@ public final class ScopeScreen extends Screen {
         renderInfo(g, L, mouseX, mouseY);
 
         switch (page) {
-            case ROOT -> renderRoot(g, L, mouseX, mouseY);
-            case PICKER -> renderSlotPicker(g, L, mouseX, mouseY);
-            case CHART, REPLAY -> {
+            case ROOT:
+                renderRoot(g, L, mouseX, mouseY);
+                break;
+            case PICKER:
+                renderSlotPicker(g, L, mouseX, mouseY);
+                break;
+            case CHART:
+            case REPLAY:
+            {
                 if (L.hasChart()) {
                     chart.render(g, this.font, chartData,
                             x + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH(), chartView(L, mouseX, mouseY));
@@ -1286,7 +1655,10 @@ public final class ScopeScreen extends Screen {
                 renderToolbar(g, L.toolbar(), mouseX, mouseY);
                 renderLegend(g, L.legend(), mouseX, mouseY);
             }
-            case DATA -> renderDataPage(g, L, mouseX, mouseY);
+            break;
+            case DATA:
+                renderDataPage(g, L, mouseX, mouseY);
+                break;
         }
 
         renderButtons(g, L.buttons(), mouseX, mouseY);
@@ -1318,7 +1690,7 @@ public final class ScopeScreen extends Screen {
         }
         List<Long> markers = page == Page.REPLAY
                 ? replayMarkers
-                : currentProbe() != null ? currentProbe().markers().toList() : List.of();
+                : currentProbe() != null ? currentProbe().markers().toList() : java.util.Collections.emptyList();
         // ④：选区基础信息只列**启用的线**（与十字线读数的 readable 同一规则）：
         // 5 条线里 3 条 quantity/IO 全关，选区统计就不写这 3 条——写了只会把小框挤爆，
         // 还让人误以为"这条线在图上"。图例开关随时可变，所以过滤放在每帧的 View 组装处。
@@ -1381,49 +1753,79 @@ public final class ScopeScreen extends Screen {
         g.fill(x, y, x + L.w(), y + TITLE_H, dragging ? 0xFF3B3B55 : (overTitle ? 0xFF2C2C3E : 0xFF22222E));
         g.fill(x, y + TITLE_H - 1, x + L.w(), y + TITLE_H, 0xFF5A5A68);
 
-        String title = switch (page) {
-            case ROOT -> "LogiScope";
-            case PICKER -> "LogiScope · " + tr("logiscope.page.picker");
-            case CHART -> "LogiScope · " + tr("logiscope.page.chart");
-            case REPLAY -> "LogiScope · " + tr("logiscope.page.replay");
-            case DATA -> "LogiScope · " + tr("logiscope.page.data");
-        };
+        String title;
+        switch (page) {
+            case ROOT:
+                title = "LogiScope";
+                break;
+            case PICKER:
+                title = "LogiScope · " + tr("logiscope.page.picker");
+                break;
+            case CHART:
+                title = "LogiScope · " + tr("logiscope.page.chart");
+                break;
+            case REPLAY:
+                title = "LogiScope · " + tr("logiscope.page.replay");
+                break;
+            case DATA:
+                title = "LogiScope · " + tr("logiscope.page.data");
+                break;
+            default:
+                // 经典 switch 不被 javac 视为穷尽（Page 目前只有 5 个值），这里兜底
+                title = "LogiScope";
+                break;
+}
         g.drawString(this.font, title, x + 4, y + 4, 0xFFE6E6F0, false);
 
         if (dragging || overTitle) {
-            g.drawString(this.font, tr("logiscope.hint.drag"), x + 4 + this.font.width(title) + 6, y + 4,
+            g.drawString(this.font, tr("logiscope.hint.drag"), x + 4 + this.font.getStringWidth(title) + 6, y + 4,
                     0xFF8A8AA0, false);
         }
 
         String status = statusText();
-        g.drawString(this.font, status, x + L.w() - 4 - this.font.width(status), y + 4,
+        g.drawString(this.font, status, x + L.w() - 4 - this.font.getStringWidth(status), y + 4,
                 statusColor(), false);
     }
 
     /** 标题栏右侧的状态徽标 */
     private String statusText() {
         ProbeManager mgr = LogiScopeMod.probes();
-        return switch (page) {
-            case ROOT -> "[ " + tr("logiscope.status.probes") + " " + mgr.count() + " ]";
-            case PICKER -> "[ " + tr("logiscope.status.picking") + " " + selectionCount() + " ]";
-            case REPLAY -> "[ " + tr("logiscope.status.replay") + " ]";
-            case DATA -> "[ " + tr("logiscope.status.data") + " ]";
-            case CHART -> {
+        switch (page) {
+            case ROOT:
+                return "[ " + tr("logiscope.status.probes") + " " + mgr.count() + " ]";
+            case PICKER:
+                return "[ " + tr("logiscope.status.picking") + " " + selectionCount() + " ]";
+            case REPLAY:
+                return "[ " + tr("logiscope.status.replay") + " ]";
+            case DATA:
+                return "[ " + tr("logiscope.status.data") + " ]";
+            case CHART:
+            default: {
                 ProbeInstance p = currentProbe();
                 if (p == null) {
-                    yield "[ " + tr("logiscope.status.idle") + " ]";
+                    return "[ " + tr("logiscope.status.idle") + " ]";
                 }
-                String key = switch (p.state()) {
-                    case ARMED -> "logiscope.status.armed";
-                    case RECORDING -> "logiscope.status.recording";
-                    case FOLLOWING -> "logiscope.status.following";
-                    case PAUSED -> p.isManuallyPaused()
-                            ? "logiscope.status.paused"
-                            : "logiscope.status.paused_auto";
-                };
-                yield "[ " + tr(key) + " ]";
+                String key;
+                switch (p.state()) {
+                    case ARMED:
+                        key = "logiscope.status.armed";
+                        break;
+                    case RECORDING:
+                        key = "logiscope.status.recording";
+                        break;
+                    case FOLLOWING:
+                        key = "logiscope.status.following";
+                        break;
+                    case PAUSED:
+                    default:
+                        key = p.isManuallyPaused()
+                                ? "logiscope.status.paused"
+                                : "logiscope.status.paused_auto";
+                        break;
+                }
+                return "[ " + tr(key) + " ]";
             }
-        };
+        }
     }
 
     private int statusColor() {
@@ -1443,12 +1845,19 @@ public final class ScopeScreen extends Screen {
         if (p == null) {
             return 0x888780;
         }
-        return switch (p.state()) {
-            case RECORDING -> 0x5DCAA5;
-            case FOLLOWING -> 0x6FB6E8;
-            case PAUSED -> 0xEF9F27;
-            case ARMED -> 0x85B7EB;
-        };
+        switch (p.state()) {
+            case RECORDING:
+                return 0x5DCAA5;
+            case FOLLOWING:
+                return 0x6FB6E8;
+            case PAUSED:
+                return 0xEF9F27;
+            case ARMED:
+                return 0x85B7EB;
+                    default:
+                        // 枚举已穷举；经典 switch 不被 javac 视为穷尽，这里兜底
+                        return 0x888780;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1461,7 +1870,8 @@ public final class ScopeScreen extends Screen {
         int y = L.infoTop();
 
         switch (page) {
-            case ROOT -> {
+            case ROOT:
+            {
                 ProbeManager mgr = LogiScopeMod.probes();
                 String head = tr("logiscope.info.probes") + " " + mgr.count() + " / " + LogiScopeConfig.maxProbes();
                 g.drawString(this.font, head, left, y, 0xBFBFBF, false);
@@ -1469,7 +1879,9 @@ public final class ScopeScreen extends Screen {
                 String hint = hasTarget ? tr("logiscope.hint.create_ready") : tr("logiscope.hint.no_target");
                 g.drawString(this.font, cut(hint, L.w() - 2 * PAD), left, y, 0x8A8AA0, false);
             }
-            case PICKER -> {
+            break;
+            case PICKER:
+            {
                 ProbeInstance p = pickerProbe();
                 String head = p == null ? tr("logiscope.hint.no_container") : p.describe();
                 g.drawString(this.font, cut(head, L.w() - 2 * PAD), left, y, 0xBFBFBF, false);
@@ -1480,7 +1892,7 @@ public final class ScopeScreen extends Screen {
                     String line = tr("logiscope.picker.ae_mode") + "  ·  "
                             + tr("logiscope.info.selected") + " " + selectionCount();
                     g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
-                    break;
+            break;
                 }
                 if (source == Source.WORLD && worldSlots.isEmpty()) {
                     // 无容器方块实体：没有格子可选，但 NBT / 数据页仍可用。
@@ -1491,13 +1903,24 @@ public final class ScopeScreen extends Screen {
                                 + " (" + nbtSlotEntries.size() + ")";
                     }
                     g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
-                    break;
+            break;
                 }
-                String badge = switch (source) {
-                    case MENU -> tr("logiscope.src.menu");
-                    case WORLD -> tr("logiscope.src.world");
-                    case NONE -> tr("logiscope.src.none");
-                };
+                String badge;
+                switch (source) {
+                    case MENU:
+                        badge = tr("logiscope.src.menu");
+                        break;
+                    case WORLD:
+                        badge = tr("logiscope.src.world");
+                        break;
+                    case NONE:
+                        badge = tr("logiscope.src.none");
+                        break;
+                    default:
+                        // 经典 switch 不被 javac 视为穷尽（Source 目前只有 3 个值），这里兜底
+                        badge = tr("logiscope.src.none");
+                        break;
+}
                 String line = badge + " · " + tr("logiscope.info.selected") + " " + selectionCount();
                 if (nbtSlotMode) {
                     // ⑦：删掉"NBT slot-list, track by slot"那句（按钮本身已表达状态），
@@ -1507,7 +1930,9 @@ public final class ScopeScreen extends Screen {
                 }
                 g.drawString(this.font, cut(line, L.w() - 2 * PAD), left, y, 0x9BE1CB, false);
             }
-            case CHART -> {
+    break;
+            case CHART:
+            {
                 ProbeInstance p = currentProbe();
                 if (p == null) {
                     g.drawString(this.font, tr("logiscope.hint.no_probe"), left, y, 0xAAAAAA, false);
@@ -1519,9 +1944,9 @@ public final class ScopeScreen extends Screen {
                 String now = "now " + currentValueText(p);
                 String counts = "ticks " + summary.dataTicks() + "  no-data " + summary.noDataTicks();
                 // 读数用**准确整数**，位数比短格式多，所以按剩余宽度裁一刀防止压到右边的计数
-                int nowW = L.w() - 2 * PAD - this.font.width(counts) - 8;
+                int nowW = L.w() - 2 * PAD - this.font.getStringWidth(counts) - 8;
                 g.drawString(this.font, cut(now, nowW), left, y, 0x9BE1CB, false);
-                g.drawString(this.font, counts, right - this.font.width(counts), y, 0x808088, false);
+                g.drawString(this.font, counts, right - this.font.getStringWidth(counts), y, 0x808088, false);
                 y += ROW_H;
 
                 // ④：min/max/avg 删掉（要看统计就存档后做区间运算，那里更完整），
@@ -1534,11 +1959,13 @@ public final class ScopeScreen extends Screen {
                     sw += "  " + tr("logiscope.info.kinds_dropped")
                             .replace("%s", String.valueOf(chartData.droppedKinds()));
                 }
-                int mmW = L.w() - 2 * PAD - this.font.width(sw) - 8;
+                int mmW = L.w() - 2 * PAD - this.font.getStringWidth(sw) - 8;
                 g.drawString(this.font, cut(mm, mmW), left, y, 0xC8C8D4, false);
-                g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
+                g.drawString(this.font, sw, right - this.font.getStringWidth(sw), y, 0x808088, false);
             }
-            case DATA -> {
+            break;
+            case DATA:
+            {
                 ProbeInstance src = dataSrcProbe();
                 String head = src == null ? tr("logiscope.hint.no_target")
                         : src.name() + "  " + src.target().anchorText();
@@ -1550,7 +1977,9 @@ public final class ScopeScreen extends Screen {
                 // 刷新速率滑条：贴在 "status ok" 同一行右侧
                 renderDataRateSlider(g, L, mouseX, mouseY);
             }
-            case REPLAY -> {
+            break;
+            case REPLAY:
+            {
                 // 回放页的信息区：存档名 / 探针来源 / 统计
                 ArchiveData a = replayArchive;
                 if (a != null) {
@@ -1568,8 +1997,9 @@ public final class ScopeScreen extends Screen {
                             .replace("%s", ChartRenderer.label(chartData.indexOf(replaySelectedItem), replaySelectedItem));
                 }
                 g.drawString(this.font, counts, left, y, 0x808088, false);
-                g.drawString(this.font, sw, right - this.font.width(sw), y, 0x808088, false);
+                g.drawString(this.font, sw, right - this.font.getStringWidth(sw), y, 0x808088, false);
             }
+            break;
         }
     }
 
@@ -1631,7 +2061,7 @@ public final class ScopeScreen extends Screen {
         int headNameW = Math.max(96, (L.w() - 16) * 44 / 100);
         int headNameX = x + 8;
         int headDirX = headNameX + headNameW + 6;
-        int headCntX = x + L.w() - 8 - this.font.width(colCnt);
+        int headCntX = x + L.w() - 8 - this.font.getStringWidth(colCnt);
         // 标题行左侧 = 筛选输入框：空时显示原「存档」标题文字作占位符
         renderArchiveFilter(g, L, mouseX, mouseY);
         if (!head.isEmpty()) {
@@ -1668,12 +2098,12 @@ public final class ScopeScreen extends Screen {
                 g.fill(x + 4, ry - 1, x + 6, ry + ROW_H - 1, COLOR_ANALYZE);
             }
             // 三列**固定对齐**：名称（左侧留宽，可重命名） / 文件夹 / 样本数（右对齐）
-            String name = info.displayName().isBlank() ? info.dirName() : info.displayName();
+            String name = info.displayName().trim().isEmpty() ? info.dirName() : info.displayName();
             String cnt = String.valueOf(info.sampleCount());
             int nameW = Math.max(96, (L.w() - 16) * 44 / 100);
             int nameX = x + 8;
             int dirX = nameX + nameW + 6;
-            int cntX = x + L.w() - 8 - this.font.width(cnt);
+            int cntX = x + L.w() - 8 - this.font.getStringWidth(cnt);
             g.drawString(this.font, cut(name, nameW), nameX, ry,
                     loaded ? 0xFFF0E0F8 : 0xFFC8C8D8, false);
             int dirW = Math.max(16, cntX - dirX - 8);
@@ -1701,7 +2131,7 @@ public final class ScopeScreen extends Screen {
         }
         List<Archives.Info> out = new ArrayList<>();
         for (Archives.Info i : archiveList) {
-            String name = i.displayName().isBlank() ? i.dirName() : i.displayName();
+            String name = i.displayName().trim().isEmpty() ? i.dirName() : i.displayName();
             if (name.toLowerCase(Locale.ROOT).contains(q)
                     || i.dirName().toLowerCase(Locale.ROOT).contains(q)) {
                 out.add(i);
@@ -1741,10 +2171,10 @@ public final class ScopeScreen extends Screen {
         int tx = x + 3;
         int ty = y + 1;
         int avail = w - 6;
-        String draw = this.font.width(text) <= avail ? text : cut(text, avail);
+        String draw = this.font.getStringWidth(text) <= avail ? text : cut(text, avail);
         g.drawString(this.font, draw, tx, ty, empty ? 0xFF9A8AA8 : 0xFFE0E0EC, false);
         if (archFilterFocus && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
-            int cx = tx + Math.min(this.font.width(text), avail);
+            int cx = tx + Math.min(this.font.getStringWidth(text), avail);
             g.fill(cx, ty, cx + 1, ty + 9, 0xFFE0E0EC);
         }
     }
@@ -1753,7 +2183,7 @@ public final class ScopeScreen extends Screen {
     private void openStorageFolder() {
         try {
             Files.createDirectories(Archives.rootDir());
-            Util.getPlatform().openFile(Archives.rootDir().toFile());
+            Util.getOSType().openFile(Archives.rootDir().toFile());
         } catch (Exception e) {
             LogiScopeMod.LOGGER.warn("open logiscope folder failed", e);
             say(tr("logiscope.flash.open_folder_fail"));
@@ -1795,11 +2225,11 @@ public final class ScopeScreen extends Screen {
             // 行首是**设备名**（需求：探针名称里前缀加方块名），然后是状态、槽位+坐标
             String name = cut(p.name(), 92);
             g.drawString(this.font, name, x + 8, ry, active ? 0xFFF0F0FF : 0xFFC8C8D8, false);
-            int stX = x + 8 + this.font.width(name) + 6;
+            int stX = x + 8 + this.font.getStringWidth(name) + 6;
             String st = shortState(p);
             g.drawString(this.font, st, stX, ry, stateColor(p), false);
             String desc = p.describe();
-            int descX = stX + this.font.width(st) + 6;
+            int descX = stX + this.font.getStringWidth(st) + 6;
             int descW = x + L.w() - 4 - DEL_W - 4 - descX;
             if (descW > 20) {
                 g.drawString(this.font, cut(desc, descW), descX, ry,
@@ -1823,21 +2253,39 @@ public final class ScopeScreen extends Screen {
     }
 
     private String shortState(ProbeInstance p) {
-        return tr(switch (p.state()) {
-            case ARMED -> "logiscope.short.armed";
-            case RECORDING -> "logiscope.short.recording";
-            case FOLLOWING -> "logiscope.short.following";
-            case PAUSED -> "logiscope.short.paused";
-        });
+        String key;
+        switch (p.state()) {
+            case ARMED:
+                key = "logiscope.short.armed";
+                break;
+            case RECORDING:
+                key = "logiscope.short.recording";
+                break;
+            case FOLLOWING:
+                key = "logiscope.short.following";
+                break;
+            case PAUSED:
+            default:
+                key = "logiscope.short.paused";
+                break;
+        }
+        return tr(key);
     }
 
     private int stateColor(ProbeInstance p) {
-        return switch (p.state()) {
-            case RECORDING -> 0x5DCAA5;
-            case FOLLOWING -> 0x6FB6E8;
-            case PAUSED -> 0xEF9F27;
-            case ARMED -> 0x85B7EB;
-        };
+        switch (p.state()) {
+            case RECORDING:
+                return 0x5DCAA5;
+            case FOLLOWING:
+                return 0x6FB6E8;
+            case PAUSED:
+                return 0xEF9F27;
+            case ARMED:
+                return 0x85B7EB;
+                    default:
+                        // 枚举已穷举；经典 switch 不被 javac 视为穷尽，这里兜底
+                        return 0x888780;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1867,11 +2315,13 @@ public final class ScopeScreen extends Screen {
         int x = L.x();
 
         switch (source) {
-            case NONE -> {
+            case NONE:
+            {
                 g.drawString(this.font, tr("logiscope.hint.no_container"), x + PAD, L.listTop(), 0xAAA6A0, false);
                 return;
             }
-            case WORLD -> {
+            case WORLD:
+            {
                 if (worldSlots.isEmpty()) {
                     ProbeSlots.Status st = ProbeSlots.status();
                     String key = st == ProbeSlots.Status.NONE
@@ -1881,8 +2331,7 @@ public final class ScopeScreen extends Screen {
                     return;
                 }
             }
-            default -> {
-            }
+            break;
         }
 
         List<ContainerAccess.SlotView> list = pickerList();
@@ -2006,12 +2455,22 @@ public final class ScopeScreen extends Screen {
                 g.fill(pr[0] + 1, ry, pr[0] + pr[2] - 1, ry + POPUP_ROW_H, 0xFF2E2E3E);
             }
             // 状态色块：数量 = 线色 / IO = 浅一档 / 分析 = 品红（标记同色系），关 = 灰
-            int swatch = !r.on() ? 0xFF3A3A44
-                    : switch (r.kind()) {
-                        case PopupRow.IO -> ChartRenderer.flowColor(accent);
-                        case PopupRow.ANALYZE -> COLOR_ANALYZE;
-                        default -> accent;
-                    };
+            int swatch;
+            if (!r.on()) {
+                swatch = 0xFF3A3A44;
+            } else {
+                switch (r.kind()) {
+                    case PopupRow.IO:
+                        swatch = ChartRenderer.flowColor(accent);
+                        break;
+                    case PopupRow.ANALYZE:
+                        swatch = COLOR_ANALYZE;
+                        break;
+                    default:
+                        swatch = accent;
+                        break;
+                }
+            }
             g.fill(pr[0] + 6, ry + 3, pr[0] + 12, ry + 9, swatch);
             g.drawString(this.font, r.label(), pr[0] + 16, ry + 2,
                     r.on() ? 0xFFE0E0EC : 0xFF8A8A9A, false);
@@ -2042,7 +2501,7 @@ public final class ScopeScreen extends Screen {
         if (page != Page.REPLAY || selection == null || item == null
                 || chartData.byItem(item) == null) {
             analyzeTitle = "";
-            analyzeLines = List.of();
+            analyzeLines = java.util.Collections.emptyList();
             aLo = Long.MIN_VALUE;
             return;
         }
@@ -2066,7 +2525,7 @@ public final class ScopeScreen extends Screen {
     private List<String> computeAnalyzeLines(Series s, long lo, long hi) {
         List<String> out = new ArrayList<>();
         if (analyzeOp == OP_NONE) {
-            return List.of();
+            return java.util.Collections.emptyList();
         }
         if (!analyzeIo) {
             List<SeriesPoint> pts = inRange(s.points(), lo, hi);
@@ -2075,18 +2534,23 @@ public final class ScopeScreen extends Screen {
                 return out;
             }
             switch (analyzeOp) {
-                case OP_EXTREMES -> {
+                case OP_EXTREMES:
+                {
                     CurveMath.Extremes e = CurveMath.extremes(pts);
                     out.add("min " + ChartRenderer.fmtExact(e.min()) + " @t" + e.minTick());
                     out.add("max " + ChartRenderer.fmtExact(e.max()) + " @t" + e.maxTick());
                 }
-                case OP_STATS -> {
+                break;
+                case OP_STATS:
+                {
                     CurveMath.Stats st = CurveMath.stats(pts);
                     out.add("mean " + fmtNum(st.mean()));
                     out.add("med " + fmtNum(st.med()));
                     out.add("var " + fmtNum(st.var()));
                 }
-                case OP_TOTAL -> {
+                break;
+                case OP_TOTAL:
+                {
                     CurveMath.TotalChange t = CurveMath.totalChange(pts);
                     out.add(tr("logiscope.calc.rise", signedNum(t.rise())));
                     out.add(tr("logiscope.calc.fall", signedNum(t.fall())));
@@ -2095,14 +2559,19 @@ public final class ScopeScreen extends Screen {
                         out.add(tr("logiscope.calc.gaps", t.gaps()));
                     }
                 }
-                case OP_EVENTS -> addEventLines(out, CurveMath.changeEvents(pts),
-                        "logiscope.calc.events");
-                case OP_RISE_EVENTS -> addEventLines(out, CurveMath.changeRiseEvents(pts),
-                        "logiscope.calc.rise_events");
-                case OP_FALL_EVENTS -> addEventLines(out, CurveMath.changeFallEvents(pts),
-                        "logiscope.calc.fall_events");
-                default -> {
-                }
+                break;
+                case OP_EVENTS:
+                    addEventLines(out, CurveMath.changeEvents(pts),
+                                        "logiscope.calc.events");
+                    break;
+                case OP_RISE_EVENTS:
+                    addEventLines(out, CurveMath.changeRiseEvents(pts),
+                                        "logiscope.calc.rise_events");
+                    break;
+                case OP_FALL_EVENTS:
+                    addEventLines(out, CurveMath.changeFallEvents(pts),
+                                        "logiscope.calc.fall_events");
+                    break;
             }
             return out;
         }
@@ -2131,18 +2600,23 @@ public final class ScopeScreen extends Screen {
             return out;
         }
         switch (analyzeOp) {
-            case OP_EXTREMES -> {
+            case OP_EXTREMES:
+            {
                 CurveMath.Extremes e = CurveMath.extremes(flow);
                 out.add("min " + signedNum(e.min()) + " @t" + e.minTick());
                 out.add("max " + signedNum(e.max()) + " @t" + e.maxTick());
             }
-            case OP_STATS -> {
+            break;
+            case OP_STATS:
+            {
                 CurveMath.Stats st = CurveMath.stats(flow);
                 out.add("mean " + signedNum(st.mean()));
                 out.add("med " + signedNum(st.med()));
                 out.add("var " + fmtNum(st.var()));
             }
-            case OP_TOTAL -> {
+            break;
+            case OP_TOTAL:
+            {
                 CurveMath.TotalChange t = CurveMath.flowTotal(flow);
                 out.add(tr("logiscope.calc.rise", signedNum(t.rise())));
                 out.add(tr("logiscope.calc.fall", signedNum(t.fall())));
@@ -2151,14 +2625,19 @@ public final class ScopeScreen extends Screen {
                     out.add(tr("logiscope.calc.gaps", t.gaps()));
                 }
             }
-            case OP_EVENTS -> addEventLines(out, CurveMath.flowEvents(flow),
-                    "logiscope.calc.events");
-            case OP_RISE_EVENTS -> addEventLines(out, CurveMath.flowRiseEvents(flow),
-                    "logiscope.calc.rise_events");
-            case OP_FALL_EVENTS -> addEventLines(out, CurveMath.flowFallEvents(flow),
-                    "logiscope.calc.fall_events");
-            default -> {
-            }
+            break;
+            case OP_EVENTS:
+                addEventLines(out, CurveMath.flowEvents(flow),
+                                "logiscope.calc.events");
+                break;
+            case OP_RISE_EVENTS:
+                addEventLines(out, CurveMath.flowRiseEvents(flow),
+                                "logiscope.calc.rise_events");
+                break;
+            case OP_FALL_EVENTS:
+                addEventLines(out, CurveMath.flowFallEvents(flow),
+                                "logiscope.calc.fall_events");
+                break;
         }
         return out;
     }
@@ -2197,9 +2676,9 @@ public final class ScopeScreen extends Screen {
             return;
         }
         int[] pr = ChartRenderer.plotRect(L.x() + PAD, L.chartTop(), L.w() - 2 * PAD, L.chartH());
-        int w = this.font.width(analyzeTitle) + 8;
+        int w = this.font.getStringWidth(analyzeTitle) + 8;
         for (String line : analyzeLines) {
-            w = Math.max(w, this.font.width(line) + 8);
+            w = Math.max(w, this.font.getStringWidth(line) + 8);
         }
         int h = (analyzeLines.size() + 1) * 10 + 4;
         int bx = pr[0] + pr[2] - w - 4;
@@ -2248,7 +2727,7 @@ public final class ScopeScreen extends Screen {
         g.fill(c.x(), c.y() + c.h() - 1, c.x() + c.w(), c.y() + c.h(), border);
         g.fill(c.x(), c.y(), c.x() + 1, c.y() + c.h(), border);
         g.fill(c.x() + c.w() - 1, c.y(), c.x() + c.w(), c.y() + c.h(), border);
-        int tw = this.font.width(c.label());
+        int tw = this.font.getStringWidth(c.label());
         g.drawString(this.font, c.label(), c.x() + (c.w() - tw) / 2, c.y() + (c.h() - 8) / 2 + 1, fg, false);
     }
 
@@ -2268,7 +2747,7 @@ public final class ScopeScreen extends Screen {
         if (hover) {
             String hint = tr("logiscope.hint.resize");
             g.drawString(this.font, hint,
-                    L.x() + L.w() - RESIZE_GRIP - 4 - this.font.width(hint),
+                    L.x() + L.w() - RESIZE_GRIP - 4 - this.font.getStringWidth(hint),
                     L.y() + L.h() - RESIZE_GRIP + 3, 0xFF8A8AA0, false);
         }
     }
@@ -2291,7 +2770,7 @@ public final class ScopeScreen extends Screen {
             flashLines = wrapText(flash, panelW - 8);
             flashWrappedFrom = flash;
         }
-        int lineH = this.font.lineHeight;
+        int lineH = this.font.FONT_HEIGHT;
         int blockH = flashLines.size() * lineH + 4;
         boolean above = panelTop - blockH >= 0;
         int x = panelX;
@@ -2309,12 +2788,26 @@ public final class ScopeScreen extends Screen {
      * 与面板背景同量级，渲染压力可忽略（用户口径：压力大才降级成呼吸光效，实测不需要）。
      */
     private void renderTopGlow(Draw g, Layout L) {
-        int base = switch (page) {
-            case ROOT -> COLOR_MAINSCREEN;
-            case PICKER, DATA -> COLOR_BACKSLOT;
-            case CHART -> COLOR_CHART_GLOW;
-            case REPLAY -> COLOR_CALC_GLOW;
-        };
+        int base;
+        switch (page) {
+            case ROOT:
+                base = COLOR_MAINSCREEN;
+                break;
+            case PICKER:
+            case DATA:
+                base = COLOR_BACKSLOT;
+                break;
+            case CHART:
+                base = COLOR_CHART_GLOW;
+                break;
+            case REPLAY:
+                base = COLOR_CALC_GLOW;
+                break;
+            default:
+                // 经典 switch 不被 javac 视为穷尽（Page 目前只有 5 个值），这里兜底
+                base = COLOR_MAINSCREEN;
+                break;
+}
         int rgb = base & 0xFFFFFF;
         g.fill(L.x(), L.y(), L.x() + L.w(), L.y() + 2, rgb | 0x30000000);
         long period = 2800L;
@@ -2349,7 +2842,7 @@ public final class ScopeScreen extends Screen {
                 continue;
             }
             String next = cur + c;
-            if (this.font.width(next) > maxW && !cur.isEmpty()) {
+            if (this.font.getStringWidth(next) > maxW && !cur.isEmpty()) {
                 int sp = cur.lastIndexOf(' ');
                 if (sp > 0) {
                     out.add(cur.substring(0, sp));
@@ -2381,7 +2874,7 @@ public final class ScopeScreen extends Screen {
      * 自己给被压住的容器界面补 hover 高亮，并把命中的槽位记下来给 tooltip 用。
      *
      * 为什么必须自己画 * 背景层是由 ClientHooks#drawScreen 渲染的，它给背景层传的鼠标坐标是
-     * Integer.MAX_VALUE（为了不让背景层的控件误高亮），而 AbstractContainerScreen
+     * Integer.MAX_VALUE（为了不让背景层的控件误高亮），而 ContainerScreen
      * 恰恰是在 render 里用这两个坐标算出 hoveredSlot 的
      * → 背景层的 hoveredSlot 永远是 null，格子不会亮、悬浮提示也不出来。
      * 我们在最顶层，手里有真实鼠标坐标，所以自己补上。
@@ -2393,25 +2886,25 @@ public final class ScopeScreen extends Screen {
      */
     private void renderBackgroundHover(Draw g, int mouseX, int mouseY, Layout L) {
         backgroundHoveredSlot = null;
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         if (bg == null || overPanel(mouseX, mouseY, L)) {
             return;
         }
         int left = bg.getGuiLeft();
         int top = bg.getGuiTop();
-        for (Slot slot : bg.getMenu().slots) {
+        for (Slot slot : bg.getContainer().inventorySlots) {
             // 与 vanilla 的判定保持一致：isActive 决定"能不能交互"，
             // isHighlightable 决定"要不要画高亮"（部分模组用假槽位占位，两样都要看）
-            if (!slot.isActive()) {
+            if (!slot.isEnabled()) {
                 continue;
             }
-            int sx = left + slot.x;
-            int sy = top + slot.y;
+            int sx = left + slot.xPos;
+            int sy = top + slot.yPos;
             if (mouseX >= sx - 1 && mouseX < sx + 17 && mouseY >= sy - 1 && mouseY < sy + 17) {
                 backgroundHoveredSlot = slot;
                 // 选格模式下由我们自己画"选中/可选中"的框，别叠上原版的高亮
                 if (!cellMode) {
-                    AbstractContainerScreen.renderSlotHighlight(g.pose(), sx, sy, 0, bg.getSlotColor(slot.index));
+                    AbstractGui.fill(g.pose(), sx, sy, sx + 16, sy + 16, 0x80FFFFFF);
                 }
                 return;
             }
@@ -2427,20 +2920,20 @@ public final class ScopeScreen extends Screen {
         if (!cellMode) {
             return;
         }
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         if (bg == null) {
             return;
         }
         int left = bg.getGuiLeft();
         int top = bg.getGuiTop();
-        for (Slot slot : bg.getMenu().slots) {
-            if (!slot.isActive()) {
+        for (Slot slot : bg.getContainer().inventorySlots) {
+            if (!slot.isEnabled()) {
                 continue;
             }
-            int sx = left + slot.x - 1;
-            int sy = top + slot.y - 1;
+            int sx = left + slot.xPos - 1;
+            int sy = top + slot.yPos - 1;
             boolean selectable = ContainerAccess.isSelectable(slot);
-            boolean selected = selMenuSlots.contains(slot.index);
+            boolean selected = selMenuSlots.contains(slot.slotNumber);
             boolean hover = mouseX >= sx && mouseX < sx + 18 && mouseY >= sy && mouseY < sy + 18;
 
             if (selected) {
@@ -2466,7 +2959,7 @@ public final class ScopeScreen extends Screen {
      * 自己把「鼠标手持的物品」画到真实鼠标位置上。
      *
      * 为什么必须自己画 * 背景容器界面是用 `Integer.MAX_VALUE` 当鼠标坐标渲染的，
-     * 于是 `AbstractContainerScreen.render` 末尾那段"把 carried item 画在光标旁边"
+     * 于是 `ContainerScreen.render` 末尾那段"把 carried item 画在光标旁边"
      * 的代码把它画到了屏幕外 —— 表现就是实测反馈的
      * "东西确实拿起来了，但跟着鼠标的图标和数字不见了"。
      *
@@ -2479,23 +2972,23 @@ public final class ScopeScreen extends Screen {
      * （`quickCraftingRemainder`，private，我们读不到），这里只能画完整数量。
      */
     private void renderCarriedItem(Draw g, int mouseX, int mouseY) {
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         if (bg == null) {
             return;
         }
-        ItemStack carried = bg.getMenu().getCarried();
+        ItemStack carried = Minecraft.getInstance().player.inventory.getItemStack();
         if (carried.isEmpty()) {
             return;
         }
         int x = mouseX - 8;
         int y = mouseY - 8;
-        g.pose().pushPose();
+        g.pose().push();
         g.pose().translate(0.0F, 0.0F, 232.0F);
         g.renderItem(carried, x, y);
         // 1.18.2 没有 IClientItemExtensions（1.19 才引入），
         // 物品数量字体一律用界面默认字体 —— 极少数自定义数量字体的模组会显示成默认字形。
         g.renderItemDecorations(this.font, carried, x, y);
-        g.pose().popPose();
+        g.pose().pop();
     }
 
     /**
@@ -2505,15 +2998,15 @@ public final class ScopeScreen extends Screen {
      */
     private void renderBackgroundTooltip(Draw g, int mouseX, int mouseY) {
         Slot slot = backgroundHoveredSlot;
-        AbstractContainerScreen<?> bg = backgroundContainer();
-        if (slot == null || bg == null || !slot.hasItem()) {
+        ContainerScreen<?> bg = backgroundContainer();
+        if (slot == null || bg == null || !slot.getHasStack()) {
             return;
         }
-        if (!bg.getMenu().getCarried().isEmpty()) {
+        if (!Minecraft.getInstance().player.inventory.getItemStack().isEmpty()) {
             return;
         }
-        // 1.18.2 的 Screen#renderTooltip 收 PoseStack，不收 GuiGraphics（本项目里由 Draw 包着矩阵）
-        this.renderTooltip(g.pose(), slot.getItem(), mouseX, mouseY);
+        // 1.18.2 的 Screen#renderTooltip 收 MatrixStack，不收 GuiGraphics（本项目里由 Draw 包着矩阵）
+        this.renderTooltip(g.pose(), slot.getStack(), mouseX, mouseY);
     }
 
     // ==================================================================
@@ -2528,7 +3021,7 @@ public final class ScopeScreen extends Screen {
     public boolean mouseClicked(double mouseX, double mouseY, int button) {
         Layout L = layout();
 
-        // 面板之外一律让给被压住的容器界面 // 这样"面板打开时机器还能操作"。可行性依据：AbstractContainerScreen#mouseClicked
+        // 面板之外一律让给被压住的容器界面 // 这样"面板打开时机器还能操作"。可行性依据：ContainerScreen#mouseClicked
         // 内部用 findSlot(mouseX, mouseY) 现算坐标、**不依赖 hoveredSlot**
         // （而背景层的 hoveredSlot 恰好恒为 null），所以转发是有效的。
         //
@@ -2539,7 +3032,7 @@ public final class ScopeScreen extends Screen {
                 handleCellClick(mouseX, mouseY, button);
                 return true;
             }
-            AbstractContainerScreen<?> bg = backgroundContainer();
+            ContainerScreen<?> bg = backgroundContainer();
             return bg != null && bg.mouseClicked(mouseX, mouseY, button);
         }
 
@@ -2616,10 +3109,16 @@ public final class ScopeScreen extends Screen {
                 if (row >= 0 && row < rows.size()) {
                     PopupRow r = rows.get(row);
                     switch (r.kind()) {
-                        case PopupRow.IO -> toggleIo(legendPopup);
-                        case PopupRow.ANALYZE -> replaySelectedItem =
-                                legendPopup.equals(replaySelectedItem) ? null : legendPopup;
-                        default -> toggleSeries(legendPopup);
+                        case PopupRow.IO:
+                            toggleIo(legendPopup);
+                            break;
+                        case PopupRow.ANALYZE:
+                            replaySelectedItem =
+                                                        legendPopup.equals(replaySelectedItem) ? null : legendPopup;
+                            break;
+                        default:
+                            toggleSeries(legendPopup);
+                            break;
                     }
                 }
                 return true;
@@ -2764,7 +3263,7 @@ public final class ScopeScreen extends Screen {
             page = Page.CHART;
             live = true;
             selection = null;
-            selectionStats = List.of();
+            selectionStats = java.util.Collections.emptyList();
             userZoomed = false;
         } else {
             enterPicker(p);
@@ -2781,11 +3280,11 @@ public final class ScopeScreen extends Screen {
             if (v.empty()) {
                 return;
             }
-            AbstractContainerMenu menu = ContainerAccess.currentMenu();
-            if (menu == null || v.menuSlotIndex() < 0 || v.menuSlotIndex() >= menu.slots.size()) {
+            Container menu = ContainerAccess.currentMenu();
+            if (menu == null || v.menuSlotIndex() < 0 || v.menuSlotIndex() >= menu.inventorySlots.size()) {
                 return;
             }
-            if (!menu.slots.get(v.menuSlotIndex()).getClass().getName().endsWith(".RepoSlot")) {
+            if (!menu.inventorySlots.get(v.menuSlotIndex()).getClass().getName().endsWith(".RepoSlot")) {
                 return;
             }
             if (!selectedAeIds.remove(v.itemId())) {
@@ -2860,9 +3359,9 @@ public final class ScopeScreen extends Screen {
             return;   // AE 模式没有"容器格"语义（cell_mode 按钮也已禁用，双保险）
         }
         if (add) {
-            selMenuSlots.add(slot.index);
+            selMenuSlots.add(slot.slotNumber);
         } else {
-            selMenuSlots.remove(slot.index);
+            selMenuSlots.remove(slot.slotNumber);
         }
         syncContainerSelection();
     }
@@ -2870,18 +3369,18 @@ public final class ScopeScreen extends Screen {
     /** 鼠标落在容器界面的哪个槽位上（与 vanilla 的 findSlot 判定一致：±1px 容差） */
     @Nullable
     private Slot slotAt(double mouseX, double mouseY) {
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         if (bg == null) {
             return null;
         }
         int left = bg.getGuiLeft();
         int top = bg.getGuiTop();
-        for (Slot slot : bg.getMenu().slots) {
-            if (!slot.isActive()) {
+        for (Slot slot : bg.getContainer().inventorySlots) {
+            if (!slot.isEnabled()) {
                 continue;
             }
-            int sx = left + slot.x;
-            int sy = top + slot.y;
+            int sx = left + slot.xPos;
+            int sy = top + slot.yPos;
             if (mouseX >= sx - 1 && mouseX < sx + 17 && mouseY >= sy - 1 && mouseY < sy + 17) {
                 return slot;
             }
@@ -2924,7 +3423,7 @@ public final class ScopeScreen extends Screen {
         if (Math.abs(selCurrentX - selAnchorX) < 3 || !sel.isValid()) {
             // 只是点了一下（没有拖动）→ 当作"取消选择"，其余状态不动
             selection = null;
-            selectionStats = List.of();
+            selectionStats = java.util.Collections.emptyList();
             return;
         }
 
@@ -3005,7 +3504,7 @@ public final class ScopeScreen extends Screen {
         ioShown.clear();
         legendPopup = null;
         selection = null;
-        selectionStats = List.of();
+        selectionStats = java.util.Collections.emptyList();
         live = true;
         userZoomed = false;
         builtVersion = Long.MIN_VALUE;
@@ -3048,14 +3547,14 @@ public final class ScopeScreen extends Screen {
         ProbeTarget old = p.target();
         // 槽位清空：AE 目标只走"网络读值"一条路，不碰菜单/坐标槽位 ——
         // 与 NBT 锚点同一条纪律：两条路读数必然不一致，就只留一条。
-        p.configure(new ProbeTarget(List.of(), old.deviceName(), old.dimension(), old.pos()), null);
+        p.configure(new ProbeTarget(java.util.Collections.emptyList(), old.deviceName(), old.dimension(), old.pos()), null);
         LogiScopeMod.probes().setActive(p.id());
 
         hiddenItems.clear();
         ioShown.clear();
         legendPopup = null;
         selection = null;
-        selectionStats = List.of();
+        selectionStats = java.util.Collections.emptyList();
         live = true;
         userZoomed = false;
         builtVersion = Long.MIN_VALUE;
@@ -3085,7 +3584,7 @@ public final class ScopeScreen extends Screen {
             }
             // 采样用的名字：非空格 = **物品 id**（不带后缀）→ 同物品多格在聚合时自然求和；
             // 空格 = 占位名（它现在没有物品，等有东西了名字会从数据里取，等于新开一条线）。
-            String name = v.empty() || v.itemId() == null || v.itemId().isBlank()
+            String name = v.empty() || v.itemId() == null || v.itemId().trim().isEmpty()
                     ? tr("logiscope.data.slot_fallback").replace("%s", String.valueOf(slot))
                     : v.itemId();
             next.add(DataTarget.slotAnchor(nbtSlotListPath, name,
@@ -3105,7 +3604,7 @@ public final class ScopeScreen extends Screen {
         ProbeTarget old = p.target();
         // 槽位列表留空：这类容器的物品读数**只走 NBT**，不走菜单/能力下标。
         // dataTargets 由 replaceSlotAnchors 覆写（只换锚点，纯数据目标保留）。
-        p.configure(new ProbeTarget(List.of(), old.deviceName(), old.dimension(), old.pos()), null);
+        p.configure(new ProbeTarget(java.util.Collections.emptyList(), old.deviceName(), old.dimension(), old.pos()), null);
         int total = p.replaceSlotAnchors(next);
         LogiScopeMod.probes().setActive(p.id());
 
@@ -3113,7 +3612,7 @@ public final class ScopeScreen extends Screen {
         ioShown.clear();
         legendPopup = null;
         selection = null;
-        selectionStats = List.of();
+        selectionStats = java.util.Collections.emptyList();
         live = true;
         userZoomed = false;
         builtVersion = Long.MIN_VALUE;
@@ -3135,7 +3634,7 @@ public final class ScopeScreen extends Screen {
     private Integer resolveNbtSlot(ContainerAccess.SlotView v, int ordinal,
                                    List<NbtSlotLayout.Entry> entries,
                                    SlotAlign.Result align, boolean idxUsable) {
-        boolean empty = v.empty() || v.itemId() == null || v.itemId().isBlank();
+        boolean empty = v.empty() || v.itemId() == null || v.itemId().trim().isEmpty();
         return SlotAlign.resolve(new SlotAlign.Pick(ordinal, v.containerSlotIndex(), v.itemId(), empty),
                 entries, align, idxUsable);
     }
@@ -3157,7 +3656,7 @@ public final class ScopeScreen extends Screen {
         List<SlotAlign.Cell> out = new ArrayList<>();
         for (int i = 0; i < space.size(); i++) {
             ContainerAccess.SlotView v = space.get(i);
-            if (v.empty() || v.itemId() == null || v.itemId().isBlank()) {
+            if (v.empty() || v.itemId() == null || v.itemId().trim().isEmpty()) {
                 continue;
             }
             out.add(new SlotAlign.Cell(nbtOrdinal(space, i, v), v.menuSlotIndex(), v.itemId()));
@@ -3228,7 +3727,7 @@ public final class ScopeScreen extends Screen {
         aeMode = false;           // AE 模式跟随菜单（重开时由 seedSelectionOnce 重新检测）
         nbtSeedPending = false;
         nbtSlotListPath = "";
-        nbtSlotEntries = List.of();
+        nbtSlotEntries = java.util.Collections.emptyList();
         nbtSlotDetected = false;
         ProbeInstance p = LogiScopeMod.probes().find(pickerProbeId);
         if (p != null && !p.hasAnything()) {
@@ -3276,7 +3775,7 @@ public final class ScopeScreen extends Screen {
             loadReplay(Archives.load(info));
             // 身份用目录名（永不改），显示名可用 name.txt 覆盖
             replayDir = info.dirName();
-            replayName = info.displayName().isBlank() ? info.dirName() : info.displayName();
+            replayName = info.displayName().trim().isEmpty() ? info.dirName() : info.displayName();
             say(tr("logiscope.flash.replay_loaded").replace("%s", replayName));
         } catch (Exception e) {
             LogiScopeMod.LOGGER.error("[LogiScope] archive load failed: {}", info.dirName(), e);
@@ -3306,7 +3805,7 @@ public final class ScopeScreen extends Screen {
         ioShown.clear();
         legendPopup = null;
         selection = null;
-        selectionStats = List.of();
+        selectionStats = java.util.Collections.emptyList();
         live = false;
         userZoomed = false;
         // 全览整段：回放数据是死的，一进来就该看到全貌
@@ -3328,7 +3827,7 @@ public final class ScopeScreen extends Screen {
         long[] win = window();
         // 先判"删"：光标附近的既有标记优先（否则密集标记区永远加不进新的）
         List<Long> markers = page == Page.REPLAY ? replayMarkers
-                : currentProbe() != null ? currentProbe().markers().toList() : List.of();
+                : currentProbe() != null ? currentProbe().markers().toList() : java.util.Collections.emptyList();
         for (long m : markers) {
             long t = Math.max(win[0], Math.min(win[1], m));
             int x = ChartRenderer.xOfTick(chartX, chartW, win[0], win[1], t);
@@ -3371,31 +3870,46 @@ public final class ScopeScreen extends Screen {
             return;
         }
         switch (id) {
-            case "create" -> createProbe();
-            case "open_folder" -> openStorageFolder();
-            case "cell_mode" -> {
+            case "create":
+                createProbe();
+                break;
+            case "open_folder":
+                openStorageFolder();
+                break;
+            case "cell_mode":
+            {
                 cellMode = !cellMode;
                 cellDragButton = -1;
                 if (cellMode) {
                     say(tr("logiscope.flash.cell_mode_on"));
                 }
             }
-            case "clear_cells" -> {
+            break;
+            case "clear_cells":
+            {
                 selMenuSlots.clear();
                 selContainerSlots.clear();
                 selectedAeIds.clear();
                 say(tr("logiscope.flash.cells_cleared"));
             }
-            case "done" -> commitPicker();
-            case "to_root" -> leavePicker();
-            case "list" -> {
+            break;
+            case "done":
+                commitPicker();
+                break;
+            case "to_root":
+                leavePicker();
+                break;
+            case "list":
+            {
                 // 图表页的「列表」：回根页挑别的探针
                 // 
                 cellMode = false;
                 cellDragButton = -1;
                 page = Page.ROOT;
             }
-            case "pick" -> {
+            break;
+            case "pick":
+            {
                 ProbeInstance p = currentProbe();
                 if (p != null) {
                     cellMode = false;
@@ -3403,14 +3917,18 @@ public final class ScopeScreen extends Screen {
                     enterPicker(p);
                 }
             }
-            case "pause" -> {
+            break;
+            case "pause":
+            {
                 ProbeInstance p = currentProbe();
                 if (p != null) {
                     p.pause();
                     say(tr("logiscope.flash.paused"));
                 }
             }
-            case "resume" -> {
+            break;
+            case "resume":
+            {
                 ProbeInstance p = currentProbe();
                 if (p != null) {
                     p.resume();
@@ -3419,38 +3937,58 @@ public final class ScopeScreen extends Screen {
                             : tr("logiscope.flash.resumed"));
                 }
             }
-            case "clear" -> {
+            break;
+            case "clear":
+            {
                 ProbeInstance p = currentProbe();
                 if (p != null) {
                     p.clearData();
                     selection = null;
-                    selectionStats = List.of();
+                    selectionStats = java.util.Collections.emptyList();
                     live = true;
                     userZoomed = false;
                     say(tr("logiscope.flash.cleared"));
                 }
             }
-            case "follow" -> {
+            break;
+            case "follow":
+            {
                 mgr.setFollowAfterClose(!mgr.followAfterClose());
                 say(followLabel());
             }
-            case "archive" -> stopAndArchive();
-            case "replay_back" -> page = Page.ROOT;
-            case "calc_obj" -> {
+            break;
+            case "archive":
+                stopAndArchive();
+                break;
+            case "replay_back":
+                page = Page.ROOT;
+                break;
+            case "calc_obj":
+            {
                 // 数量 ↔ IO，一次只算一个（切过去时缓存键变了，结果框自动重算）
                 analyzeIo = !analyzeIo;
             }
-            case "calc_op" -> opPopupOpen = !opPopupOpen;
-            case "probe_data" -> enterDataPage();
-            case "data_refresh" -> {
+            break;
+            case "calc_op":
+                opPopupOpen = !opPopupOpen;
+                break;
+            case "probe_data":
+                enterDataPage();
+                break;
+            case "data_refresh":
+            {
                 ProbeInstance src = dataSrcProbe();
                 if (src != null) {
                     DataCommand.request(src.target().dimension(), src.target().pos());
                     say(tr(DataCommand.statusKey()));
                 }
             }
-            case "data_confirm" -> confirmDataTarget();
-            case "nbt_mode" -> {
+            break;
+            case "data_confirm":
+                confirmDataTarget();
+                break;
+            case "nbt_mode":
+            {
                 if (!nbtSlotDetected) {
                     return;
                 }
@@ -3469,26 +4007,40 @@ public final class ScopeScreen extends Screen {
                 }
                 syncContainerSelection();
             }
-            case "rename" -> {
+            break;
+            case "rename":
+            {
                 // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 需求原文）
                 renameFocus = true;
                 renameBuf = replayName;
             }
-            case "data_back" -> {
+            break;
+            case "data_back":
+            {
                 cellMode = false;
                 page = Page.PICKER;
             }
-            case "close" -> closeScope();
-            case "live" -> {
+            break;
+            case "close":
+                closeScope();
+                break;
+            case "live":
+            {
                 // 回到实时 = 放弃选择。两者不并存（选择会冻结视图，见 endSelection）
                 live = true;
                 selection = null;
-                selectionStats = List.of();
+                selectionStats = java.util.Collections.emptyList();
                 say(tr("logiscope.flash.live"));
             }
-            case "zoom_in" -> zoom(true);
-            case "zoom_out" -> zoom(false);
-            case "fit" -> {
+            break;
+            case "zoom_in":
+                zoom(true);
+                break;
+            case "zoom_out":
+                zoom(false);
+                break;
+            case "fit":
+            {
                 long span = Math.max(MIN_WINDOW, chartData.spanTicks() + 1);
                 windowTicks = (int) Math.min(MAX_WINDOW, span);
                 live = false;
@@ -3496,13 +4048,14 @@ public final class ScopeScreen extends Screen {
                 userZoomed = false;
                 say(tr("logiscope.flash.fit"));
             }
-            case "clear_sel" -> {
+            break;
+            case "clear_sel":
+            {
                 selection = null;
-                selectionStats = List.of();
+                selectionStats = java.util.Collections.emptyList();
                 say(tr("logiscope.flash.sel_cleared"));
             }
-            default -> {
-            }
+            break;
         }
     }
 
@@ -3525,7 +4078,7 @@ public final class ScopeScreen extends Screen {
             say(tr("logiscope.flash.no_target"));
             return;
         }
-        ProbeInstance created = mgr.create(new ProbeTarget(List.of(), cand.label(), cand.dimension(), cand.pos()));
+        ProbeInstance created = mgr.create(new ProbeTarget(java.util.Collections.emptyList(), cand.label(), cand.dimension(), cand.pos()));
         if (created == null) {
             say(tr("logiscope.flash.too_many_probes"));
             return;
@@ -3533,8 +4086,8 @@ public final class ScopeScreen extends Screen {
         // MEK 设备：自动开启 NBT 追踪 + 提示 // MEK 的机器没有可从外部列出的容器槽位（worldSlots 为空），槽位号写在 NBT 里 ——
         // 用户点名：创建这类设备的探针时直接开好，别让人手动按按钮再猜。
         // 判据 = 准星所指方块的注册命名空间（mekanism）；NBT 识别本身仍靠形状（CP24）。
-        if (cand.hasAnchor() && mc.level != null && "mekanism".equals(
-                ForgeRegistries.BLOCKS.getKey(mc.level.getBlockState(cand.pos()).getBlock())
+        if (cand.hasAnchor() && mc.world != null && "mekanism".equals(
+                ForgeRegistries.BLOCKS.getKey(mc.world.getBlockState(cand.pos()).getBlock())
                         .getNamespace())) {
             nbtSlotMode = true;
             say(tr("logiscope.flash.mek_nbt"));
@@ -3665,7 +4218,7 @@ public final class ScopeScreen extends Screen {
         if (cellMode) {
             return true;
         }
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         return bg != null && bg.mouseDragged(mouseX, mouseY, button, dragX, dragY);
     }
 
@@ -3695,9 +4248,9 @@ public final class ScopeScreen extends Screen {
         if (cellMode) {
             return true;
         }
-        // 松手同样要转交，否则容器的拖拽状态会卡住（AbstractContainerScreen 里
+        // 松手同样要转交，否则容器的拖拽状态会卡住（ContainerScreen 里
         // 用 mouseReleased 收尾 quick-craft）
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         return bg != null && bg.mouseReleased(mouseX, mouseY, button);
     }
 
@@ -3757,7 +4310,7 @@ public final class ScopeScreen extends Screen {
             return true;
         }
         // 面板外滚轮让给容器（部分模组的容器界面用滚轮翻页）
-        AbstractContainerScreen<?> bg = backgroundContainer();
+        ContainerScreen<?> bg = backgroundContainer();
         return bg != null && bg.mouseScrolled(mouseX, mouseY, scrollY);
     }
 
@@ -3806,22 +4359,27 @@ public final class ScopeScreen extends Screen {
         }
         if (renameFocus) {
             switch (keyCode) {
-                case 259 -> {   // Backspace
+                case 259:
+                {   // Backspace
                     renameBuf = chop(renameBuf);
                     return true;
                 }
-                case 257, 335 -> {   // Enter / 小键盘 Enter → 确认
+                case 257:
+                case 335:
+                {   // Enter / 小键盘 Enter → 确认
                     commitRename();
                     return true;
                 }
-                case 256 -> {   // Esc → 取消
+                case 256:
+                {   // Esc → 取消
                     renameFocus = false;
                     return true;
                 }
-                case 86 -> {   // Ctrl+V
+                case 86:
+                {   // Ctrl+V
                     if (hasControlDown()) {
                         try {
-                            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+                            String clip = Minecraft.getInstance().keyboardListener.getClipboardString();
                             if (clip != null) {
                                 String t = clip.trim();
                                 renameBuf = t.length() > 48 ? t.substring(0, 48) : t;
@@ -3832,42 +4390,46 @@ public final class ScopeScreen extends Screen {
                         return true;
                     }
                 }
-                default -> {
-                }
+                break;
             }
             return true;   // 输入框激活时吃掉所有按键，免得误触发别的交互
         }
         if (archFilterFocus) {
             switch (keyCode) {
-                case 259 -> {   // Backspace
+                case 259:
+                {   // Backspace
                     archFilter = chop(archFilter);
                     scrollArchives = 0;
                     return true;
                 }
-                case 257, 335 -> {   // Enter / 小键盘 Enter → 确认：保留筛选、收起焦点
+                case 257:
+                case 335:
+                {   // Enter / 小键盘 Enter → 确认：保留筛选、收起焦点
                     archFilterFocus = false;
                     return true;
                 }
-                case 256 -> {   // Esc → 取消：清空筛选并收起
+                case 256:
+                {   // Esc → 取消：清空筛选并收起
                     archFilterFocus = false;
                     archFilter = "";
                     scrollArchives = 0;
                     return true;
                 }
-                case 86 -> {   // Ctrl+V
+                case 86:
+                {   // Ctrl+V
                     if (hasControlDown()) {
                         pasteIntoArchFilter();
                         return true;
                     }
                 }
-                default -> {
-                }
+                break;
             }
             return true;   // 输入框激活时吃掉所有按键（与重命名框一致）
         }
         if (page == Page.DATA && dataFocus != 0) {
             switch (keyCode) {
-                case 259 -> {   // Backspace
+                case 259:
+                {   // Backspace
                     if (dataFocus == 1) {
                         dataPath = chop(dataPath);
                         dataForceNumeric = false;   // 手输同口径：回到自动
@@ -3876,18 +4438,21 @@ public final class ScopeScreen extends Screen {
                     }
                     return true;
                 }
-                case 256, 257, 335 -> {   // Esc / Enter / 小键盘 Enter → 收起焦点
+                case 256:
+                case 257:
+                case 335:
+                {   // Esc / Enter / 小键盘 Enter → 收起焦点
                     dataFocus = 0;
                     return true;
                 }
-                case 86 -> {   // Ctrl+V：路径又长又难打，支持粘贴
+                case 86:
+                {   // Ctrl+V：路径又长又难打，支持粘贴
                     if (hasControlDown()) {
                         pasteIntoFocusedField();
                         return true;
                     }
                 }
-                default -> {
-                }
+                break;
             }
         }
         return super.keyPressed(keyCode, scanCode, modifiers);
@@ -3899,7 +4464,7 @@ public final class ScopeScreen extends Screen {
 
     private void pasteIntoFocusedField() {
         try {
-            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+            String clip = Minecraft.getInstance().keyboardListener.getClipboardString();
             if (clip == null) {
                 return;
             }
@@ -3919,7 +4484,7 @@ public final class ScopeScreen extends Screen {
     /** 粘贴进存档筛选框，同其他输入框：去首尾空白、限长 48 */
     private void pasteIntoArchFilter() {
         try {
-            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+            String clip = Minecraft.getInstance().keyboardListener.getClipboardString();
             if (clip == null) {
                 return;
             }
@@ -3953,7 +4518,7 @@ public final class ScopeScreen extends Screen {
             archiveList = Archives.scan();
             for (Archives.Info i : archiveList) {
                 if (i.dirName().equals(replayDir)) {
-                    replayName = i.displayName().isBlank() ? i.dirName() : i.displayName();
+                    replayName = i.displayName().trim().isEmpty() ? i.dirName() : i.displayName();
                     break;
                 }
             }
@@ -3978,10 +4543,10 @@ public final class ScopeScreen extends Screen {
         g.drawString(this.font, label, x + 5, y + 3, 0xFF8A8AA0, false);
         String shown = renameBuf;
         int avail = w - 10;
-        String draw = this.font.width(shown) <= avail ? shown : cut(shown, avail);
+        String draw = this.font.getStringWidth(shown) <= avail ? shown : cut(shown, avail);
         g.drawString(this.font, draw, x + 5, y + 13, 0xFFE0E0EC, false);
         if ((LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
-            int cx = x + 5 + Math.min(this.font.width(shown), avail);
+            int cx = x + 5 + Math.min(this.font.getStringWidth(shown), avail);
             g.fill(cx, y + 12, cx + 1, y + 21, 0xFFE0E0EC);
         }
         g.drawString(this.font, tr("logiscope.rename.hint"), x + w + 6, y + 13, 0xFF9099A8, false);
@@ -4004,7 +4569,7 @@ public final class ScopeScreen extends Screen {
         NbtSlotLayout.Layout layout = NbtSlotLayout.detect(Snbt.parse(text));
         nbtSlotDetected = layout != null;
         nbtSlotListPath = layout == null ? "" : layout.listPath();
-        nbtSlotEntries = layout == null ? List.of() : layout.entries();
+        nbtSlotEntries = layout == null ? java.util.Collections.emptyList() : layout.entries();
         if (!nbtSlotDetected) {
             nbtSlotMode = false;   // 检测不到就谈不上开启
         }
@@ -4028,7 +4593,7 @@ public final class ScopeScreen extends Screen {
                     + (dt.hasNamePath() ? "  ← " + dt.namePath() : ""));
         }
         for (ProbeTarget.SlotRef ref : p.target().slots()) {
-            String item = ref.itemId() == null || ref.itemId().isBlank()
+            String item = ref.itemId() == null || ref.itemId().trim().isEmpty()
                     ? tr("logiscope.slot.empty")
                     : ChartRenderer.label(-1, ref.itemId()) + " x" + ref.count();
             lines.add(tr("logiscope.tip.slot").replace("%s", String.valueOf(ref.menuSlotIndex()))
@@ -4079,12 +4644,21 @@ public final class ScopeScreen extends Screen {
         // 描述里那句 "槽 0,1,2+15 · … · 数据 x2" 就是这里展开的
         if (mouseY >= L.infoTop() && mouseY < L.infoTop() + L.infoRows() * ROW_H
                 && (mouseY - L.infoTop()) / ROW_H == 0) {
-            ProbeInstance p = switch (page) {
-                case PICKER -> pickerProbe();
-                case DATA -> dataSrcProbe();
-                case CHART -> currentProbe();
-                default -> null;      // 根页第一行是"探针 N/16"，回放页第一行是存档名
-            };
+            ProbeInstance p;
+            switch (page) {
+                case PICKER:
+                    p = pickerProbe();
+                    break;
+                case DATA:
+                    p = dataSrcProbe();
+                    break;
+                case CHART:
+                    p = currentProbe();
+                    break;
+                default:
+                    p = null;
+                    break;
+}
             if (p != null) {
                 wantTip(2, probeTipTitle(p), probeTipLines(p));
                 return;
@@ -4095,7 +4669,7 @@ public final class ScopeScreen extends Screen {
         if (page == Page.PICKER && aeMode
                 && mouseY >= L.infoTop() + ROW_H && mouseY < L.infoTop() + 2 * ROW_H) {
             wantTip(4, tr("logiscope.picker.ae_mode"),
-                    List.of(tr("logiscope.picker.ae_hint")));
+                    java.util.Arrays.asList(tr("logiscope.picker.ae_hint")));
             return;
         }
 
@@ -4127,9 +4701,9 @@ public final class ScopeScreen extends Screen {
         }
         int lineH = 10;
         int maxRows = 12;
-        int w = this.font.width(tipTitle) + 10;
+        int w = this.font.getStringWidth(tipTitle) + 10;
         for (String l : tipLines) {
-            w = Math.max(w, this.font.width(l) + 10);
+            w = Math.max(w, this.font.getStringWidth(l) + 10);
         }
         int rows = Math.min(tipLines.size(), maxRows);
         int h = (rows + 1) * lineH + 4 + (tipLines.size() > rows ? lineH : 0);
@@ -4178,9 +4752,9 @@ public final class ScopeScreen extends Screen {
         dataNamePath = null;
         dataForceNumeric = false;
         dataFocus = 0;
-        dataEntries = List.of();
+        dataEntries = java.util.Collections.emptyList();
         dataParsedFrom = "";
-        dataTextLines = List.of();
+        dataTextLines = java.util.Collections.emptyList();
         dataTextCachedFrom = "";
         dataTextScroll = 0;
         dataScroll = 0;
@@ -4245,14 +4819,14 @@ public final class ScopeScreen extends Screen {
         }
         dataParsedFrom = text;
         Snbt.Node root = Snbt.parse(text);
-        dataEntries = root == null ? List.of() : Snbt.flatten(root);
+        dataEntries = root == null ? java.util.Collections.emptyList() : Snbt.flatten(root);
     }
 
     /** 命令原文按当前宽度折行（缓存：宽度或原文变了才重算） */
     private void ensureDataTextWrapped(int width) {
         String text = DataCommand.text();
         if (text == null) {
-            dataTextLines = List.of();
+            dataTextLines = java.util.Collections.emptyList();
             return;
         }
         if (text.equals(dataTextCachedFrom) && width == dataTextCachedWidth) {
@@ -4267,7 +4841,7 @@ public final class ScopeScreen extends Screen {
             int len = Math.min(text.length() - i, 96);
             String chunk = text.substring(i, i + len);
             // 折到放得下为止（贪心：能放多少放多少）
-            while (len > 1 && this.font.width(chunk) > width) {
+            while (len > 1 && this.font.getStringWidth(chunk) > width) {
                 len--;
                 chunk = text.substring(i, i + len);
             }
@@ -4292,7 +4866,7 @@ public final class ScopeScreen extends Screen {
         int right = L.x() + L.w() - PAD;
         int y = L.infoTop() + ROW_H - 2;
         String line = tr("logiscope.data.src") + "  " + tr(DataCommand.statusKey());
-        int sx = left + this.font.width(line) + 10;
+        int sx = left + this.font.getStringWidth(line) + 10;
         int sw = Math.min(220, right - sx - 36);
         return new int[]{sx, y, Math.max(0, sw), ROW_H + 2};
     }
@@ -4384,8 +4958,8 @@ public final class ScopeScreen extends Screen {
                     int from = Math.max(hs, ls) - ls;
                     int to = Math.min(heEnd, le) - ls;
                     String lineText = dataTextLines.get(li);
-                    int x1 = left + 3 + this.font.width(lineText.substring(0, from));
-                    int x2 = left + 3 + this.font.width(lineText.substring(0, to));
+                    int x1 = left + 3 + this.font.getStringWidth(lineText.substring(0, from));
+                    int x2 = left + 3 + this.font.getStringWidth(lineText.substring(0, to));
                     int yTop = R.textTop() + 3 + (li - dataTextScroll) * lineH;
                     g.fill(x1, yTop, Math.max(x2, x1 + 2), yTop + 9, COLOR_HILIGHT);
                 }
@@ -4398,7 +4972,7 @@ public final class ScopeScreen extends Screen {
             }
             if (dataTextLines.size() > maxLines) {
                 String more = (dataTextScroll + maxLines) + " / " + dataTextLines.size();
-                g.drawString(this.font, more, left + width - 4 - this.font.width(more),
+                g.drawString(this.font, more, left + width - 4 - this.font.getStringWidth(more),
                         R.textTop() + R.textH() - 10, 0xFF707070, false);
             }
         } else {
@@ -4438,7 +5012,7 @@ public final class ScopeScreen extends Screen {
                 int pathColor = e.numeric() ? (picked ? 0xFF3FE0A0 : 0xFFE0E0EC)
                         : (named ? 0xFFE070D8 : 0xFF9BE1CB);
                 String value = e.node().raw();
-                int vw = this.font.width(value);
+                int vw = this.font.getStringWidth(value);
                 int avail = L.w() - 8 - vw - 8;
                 g.drawString(this.font, cut(e.path() + (named ? "  " + tr("logiscope.data.name_mark") : ""),
                         Math.max(20, avail)),
@@ -4453,7 +5027,7 @@ public final class ScopeScreen extends Screen {
 
         // ---- 3) 追踪目标列表（确认添加后出现在这里；只能删，不能改；可滚动）----
         ProbeInstance src = dataSrcProbe();
-        List<DataTarget> dts = src == null ? List.of() : src.dataTargets();
+        List<DataTarget> dts = src == null ? java.util.Collections.emptyList() : src.dataTargets();
         dataTgtScroll = Math.max(0, Math.min(dataTgtScroll,
                 Math.max(0, dts.size() - R.tgtRows())));
         g.drawString(this.font, cut(tr("logiscope.data.targets") + " · " + dts.size()
@@ -4510,7 +5084,7 @@ public final class ScopeScreen extends Screen {
         ring(g, x, y, w, CHIP_H, border);
         String shown = value == null ? "" : value;
         int avail = w - 12;
-        String draw = this.font.width(shown) > avail ? cut(shown, avail) : shown;
+        String draw = this.font.getStringWidth(shown) > avail ? cut(shown, avail) : shown;
         int color = shown.isEmpty() ? 0xFF6A6A78 : 0xFFE0E0EC;
         g.drawString(this.font, shown.isEmpty() ? tr("logiscope.data.field.empty") : draw,
                 x + 5, y + 3, color, false);
@@ -4519,7 +5093,7 @@ public final class ScopeScreen extends Screen {
             g.fill(x + w - 5, y + 3, x + w - 2, y + 6, marker);
         }
         if (focused && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
-            int cx = x + 5 + Math.min(this.font.width(shown), avail);
+            int cx = x + 5 + Math.min(this.font.getStringWidth(shown), avail);
             g.fill(cx, y + 3, cx + 1, y + CHIP_H - 3, 0xFFE0E0EC);
         }
     }
@@ -4582,7 +5156,7 @@ public final class ScopeScreen extends Screen {
             if (button == 0) {
                 int row = (my - R.tgtTop() - ROW_H) / ROW_H;   // 第一行是表头
                 ProbeInstance src2 = dataSrcProbe();
-                List<DataTarget> dts = src2 == null ? List.of() : src2.dataTargets();
+                List<DataTarget> dts = src2 == null ? java.util.Collections.emptyList() : src2.dataTargets();
                 int idx = dataTgtScroll + row;
                 if (row >= 0 && row < R.tgtRows() && idx < dts.size()
                         && isIn(mx, my, L.x() + L.w() - 4 - DEL_W,
@@ -4726,24 +5300,24 @@ public final class ScopeScreen extends Screen {
 
     /** 按像素宽度截断，超出加省略号（探测目标那行可能带很长的维度名） */
     private String cut(String s, int maxW) {
-        if (this.font.width(s) <= maxW) {
+        if (this.font.getStringWidth(s) <= maxW) {
             return s;
         }
         String ell = "...";
-        int budget = maxW - this.font.width(ell);
+        int budget = maxW - this.font.getStringWidth(ell);
         int i = s.length();
-        while (i > 0 && this.font.width(s.substring(0, i)) > budget) {
+        while (i > 0 && this.font.getStringWidth(s.substring(0, i)) > budget) {
             i--;
         }
         return s.substring(0, Math.max(0, i)) + ell;
     }
 
     private static String tr(String key) {
-        return new TranslatableComponent(key).getString();
+        return new TranslationTextComponent(key).getString();
     }
 
     /** 带参数的翻译（%s 占位）。注意：数字格式化交给调用方，这里只做文本替换 */
     private static String tr(String key, Object... args) {
-        return new TranslatableComponent(key, args).getString();
+        return new TranslationTextComponent(key, args).getString();
     }
 }

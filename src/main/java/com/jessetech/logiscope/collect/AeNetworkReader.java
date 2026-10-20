@@ -1,14 +1,14 @@
 package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.LogiScopeMod;
-import net.minecraft.core.BlockPos;
-import net.minecraft.core.Direction;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.Direction;
 import net.minecraftforge.registries.ForgeRegistries;
-import net.minecraft.resources.ResourceLocation;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.item.Item;
-import net.minecraft.world.item.ItemStack;
-import net.minecraft.world.level.block.entity.BlockEntity;
+import net.minecraft.util.ResourceLocation;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.item.Item;
+import net.minecraft.item.ItemStack;
+import net.minecraft.tileentity.TileEntity;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
@@ -24,13 +24,13 @@ import java.util.Optional;
  *
  * 【服务端读值链（AE2 19.2.x，全部反射，零编译依赖 —— 本项目刻意不引入第三方 jar）】
  * <pre>
- * BlockEntity
+ * TileEntity
  *   → GridHelper.getNodeHost(level, pos)        → IInWorldGridNodeHost（null = 不是 AE 设备）
  *   → getGridNode(dir) 遍历 6 个面取第一个非 null
  *       不能只试一个方向：CableBusBlockEntity（终端挂在电缆上）的 default 实现
  *         会检查 isExposedOnSide(dir) —— 节点被其它部件遮住的面返回 null。
  *       也不能用 getActionableNode()：CableBus 不实现 IActionHost（字节码核实过）。
- *   → node.isActive()（false = 网络没供电 / 未成型 → no_data）
+ *   → node.isEnabled()（false = 网络没供电 / 未成型 → no_data）
  *   → node.getGrid() → IGrid.getStorageService() → IStorageService.getInventory()
  *   → MEStorage.getAvailableStacks() → KeyCounter
  *   → AEItemKey.of(物品堆) → counter.get(key) → long
@@ -61,24 +61,24 @@ public final class AeNetworkReader {
      * @return null = 读不到（记 no_data）；否则 = 数量（可为 0，网络在线就是真值）
      */
     @Nullable
-    public static Long read(ServerLevel level, BlockPos pos, String itemId) {
+    public static Long read(ServerWorld level, BlockPos pos, String itemId) {
         try {
             if (aeUnavailable) {
                 return null;
             }
             Optional<Item> item = Optional.ofNullable(ForgeRegistries.ITEMS.getValue(new ResourceLocation(itemId)));
-            if (item.isEmpty()) {
+            if (!item.isPresent()) {
                 return null;   // 注册表里已经没有这个物品（模组被移除）→ 读不到
             }
 
             // 1) 设备是不是 AE 网络节点宿主
-            BlockEntity be = level.getBlockEntity(pos);
+            TileEntity be = level.getTileEntity(pos);
             if (be == null) {
                 return null;
             }
             Class<?> gridHelper = Class.forName("appeng.api.networking.GridHelper");
             Method getNodeHost = gridHelper.getMethod("getNodeHost",
-                    Class.forName("net.minecraft.world.level.Level"), BlockPos.class);
+                    Class.forName("net.minecraft.world.level.World"), BlockPos.class);
             Object host = getNodeHost.invoke(null, level, pos);
             if (host == null) {
                 return null;   // 不是 AE 设备（或方块刚被换掉）

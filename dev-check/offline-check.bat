@@ -1,6 +1,6 @@
 @echo off
 rem ============================================================
-rem  LogiScope - offline checks (1.18.2 branch)
+rem  LogiScope - offline checks (1.16.5 branch)
 rem
 rem  Why a .bat instead of the one-liners in docs/VERIFY.md:
 rem  passing a multi-entry -cp (semicolon list) from Git Bash to
@@ -10,13 +10,14 @@ rem  classpath inside a native cmd context.
 rem
 rem  Run:  cmd //c dev-check\offline-check.bat
 rem  Requires: build\classes\java\main already produced
-rem            (gradlew.bat build --offline)
+rem            (gradlew.bat build --offline, which also runs
+rem             copyMinecraftDeps -> build\mcdeps\*.jar)
 rem  ASCII only on purpose: Chinese text in .bat files can break
 rem  the console codepage.
 rem ============================================================
 setlocal
 cd /d "%~dp0.."
-set CP=build\classes\java\main;dev-check\lib\gson-2.10.1.jar;dev-check\lib\guava-31.1-jre.jar;build\moddev\artifacts\forge-1.18.2-40.3.12-merged.jar
+set CP=build\classes\java\main;dev-check\lib\*;build\mcdeps\*
 
 echo === [1/4] javac TestChart ===
 javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\TestChart.java
@@ -33,7 +34,7 @@ java -Dfile.encoding=UTF-8 -cp "build\dev-check;build\classes\java\main" BenchRe
 if errorlevel 1 goto fail
 
 echo === [4/4] verify-jar ===
-python verify-jar.py build\libs\logiscope-0.1.2-1.18.2-alpha.jar
+python verify-jar.py build\libs\logiscope-0.1.2-1.16.5-alpha.jar
 if errorlevel 1 goto fail
 
 echo ALL_OK

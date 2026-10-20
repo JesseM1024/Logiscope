@@ -3,31 +3,32 @@ package com.jessetech.logiscope.bind;
 import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.collect.ContainerAccess;
 import com.jessetech.logiscope.ui.ScopeScreen;
-import com.mojang.blaze3d.platform.InputConstants;
-import net.minecraft.client.KeyMapping;
+import net.minecraft.client.util.InputMappings;
+import org.lwjgl.glfw.GLFW;
+import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
-import net.minecraft.client.gui.screens.inventory.EffectRenderingInventoryScreen;
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
-import net.minecraft.world.phys.BlockHitResult;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraft.client.gui.screen.inventory.ContainerScreen;
+import net.minecraft.client.gui.screen.inventory.ContainerScreen;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.World;
+import net.minecraft.util.math.BlockRayTraceResult;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.client.ClientRegistry;
+import net.minecraftforge.fml.client.registry.ClientRegistry;
 import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraftforge.client.event.GuiScreenEvent;
 import org.jetbrains.annotations.Nullable;
 
 /**
  * 绑定层：把「按键」翻译成「打开/收起示波器面板的意图」。
  *
- * 关键逻辑路径 CP2 * vanilla 的 KeyMapping 只在【没有界面打开】时才会被 tick 消费。
+ * 关键逻辑路径 CP2 * vanilla 的 KeyBinding 只在【没有界面打开】时才会被 tick 消费。
  * 而本模组的核心场景恰恰是「玩家的容器界面开着」——
- * 此时按键被当前 Screen 吃掉，KeyMapping 完全收不到。
+ * 此时按键被当前 Screen 吃掉，KeyBinding 完全收不到。
  *
- * 解法：监听 ScreenEvent.KeyboardKeyPressedEvent.Pre。
+ * 解法：监听 GuiScreenEvent.KeyboardKeyPressedEvent.Pre。
  * 这个事件在 Screen 处理按键【之前】触发，且可以 cancel，
  * 因此我们既能拿到按键，又能阻止它被原界面继续处理。
  *
@@ -36,7 +37,7 @@ import org.jetbrains.annotations.Nullable;
  *   玩家在 JEI 搜索框里打 "hopper"，那个 'o' 一样会走到这个事件里来。
  *   所以先判断"当前是不是有文本输入被聚焦"，是就完全不响应。
  *
- * 坑 2：KeyMapping#matches **不看修饰键**。
+ * 坑 2：KeyBinding#matches **不看修饰键**。
  *   源码只有一句比较：key.getType() == KEYSYM && key.getValue() == keyCode。
  *   所以把快捷键设成 Ctrl+O 毫无意义 —— 单独按 o 一样命中。
  *   真正的出路是换一个**根本不产生字符**的键（本项目最终用 F9）+ 上面的三层守卫。
@@ -72,6 +73,9 @@ public final class KeyBindings {
     /** "模拟右键打开界面"之后，等界面出现的最大 tick 数（超时就当它没有界面） */
     private static final int PENDING_OPEN_TICKS = 40;
 
+    /** 快捷键上一 tick 是否处于按下状态（1.16.5 没有 consumeClick，用边沿检测） */
+    private static boolean scopeKeyWasDown;
+
     /** 上一次真正响应快捷键的 tick */
     private static long lastHotkeyTick = Long.MIN_VALUE / 2;
 
@@ -86,7 +90,57 @@ public final class KeyBindings {
      */
     private static PendingOpen pendingOpen;
 
-    private record PendingOpen(ResourceKey<Level> dim, BlockPos pos, String name, long deadline) {
+    private static final class PendingOpen {
+        private final RegistryKey<World> dim;
+        private final BlockPos pos;
+        private final String name;
+        private final long deadline;
+
+        public PendingOpen(RegistryKey<World> dim, BlockPos pos, String name, long deadline) {
+            this.dim = dim;
+            this.pos = pos;
+            this.name = name;
+            this.deadline = deadline;
+        }
+
+        public RegistryKey<World> dim() {
+            return dim;
+        }
+
+        public BlockPos pos() {
+            return pos;
+        }
+
+        public String name() {
+            return name;
+        }
+
+        public long deadline() {
+            return deadline;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            PendingOpen other = (PendingOpen) o;
+            return java.util.Objects.equals(this.dim, other.dim) && java.util.Objects.equals(this.pos, other.pos) && java.util.Objects.equals(this.name, other.name) && java.util.Objects.equals(this.deadline, other.deadline);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(dim, pos, name, deadline);
+        }
+
+        @Override
+        public String toString() {
+            return "PendingOpen[" + "dim=" + dim + ", " + "pos=" + pos + ", " + "name=" + name + ", " + "deadline=" + deadline + "]";
+        }
+
     }
 
     /**
@@ -108,10 +162,10 @@ public final class KeyBindings {
      *   那份存档优先。所以换了默认值之后，要么删掉 options.txt 里那一行，
      *   要么在「选项 → 控制」里手动重绑。
      */
-    public static final KeyMapping OPEN_SCOPE = new KeyMapping(
+    public static final KeyBinding OPEN_SCOPE = new KeyBinding(
             "logiscope.key.open_scope",
-            InputConstants.Type.KEYSYM,
-            InputConstants.KEY_F9,
+            InputMappings.Type.KEYSYM,
+            GLFW.GLFW_KEY_F9,
             CATEGORY);
 
     private KeyBindings() {
@@ -138,8 +192,8 @@ public final class KeyBindings {
      * 都走 screen 这条分支），而且事件本身不带 action 信息。
      * 不去抖的话，按住快捷键会以每秒 ~30 次的频率把面板开了又关。
      */
-    public static void onScreenKeyPressed(ScreenEvent.KeyboardKeyPressedEvent.Pre event) {
-        if (!OPEN_SCOPE.matches(event.getKeyCode(), event.getScanCode())) {
+    public static void onScreenKeyPressed(GuiScreenEvent.KeyboardKeyPressedEvent.Pre event) {
+        if (!OPEN_SCOPE.matchesKey(event.getKeyCode(), event.getScanCode())) {
             return;
         }
 
@@ -155,7 +209,7 @@ public final class KeyBindings {
             return;
         }
 
-        Screen screen = event.getScreen();
+        Screen screen = event.getGui();
 
         // 正在打字就别抢键 // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）
         if (TextInputGuard.isTypingNow(screen)) {
@@ -163,7 +217,8 @@ public final class KeyBindings {
         }
 
         // 面板已经开着 → 再按一次就是收起（开关语义）
-        if (screen instanceof ScopeScreen scope) {
+        if (screen instanceof ScopeScreen) {
+            ScopeScreen scope = (ScopeScreen) screen;
             lastHotkeyTick = now;
             scope.closeScope();
             event.setCanceled(true);
@@ -188,7 +243,7 @@ public final class KeyBindings {
 
     /**
      * 没有界面打开时，上面的 Screen 事件**根本不会触发**，
-     * 按键这时才走标准的 KeyMapping 路径（Minecraft#handleKeybinds 只在 screen == null 时跑）。
+     * 按键这时才走标准的 KeyBinding 路径（Minecraft#handleKeybinds 只在 screen == null 时跑）。
      * 所以想"关掉容器界面之后还能按快捷键把面板叫出来看波形"，必须在这里补一条。
      *
      * 无论有没有界面打开都要把点击队列排空 * 否则界面开着时攒下的点击会在面板关掉的那一刻集中兑现，把面板又立刻弹回来。
@@ -205,12 +260,13 @@ public final class KeyBindings {
         }
         expirePendingOpen(mc);
 
-        boolean clicked = false;
-        while (OPEN_SCOPE.consumeClick()) {
-            clicked = true;
-        }
+        // 1.16.5 的 KeyBinding 没有 consumeClick()（那是 1.17+ 的队列 API），
+        // 这里自己做边沿检测：按住只算一次，松开后才重新武装。
+        boolean down = OPEN_SCOPE.isPressed();
+        boolean clicked = down && !scopeKeyWasDown;
+        scopeKeyWasDown = down;
 
-        if (!clicked || mc.screen != null) {
+        if (!clicked || mc.currentScreen != null) {
             return;
         }
         lastHotkeyTick = LogiScopeMod.probes().currentTick();
@@ -225,43 +281,43 @@ public final class KeyBindings {
      * 没有容器界面时按快捷键的完整分支。
      *
      * 注意 `Minecraft#tick` 里 `gameRenderer.pick(1.0F)` 是**无条件**每 tick 调一次的
-     * （在 screen 判断之前），所以只要世界加载着，`mc.hitResult` 就是这一 tick 的准星结果，
+     * （在 screen 判断之前），所以只要世界加载着，`mc.objectMouseOver` 就是这一 tick 的准星结果，
      * 不需要我们自己去射线检测。
      */
     private static void openFromCrosshair(Minecraft mc) {
-        if (mc.level == null) {
+        if (mc.world == null) {
             ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
-        BlockHitResult hit = ProbeContext.crosshairBlock(mc);
+        BlockRayTraceResult hit = ProbeContext.crosshairBlock(mc);
         if (hit == null) {
             // 准星上没有方块 → 打开根目录，选一个已创建的探针来监测
             ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
 
-        BlockPos pos = hit.getBlockPos();
+        BlockPos pos = hit.getPos();
 
         // 探测资格：有方块实体即可 —— 无容器的 BE 走
         //   "无容器格，可监测 NBT"。不是目标就**绝对不发交互**：
         //   非目标方块（拉杆、门、按钮……普通非 BE 方块）一个包都不发。
-        if (!ProbeContext.isProbeTarget(mc.level, pos)) {
+        if (!ProbeContext.isProbeTarget(mc.world, pos)) {
             ScopeScreen.openStandalone(mc, ScopeScreen.Page.ROOT, -1);
             return;
         }
 
-        String name = ProbeContext.blockName(mc.level, pos);
+        String name = ProbeContext.blockName(mc.world, pos);
 
-        // "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）//   但模拟右键只对**真容器**做（isContainerLike = Container/ItemHandler）//   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
+        // "有没有界面"：静态判据（快，能直接肯定）+ "会不会消费右键"（准）//   但模拟右键只对**真容器**做（isContainerLike = IInventory/ItemHandler）//   床 / 告示牌这类"有 BE 但没容器"的方块如果也模拟右键，对床按 F9 会
         //   真的触发睡觉 —— 右键模拟的资格必须比探测资格更严。
-        boolean containerLike = ProbeContext.isContainerLike(mc.level, pos);
-        boolean hasGui = containerLike && (ProbeContext.hasMenuProvider(mc.level, pos)
-                || ProbeContext.wouldConsumeClick(mc.level, pos, hit, mc.player));
+        boolean containerLike = ProbeContext.isContainerLike(mc.world, pos);
+        boolean hasGui = containerLike && (ProbeContext.hasMenuProvider(mc.world, pos)
+                || ProbeContext.wouldConsumeClick(mc.world, pos, hit, mc.player));
 
         if (!hasGui) {
             // 无 GUI 的容器（机械手这类）→ 直接进入这台设备的创建流程。
             // 没有菜单 → 可视化选格用不了，选格页会自动切成"列表选格"。
-            ScopeScreen.openWorldCreate(mc, mc.level.dimension(), pos.immutable(), name);
+            ScopeScreen.openWorldCreate(mc, mc.world.getDimensionKey(), pos.toImmutable(), name);
             return;
         }
 
@@ -273,7 +329,7 @@ public final class KeyBindings {
             ScopeScreen.flashOnOpen("logiscope.flash.hand_blocks_use");
             return;
         }
-        pendingOpen = new PendingOpen(mc.level.dimension(), pos.immutable(), name,
+        pendingOpen = new PendingOpen(mc.world.getDimensionKey(), pos.toImmutable(), name,
                 LogiScopeMod.probes().currentTick() + PENDING_OPEN_TICKS);
     }
 
@@ -291,38 +347,39 @@ public final class KeyBindings {
         }
         pendingOpen = null;
         // 这 2 秒里玩家可能自己开了别的界面（背包、聊天…）。那种情况下不要硬抢屏幕。
-        if (mc.screen != null || mc.level == null) {
+        if (mc.currentScreen != null || mc.world == null) {
             return;
         }
         // 探测资格已放宽到"有 BE" —— 这里同步放宽（模拟右键误判
         // 超时兜底也该对无容器 BE 生效）
-        if (ProbeContext.isProbeTarget(mc.level, p.pos())) {
+        if (ProbeContext.isProbeTarget(mc.world, p.pos())) {
             ScopeScreen.openWorldCreate(mc, p.dim(), p.pos(), p.name());
         }
     }
 
     /**
-     * 由 ScreenEvent.InitScreenEvent.Post 调用：
+     * 由 GuiScreenEvent.InitGuiEvent.Post 调用：
      *   1. 容器界面初始化完成时，把它和"玩家右键的那个方块"关联起来，得到持久身份（维度 + 坐标）
      *   2. 如果是我们刚刚模拟右键开出来的界面，顺手把探针面板压上去
      *
      * 这是"关掉界面之后还能找回来"的唯一可靠时机，见 ContainerAnchor 的类注释。
      */
-    public static void onScreenInit(ScreenEvent.InitScreenEvent.Post event) {
-        Screen screen = event.getScreen();
+    public static void onScreenInit(GuiScreenEvent.InitGuiEvent.Post event) {
+        Screen screen = event.getGui();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null) {
             return;
         }
-        if (screen instanceof AbstractContainerScreen<?> containerScreen) {
-            ContainerAnchor.onContainerScreenOpened(containerScreen.getMenu().containerId);
+        if (screen instanceof ContainerScreen) {
+            ContainerScreen<?> containerScreen = (ContainerScreen<?>) screen;
+            ContainerAnchor.onContainerScreenOpened(containerScreen.getContainer().windowId);
         }
 
         // 我们自己弹出/收起的界面不算"服务端给出的答复"；
         // 玩家自己的背包界面也不算（那是他在这几 tick 里顺手按 E 打开的，与本次交互无关）。
         if (pendingOpen != null && !(screen instanceof ScopeScreen) && !isOwnInventoryScreen(screen)) {
             pendingOpen = null;
-            // 此刻 Minecraft#setScreen 已经把 mc.screen 赋成这个界面了
+            // 此刻 Minecraft#setScreen 已经把 mc.currentScreen 赋成这个界面了
             // （它先赋值、再调 init，而 Init.Post 在 init 末尾发），所以压图层的父界面正确。
             ScopeScreen.openOverlay(mc, ScopeScreen.Page.ROOT, -1);
         }
@@ -337,10 +394,10 @@ public final class KeyBindings {
      * 实测表现：创造模式里在背包界面按快捷键会弹出面板（面板上还会列出一堆
      * 创造物品标签页的内容）。这不是崩溃，但语义是错的。
      *
-     * 两种背包界面共同的基类是 EffectRenderingInventoryScreen，
+     * 两种背包界面共同的基类是 ContainerScreen，
      * 按基类排除即可，也不必分别引用两个具体类。
      */
     private static boolean isOwnInventoryScreen(@Nullable Screen screen) {
-        return screen instanceof EffectRenderingInventoryScreen<?>;
+        return screen instanceof ContainerScreen<?>;
     }
 }

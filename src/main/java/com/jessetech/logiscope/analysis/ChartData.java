@@ -65,20 +65,96 @@ import java.util.Set;
  * @param droppedKinds 因为超过 `maxItemKinds` 而没有画线的物品种类数
  * @param version      对应的 SampleStore 版本号
  */
-public record ChartData(
-        List<Series> series,
-        long firstTick,
-        long lastTick,
-        Val minValue,
-        Val maxValue,
-        int dataCount,
-        int noDataCount,
-        int switches,
-        int droppedKinds,
-        long version) {
+public final class ChartData {
+    private final List<Series> series;
+    private final long firstTick;
+    private final long lastTick;
+    private final Val minValue;
+    private final Val maxValue;
+    private final int dataCount;
+    private final int noDataCount;
+    private final int switches;
+    private final int droppedKinds;
+    private final long version;
+
+    public ChartData(List<Series> series, long firstTick, long lastTick, Val minValue, Val maxValue, int dataCount, int noDataCount, int switches, int droppedKinds, long version) {
+        this.series = series;
+        this.firstTick = firstTick;
+        this.lastTick = lastTick;
+        this.minValue = minValue;
+        this.maxValue = maxValue;
+        this.dataCount = dataCount;
+        this.noDataCount = noDataCount;
+        this.switches = switches;
+        this.droppedKinds = droppedKinds;
+        this.version = version;
+    }
+
+    public List<Series> series() {
+        return series;
+    }
+
+    public long firstTick() {
+        return firstTick;
+    }
+
+    public long lastTick() {
+        return lastTick;
+    }
+
+    public Val minValue() {
+        return minValue;
+    }
+
+    public Val maxValue() {
+        return maxValue;
+    }
+
+    public int dataCount() {
+        return dataCount;
+    }
+
+    public int noDataCount() {
+        return noDataCount;
+    }
+
+    public int switches() {
+        return switches;
+    }
+
+    public int droppedKinds() {
+        return droppedKinds;
+    }
+
+    public long version() {
+        return version;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        ChartData other = (ChartData) o;
+        return java.util.Objects.equals(this.series, other.series) && java.util.Objects.equals(this.firstTick, other.firstTick) && java.util.Objects.equals(this.lastTick, other.lastTick) && java.util.Objects.equals(this.minValue, other.minValue) && java.util.Objects.equals(this.maxValue, other.maxValue) && java.util.Objects.equals(this.dataCount, other.dataCount) && java.util.Objects.equals(this.noDataCount, other.noDataCount) && java.util.Objects.equals(this.switches, other.switches) && java.util.Objects.equals(this.droppedKinds, other.droppedKinds) && java.util.Objects.equals(this.version, other.version);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(series, firstTick, lastTick, minValue, maxValue, dataCount, noDataCount, switches, droppedKinds, version);
+    }
+
+    @Override
+    public String toString() {
+        return "ChartData[" + "series=" + series + ", " + "firstTick=" + firstTick + ", " + "lastTick=" + lastTick + ", " + "minValue=" + minValue + ", " + "maxValue=" + maxValue + ", " + "dataCount=" + dataCount + ", " + "noDataCount=" + noDataCount + ", " + "switches=" + switches + ", " + "droppedKinds=" + droppedKinds + ", " + "version=" + version + "]";
+    }
+
 
     public static final ChartData EMPTY =
-            new ChartData(List.of(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, Long.MIN_VALUE);
+            new ChartData(java.util.Collections.emptyList(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, Long.MIN_VALUE);
 
     /**
      * 静默大空档兜底（tick）：中间隔了这么多还没断，就直接剪断。
@@ -181,7 +257,7 @@ public record ChartData(
     public static ChartData build(long version, List<Sample> samples, int maxItemKinds) {
         int kinds = Math.max(1, maxItemKinds);
         if (samples.isEmpty()) {
-            return new ChartData(List.of(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, version);
+            return new ChartData(java.util.Collections.emptyList(), 0L, 0L, Val.ZERO, Val.ZERO, 0, 0, 0, 0, version);
         }
 
         // LinkedHashMap：series 的顺序 = 物品首次出现的顺序，
@@ -287,7 +363,7 @@ public record ChartData(
 
         List<Series> out = new ArrayList<>(builders.size());
         for (Builder b : builders.values()) {
-            out.add(new Series(b.itemId, List.copyOf(b.points), List.copyOf(b.flow),
+            out.add(new Series(b.itemId, new java.util.ArrayList<>(b.points), new java.util.ArrayList<>(b.flow),
                     b.min, b.max, b.flowMin, b.flowMax));
         }
 
@@ -299,7 +375,7 @@ public record ChartData(
         }
 
         return new ChartData(
-                List.copyOf(out),
+                new java.util.ArrayList<>(out),
                 firstTick,
                 lastTick,
                 minValue,
@@ -389,7 +465,73 @@ public record ChartData(
      * @param first   区间内最早的存量值
      * @param last    区间内最晚的存量值
      */
-    public record SeriesRange(String itemId, int samples, Val first, Val last, Val min, Val max) {
+    public static final class SeriesRange {
+        private final String itemId;
+        private final int samples;
+        private final Val first;
+        private final Val last;
+        private final Val min;
+        private final Val max;
+
+        public SeriesRange(String itemId, int samples, Val first, Val last, Val min, Val max) {
+            this.itemId = itemId;
+            this.samples = samples;
+            this.first = first;
+            this.last = last;
+            this.min = min;
+            this.max = max;
+        }
+
+        public String itemId() {
+            return itemId;
+        }
+
+        public int samples() {
+            return samples;
+        }
+
+        public Val first() {
+            return first;
+        }
+
+        public Val last() {
+            return last;
+        }
+
+        public Val min() {
+            return min;
+        }
+
+        public Val max() {
+            return max;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            SeriesRange other = (SeriesRange) o;
+            return samples == other.samples
+                    && java.util.Objects.equals(itemId, other.itemId)
+                    && java.util.Objects.equals(first, other.first)
+                    && java.util.Objects.equals(last, other.last)
+                    && java.util.Objects.equals(min, other.min)
+                    && java.util.Objects.equals(max, other.max);
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(itemId, samples, first, last, min, max);
+        }
+
+        @Override
+        public String toString() {
+            return "SeriesRange[itemId=" + itemId + ", samples=" + samples + "]";
+        }
 
         /** 净变化（存量首尾之差） */
         public Val delta() {

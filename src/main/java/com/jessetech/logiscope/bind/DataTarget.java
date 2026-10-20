@@ -1,8 +1,8 @@
 package com.jessetech.logiscope.bind;
 
-import net.minecraft.core.BlockPos;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
@@ -34,20 +34,91 @@ import java.util.List;
  *                   {@code no_data}。用于"数值被模组存成字符串"的键
  *                   （如 {@code "energy": "1000"}）。只影响值的读取，不影响名称。
  */
-public record DataTarget(
-        String valuePath,
-        @Nullable String namePath,
-        String literalName,
-        String blockLabel,
-        ResourceKey<Level> dimension,
-        BlockPos pos,
-        int nbtSlot,
-        @Nullable String beType,
-        boolean forceNumeric) {
+public final class DataTarget {
+    private final String valuePath;
+    private final @Nullable String namePath;
+    private final String literalName;
+    private final String blockLabel;
+    private final RegistryKey<World> dimension;
+    private final BlockPos pos;
+    private final int nbtSlot;
+    private final @Nullable String beType;
+    private final boolean forceNumeric;
+
+    public DataTarget(String valuePath, @Nullable String namePath, String literalName, String blockLabel, RegistryKey<World> dimension, BlockPos pos, int nbtSlot, @Nullable String beType, boolean forceNumeric) {
+        this.valuePath = valuePath;
+        this.namePath = namePath;
+        this.literalName = literalName;
+        this.blockLabel = blockLabel;
+        this.dimension = dimension;
+        this.pos = pos;
+        this.nbtSlot = nbtSlot;
+        this.beType = beType;
+        this.forceNumeric = forceNumeric;
+    }
+
+    public String valuePath() {
+        return valuePath;
+    }
+
+    public String namePath() {
+        return namePath;
+    }
+
+    public String literalName() {
+        return literalName;
+    }
+
+    public String blockLabel() {
+        return blockLabel;
+    }
+
+    public RegistryKey<World> dimension() {
+        return dimension;
+    }
+
+    public BlockPos pos() {
+        return pos;
+    }
+
+    public int nbtSlot() {
+        return nbtSlot;
+    }
+
+    public String beType() {
+        return beType;
+    }
+
+    public boolean forceNumeric() {
+        return forceNumeric;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        DataTarget other = (DataTarget) o;
+        return java.util.Objects.equals(this.valuePath, other.valuePath) && java.util.Objects.equals(this.namePath, other.namePath) && java.util.Objects.equals(this.literalName, other.literalName) && java.util.Objects.equals(this.blockLabel, other.blockLabel) && java.util.Objects.equals(this.dimension, other.dimension) && java.util.Objects.equals(this.pos, other.pos) && java.util.Objects.equals(this.nbtSlot, other.nbtSlot) && java.util.Objects.equals(this.beType, other.beType) && java.util.Objects.equals(this.forceNumeric, other.forceNumeric);
+    }
+
+    @Override
+    public int hashCode() {
+        return java.util.Objects.hash(valuePath, namePath, literalName, blockLabel, dimension, pos, nbtSlot, beType, forceNumeric);
+    }
+
+    @Override
+    public String toString() {
+        return "DataTarget[" + "valuePath=" + valuePath + ", " + "namePath=" + namePath + ", " + "literalName=" + literalName + ", " + "blockLabel=" + blockLabel + ", " + "dimension=" + dimension + ", " + "pos=" + pos + ", " + "nbtSlot=" + nbtSlot + ", " + "beType=" + beType + ", " + "forceNumeric=" + forceNumeric + "]";
+    }
+
 
     /** 普通路径目标（非强制数值） */
     public DataTarget(String valuePath, @Nullable String namePath, String literalName,
-                      String blockLabel, ResourceKey<Level> dimension, BlockPos pos) {
+                      String blockLabel, RegistryKey<World> dimension, BlockPos pos) {
         this(valuePath, namePath, literalName, blockLabel, dimension, pos, -1, null, false);
     }
 
@@ -69,7 +140,7 @@ public record DataTarget(
      * → 按 AEItemKey 取数量；物品不在网内 = 0（网络在线），设备不可用 = no_data。
      */
     public static DataTarget aeNetwork(String itemId, String blockLabel,
-                                       ResourceKey<Level> dimension, BlockPos pos) {
+                                       RegistryKey<World> dimension, BlockPos pos) {
         return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null, false);
     }
 
@@ -89,7 +160,7 @@ public record DataTarget(
      * @param beType 建档时的方块实体类型 id；给不出就传 null（那就退回"读不到就记 0"的老行为）
      */
     public static DataTarget slotAnchor(String listPath, String itemId, String blockLabel,
-                                        ResourceKey<Level> dimension, BlockPos pos, int slot,
+                                        RegistryKey<World> dimension, BlockPos pos, int slot,
                                         @Nullable String beType) {
         return new DataTarget(listPath, null, itemId, blockLabel, dimension, pos, slot, beType, false);
     }
@@ -100,15 +171,15 @@ public record DataTarget(
     }
 
     public boolean hasNamePath() {
-        return namePath != null && !namePath.isBlank();
+        return namePath != null && !namePath.trim().isEmpty();
     }
 
     /** 名称兜底：手输的名字 → 没有就用值路径（认得出是哪个数） */
     public String fallbackName() {
-        if (literalName != null && !literalName.isBlank()) {
+        if (literalName != null && !literalName.trim().isEmpty()) {
             return literalName;
         }
-        return valuePath == null || valuePath.isBlank() ? "value" : valuePath;
+        return valuePath == null || valuePath.trim().isEmpty() ? "value" : valuePath;
     }
 
     /**
@@ -144,7 +215,7 @@ public record DataTarget(
     }
 
     public String anchorText() {
-        return dimension.location().getPath() + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
+        return dimension.getLocation().getPath() + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
     /**
@@ -160,7 +231,7 @@ public record DataTarget(
 
     /** 面板上的一行描述 */
     public String describe() {
-        String label = blockLabel == null || blockLabel.isBlank() ? "block" : blockLabel;
+        String label = blockLabel == null || blockLabel.trim().isEmpty() ? "block" : blockLabel;
         if (isAeNetwork()) {
             return label + " · " + displayValue() + " · " + anchorText();
         }

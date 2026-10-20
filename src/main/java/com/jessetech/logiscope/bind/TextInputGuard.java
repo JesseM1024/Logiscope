@@ -1,11 +1,11 @@
 package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeMod;
-import net.minecraft.client.gui.components.AbstractWidget;
-import net.minecraft.client.gui.components.EditBox;
-import net.minecraft.client.gui.components.events.GuiEventListener;
-import net.minecraft.client.gui.screens.Screen;
-import net.minecraftforge.client.event.ScreenEvent;
+import net.minecraft.client.gui.widget.Widget;
+import net.minecraft.client.gui.widget.TextFieldWidget;
+import net.minecraft.client.gui.IGuiEventListener;
+import net.minecraft.client.gui.screen.Screen;
+import net.minecraftforge.client.event.GuiScreenEvent;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
@@ -18,12 +18,12 @@ import java.lang.reflect.Method;
  *
  * 这里做了**三层**守卫，从准到糙，任何一层命中就不抢键：
  *
- *   1) 原版契约 —— Screen#getFocused() / children() 里的 EditBox
+ *   1) 原版契约 —— Screen#getFocused() / children() 里的 TextFieldWidget
  *      覆盖所有走 Screen 焦点机制的文本框（原版背包搜索框、大多数模组输入框）
  *
  *   2) 第三方浮层搜索框的公开 API —— 目前接 JEI
- *      JEI 的搜索框（mezz.jei.gui.input.GuiTextFieldFilter）**本身是 EditBox**，
- *      但它不挂进 screen.children()，而是自己管输入（createInputHandler），
+ *      JEI 的搜索框（mezz.jei.gui.input.GuiTextFieldFilter）**本身是 TextFieldWidget**，
+ *      但它不挂进 screen.getEventListeners()，而是自己管输入（createInputHandler），
  *      所以第 1 层看不见它。好在 JEI 暴露了公开 API：
  *        mezz.jei.api.runtime.IIngredientListOverlay#hasKeyboardFocus()
  *      用反射调用，**零编译期依赖**：没装 JEI 就静静跳过。
@@ -75,12 +75,12 @@ public final class TextInputGuard {
     // 事件入口（由主类注册到游戏总线）
     // ------------------------------------------------------------------
 
-    public static void onCharTypedPre(ScreenEvent.KeyboardCharTypedEvent.Pre event) {
+    public static void onCharTypedPre(GuiScreenEvent.KeyboardCharTypedEvent.Pre event) {
         lastCharConsumed = true;
         lastCharTick = LogiScopeMod.probes().currentTick();
     }
 
-    public static void onCharTypedPost(ScreenEvent.KeyboardCharTypedEvent.Post event) {
+    public static void onCharTypedPost(GuiScreenEvent.KeyboardCharTypedEvent.Post event) {
         // Post 发出来了 = 这个字符没有人接手
         lastCharConsumed = false;
     }
@@ -98,33 +98,33 @@ public final class TextInputGuard {
      * 第 1 层：原版契约。
      *
      * 主判据是 Screen#getFocused（Screen#mouseClicked 会把被点的子控件设成 focused），
-     * 覆盖原版 EditBox。仍然保留类名兜底：少数模组的文本框不是 EditBox、
+     * 覆盖原版 TextFieldWidget。仍然保留类名兜底：少数模组的文本框不是 TextFieldWidget、
      * 也不一定走 Screen 焦点机制 —— 宁可漏触发一次快捷键，也不要在玩家打字时弹面板。
      */
     private static boolean hasVanillaTextFocus(@Nullable Screen screen) {
         if (screen == null) {
             return false;
         }
-        if (isTextLike(screen.getFocused())) {
+        if (isTextLike(screen.getListener())) {
             return true;
         }
-        for (GuiEventListener child : screen.children()) {
-            if (child instanceof AbstractWidget widget && widget.isFocused() && isTextLike(child)) {
+        for (IGuiEventListener child : screen.getEventListeners()) {
+            if (child instanceof Widget && ((Widget) child).isFocused() && isTextLike(child)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static boolean isTextLike(@Nullable GuiEventListener listener) {
+    private static boolean isTextLike(@Nullable IGuiEventListener listener) {
         if (listener == null) {
             return false;
         }
-        if (listener instanceof EditBox) {
+        if (listener instanceof TextFieldWidget) {
             return true;
         }
         String name = listener.getClass().getName();
-        return name.contains("EditBox")
+        return name.contains("TextFieldWidget")
                 || name.contains("TextField")
                 || name.contains("SearchField")
                 || name.contains("InputField")

@@ -25,7 +25,29 @@ import org.jetbrains.annotations.Nullable;
  *   · **double 非有限**（NaN / Infinity）：{@link #of(double)} 返回 null，
  *     调用方按"读不到"处理（留空），绝不把 NaN 变成 0。
  */
-public record Val(boolean integral, long i, double d) implements Comparable<Val> {
+public final class Val implements Comparable<Val> {
+    private final boolean integral;
+    private final long i;
+    private final double d;
+
+    public Val(boolean integral, long i, double d) {
+        this.integral = integral;
+        this.i = i;
+        this.d = d;
+    }
+
+    public boolean integral() {
+        return integral;
+    }
+
+    public long i() {
+        return i;
+    }
+
+    public double d() {
+        return d;
+    }
+
 
     public static final Val ZERO = of(0L);
 
@@ -156,7 +178,7 @@ public record Val(boolean integral, long i, double d) implements Comparable<Val>
 
     @Override
     public boolean equals(Object o) {
-        return o instanceof Val v && compareTo(v) == 0;
+        return o instanceof Val && compareTo((Val) o) == 0;
     }
 
     @Override

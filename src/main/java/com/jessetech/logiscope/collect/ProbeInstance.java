@@ -12,11 +12,11 @@ import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
 import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.TranslatableComponent;
+import net.minecraft.util.text.TranslationTextComponent;
 import net.minecraft.server.MinecraftServer;
-import net.minecraft.resources.ResourceKey;
-import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.level.Level;
+import net.minecraft.util.RegistryKey;
+import net.minecraft.world.server.ServerWorld;
+import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
@@ -43,7 +43,7 @@ import java.util.List;
  *   | | 客户端 tick 驱动 + 异步读（已否决） | 服务端 tick 驱动 + 同步读（现行） |
  *   |---|---|---|
  *   | 采样节拍 | 客户端 20 次/秒，与服务端 tick **不锁相** | **服务端 tick 本身** |
- *   | 时间戳 | 异步读回来的 world tick（会跳 0 / 跳 2） | 那一刻 `ServerLevel#getGameTime()`，**一个 tick 一条** |
+ *   | 时间戳 | 异步读回来的 world tick（会跳 0 / 跳 2） | 那一刻 `ServerWorld#getGameTime()`，**一个 tick 一条** |
  *   | 值 | 缓存里的旧值可能被复用（贴上新 tick 标签 → 假平台） | 同步读，读到的就是这个世界 tick 的值 |
  *   | `/tick rate 200` | 客户端只能观测 20 次/秒 → 每 ~10 tick 一个点 | **200 条/秒**（服务端 tick 200 次） |
  *
@@ -116,7 +116,7 @@ public final class ProbeInstance {
      *     （FE 能量 / 流体重 / 化学品量，以及任何在 NBT 里的数字）
      * 这样"图表、框选、导出、回放、计算"全都不需要为新数据源改一行。
      */
-    private volatile List<DataTarget> dataTargets = List.of();
+    private volatile List<DataTarget> dataTargets = java.util.Collections.emptyList();
     private final DataProbe dataProbe = new DataProbe();
 
     /** 数据采样的独立节拍守卫（与物品的 {@link #lastSampledGameTime} 分开）：
@@ -206,7 +206,7 @@ public final class ProbeInstance {
             }
             List<DataTarget> n = new ArrayList<>(dataTargets);
             n.add(t);
-            dataTargets = List.copyOf(n);
+            dataTargets = new java.util.ArrayList<>(n);
             // 刚加目标时如果还停在 ARMED（没选格也没目标），顺手进入可采样状态
             if (state == State.ARMED && integratedServerUp()) {
                 enterFollowing();
@@ -231,7 +231,7 @@ public final class ProbeInstance {
                 return false;
             }
             n.add(now);
-            dataTargets = List.copyOf(n);
+            dataTargets = new java.util.ArrayList<>(n);
             // 与 addDataTarget 同款兜底：列表非空就该是可采样状态
             if (state == State.ARMED && integratedServerUp()) {
                 enterFollowing();
@@ -267,7 +267,7 @@ public final class ProbeInstance {
                 }
                 n.add(a);
             }
-            dataTargets = List.copyOf(n);
+            dataTargets = new java.util.ArrayList<>(n);
             // 刚有了目标却还停在 ARMED（既没选格也没目标）→ 顺手进入可采样状态
             if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
                 enterFollowing();
@@ -305,7 +305,7 @@ public final class ProbeInstance {
                 }
                 n.add(a);
             }
-            dataTargets = List.copyOf(n);
+            dataTargets = new java.util.ArrayList<>(n);
             if (state == State.ARMED && !dataTargets.isEmpty() && integratedServerUp()) {
                 enterFollowing();
             }
@@ -319,7 +319,7 @@ public final class ProbeInstance {
             List<DataTarget> n = new ArrayList<>(dataTargets);
             boolean gone = n.removeIf(d -> d.valuePath().equals(valuePath));
             if (gone) {
-                dataTargets = List.copyOf(n);
+                dataTargets = new java.util.ArrayList<>(n);
                 // 最后一个目标也没了、又没有槽位 → 回到待配置，不留一个空转的探针
                 if (dataTargets.isEmpty() && !hasSlots()) {
                     state = State.ARMED;
@@ -359,10 +359,10 @@ public final class ProbeInstance {
      */
     public String name() {
         String d = target.deviceName();
-        if (d != null && !d.isBlank()) {
+        if (d != null && !d.trim().isEmpty()) {
             return d;
         }
-        return new TranslatableComponent("logiscope.label.probe").getString();
+        return new TranslationTextComponent("logiscope.label.probe").getString();
     }
 
     /** 列表页显示用的一行描述（槽位 + 维度坐标；带数据追踪时标注条数） */
@@ -376,7 +376,7 @@ public final class ProbeInstance {
             base = target.slotSummary() + " · " + target.anchorText();
         }
         int n = dataTargets.size();
-        return n > 0 ? base + " · " + new TranslatableComponent("logiscope.info.data_count", n).getString() : base;
+        return n > 0 ? base + " · " + new TranslationTextComponent("logiscope.info.data_count", n).getString() : base;
     }
 
     // ------------------------------------------------------------------
@@ -392,7 +392,7 @@ public final class ProbeInstance {
     /** 客户端手上有集成服务端（单人）—— 只有这种局面下才读得到方块实体 */
     private static boolean integratedServerUp() {
         Minecraft mc = Minecraft.getInstance();
-        return mc.isLocalServer() && mc.getSingleplayerServer() != null;
+        return mc.isIntegratedServerRunning() && mc.getIntegratedServer() != null;
     }
 
     public void configure(ProbeTarget newTarget, @Nullable List<ContainerAccess.SlotView> verifyViews) {
@@ -470,7 +470,7 @@ public final class ProbeInstance {
             markers.clear();
             probe.reset();
             target = ProbeTarget.EMPTY;
-            dataTargets = List.of();
+            dataTargets = java.util.Collections.emptyList();
             lastDataTick = Long.MIN_VALUE;
             state = State.ARMED;
             manualPause = false;
@@ -541,11 +541,15 @@ public final class ProbeInstance {
         // 提示必须跟着提前 —— 否则用户会把"界面内读数"当成准的。
         warnIfIndexUnverified();
         switch (state) {
-            case RECORDING -> tickRecording(gameTime);
-            case FOLLOWING -> tickFollowing(gameTime);
-            case PAUSED -> tickPaused();
-            default -> {
-            }
+            case RECORDING:
+                tickRecording(gameTime);
+                break;
+            case FOLLOWING:
+                tickFollowing(gameTime);
+                break;
+            case PAUSED:
+                tickPaused();
+                break;
         }
     }
 
@@ -683,7 +687,7 @@ public final class ProbeInstance {
     /**
      * 由服务端 tick 事件调用（**服务端线程**）*
      * 每世界 tick 调一次。它同时是"时间戳"和"取值时机"的答案：
-     * 时间戳取那一刻的 `ServerLevel#getGameTime()`，值取那一刻方块实体里的真值 ——
+     * 时间戳取那一刻的 `ServerWorld#getGameTime()`，值取那一刻方块实体里的真值 ——
      * 两者同源，所以既不会漏观测也不会把旧值当新值。
      *
      * @return true = 这一 tick 已经写了样本（数据或 `no_data`）
@@ -721,8 +725,8 @@ public final class ProbeInstance {
                 return false;
             }
             // 同一台设备：维度取槽位的（没有槽位就取数据目标的）
-            ResourceKey<Level> dim = t.hasPersistentId() ? t.dimension() : dts.get(0).dimension();
-            ServerLevel level = server.getLevel(dim);
+            RegistryKey<World> dim = t.hasPersistentId() ? t.dimension() : dts.get(0).dimension();
+            ServerWorld level = server.getWorld(dim);
             if (level == null) {
                 return false;
             }
@@ -774,7 +778,7 @@ public final class ProbeInstance {
                         if (e == null) {
                             continue;   // 设备读不到 —— 留空（不写 0，也不连累别的目标）
                         }
-                        String name = e.itemId() != null && !e.itemId().isBlank()
+                        String name = e.itemId() != null && !e.itemId().trim().isEmpty()
                                 ? e.itemId()
                                 : dt.fallbackName();
                         bufIds[got] = name;
@@ -812,7 +816,7 @@ public final class ProbeInstance {
      * |---|---|
      * | 有坐标 | 服务端才能按"维度+坐标"读到那台设备 |
      * | 是单人 | 多人下方块实体不在客户端进程里（集成服务端才有） |
-     * | 设备有可读的容器 | 挂探头时验证过：既不是 `Container` 也没有 ItemHandler 的方块
+     * | 设备有可读的容器 | 挂探头时验证过：既不是 `IInventory` 也没有 ItemHandler 的方块
      *   （UNAVAILABLE）服务端拿不到值，只能让菜单路兜底 |
      *
      * 与此前口径的差别：去掉了 `state != RECORDING || VERIFIED` 这一条。旧口径把
@@ -860,10 +864,10 @@ public final class ProbeInstance {
      *   换了东西 → 名字变了 → 图上就是**换了一条线**。这正是我们要的语义
      *   （比"同一条线忽然变成另一种物质"诚实得多）。
      */
-    private String resolveDataName(ServerLevel level, DataTarget dt) {
+    private String resolveDataName(ServerWorld level, DataTarget dt) {
         if (dt.hasNamePath()) {
             String n = dataProbe.readString(level, dt.namePath(), dt.pos());
-            if (n != null && !n.isBlank()) {
+            if (n != null && !n.trim().isEmpty()) {
                 return n;
             }
         }
@@ -929,7 +933,7 @@ public final class ProbeInstance {
             return;
         }
         lastNotifyTick = now;
-        mc.player.displayClientMessage(new TranslatableComponent(key), true);
+        mc.player.sendStatusMessage(new TranslationTextComponent(key), true);
     }
 
     // ------------------------------------------------------------------

@@ -48,9 +48,9 @@ import com.jessetech.logiscope.collect.DataProbe;
 import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
-import net.minecraft.nbt.IntTag;
-import net.minecraft.nbt.ListTag;
-import net.minecraft.nbt.StringTag;
+import net.minecraft.nbt.IntNBT;
+import net.minecraft.nbt.ListNBT;
+import net.minecraft.nbt.StringNBT;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -791,11 +791,11 @@ public class TestChart {
         eq("'Infinity' → null", null, Val.parseNumericText("Infinity"));
 
         // —— 标签层：强制模式 = 数值标签原样 + 字符串尝试解析；其余类型读不到 ——
-        eq("StringTag(\"64\") 强制转换", 64L,
-                DataProbe.asValForced(StringTag.valueOf("64")).longValue());
-        eq("StringTag(\"abc\") → null", null, DataProbe.asValForced(StringTag.valueOf("abc")));
-        eq("IntTag 照常（本来就是数值）", 7L, DataProbe.asValForced(IntTag.valueOf(7)).longValue());
-        eq("ListTag → null（类型不可转换）", null, DataProbe.asValForced(new ListTag()));
+        eq("StringNBT(\"64\") 强制转换", 64L,
+                DataProbe.asValForced(StringNBT.valueOf("64")).longValue());
+        eq("StringNBT(\"abc\") → null", null, DataProbe.asValForced(StringNBT.valueOf("abc")));
+        eq("IntNBT 照常（本来就是数值）", 7L, DataProbe.asValForced(IntNBT.valueOf(7)).longValue());
+        eq("ListNBT → null（类型不可转换）", null, DataProbe.asValForced(new ListNBT()));
     }
 
     private static void t22StoreResize() {
