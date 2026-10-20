@@ -240,6 +240,19 @@ cmd //c dev-check\offline-check.bat
 | Git Bash 里 javac 报"程序包 xxx 不存在"（类实际已编译） | Git Bash → cmd 传**多条目 `-cp`**（分号列表）会被拆坏 | 用 `.bat` 包装（成品：`dev-check\offline-check.bat`），或只用单条目 classpath |
 | **FG5 首次构建卡在 `downloadMcpConfig` / `extractSrg`，或报 `Could not GET .../mcp_config-...zip`** | ForgeGradle 要下载 MC client、mappings 的 zip 与 MCP 配置，源站 `maven.minecraftforge.net` / `libraries.minecraft.net` 从国内常超时 | 开代理后重跑一次即可（本机实测开代理一次通过）；之后整个工具链都在 `~/.gradle/caches/forge_gradle/` 落地，日常构建加 `--offline` 不再联网 |
 | 换映射 / 换 Forge 版本后 `runClient` 报 SRG 名字对不上 | FG5 生成的 mapped jar 按「映射版本」分目录缓存，旧产物不会自动失效 | 删 `~/.gradle/caches/forge_gradle/minecraft_user_repo/` 对应版本目录，重跑 `build` |
+| **`gradlew clean` 之后 `build/libs` 里其他版本线的 jar 全没了** | `build/` 是**所有分支共用**的产物目录（同一个工作树切分支构建），`clean` 删的是整个目录 | 别在共享工作树里跑 `clean`；真要清就只删 `build/classes`、`build/tmp`。恢复办法见下 |
+
+**恢复某个版本线的 jar（不动当前分支）**：用 git worktree 单独构建，拷回主目录后删掉 worktree。
+
+```bat
+git worktree add ..\logiscope-wt-1182 1.18.2-forge
+cd ..\logiscope-wt-1182 && gradlew.bat build --offline
+copy build\libs\logiscope-0.1.2-1.18.2-alpha.jar ..\logiscope\build\libs\
+cd ..\logiscope && git worktree remove ..\logiscope-wt-1182 --force
+```
+
+实测四个版本线的产物大小是稳定的，可直接当校验值：
+`1.21.1` 234,142 B / `1.20.1` 237,605 B / `1.18.2` 238,934 B / `1.16.5` 245,041 B。
 
 详细的排错记录见隔壁项目 `..\neoforge-1.21.1-walkthrough\WALKTHROUGH.md`，
 那份文档把整个工具链的坑都记全了。
