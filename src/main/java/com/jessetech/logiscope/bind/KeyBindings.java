@@ -9,7 +9,6 @@ import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.inventory.ContainerScreen;
-import net.minecraft.client.gui.screen.inventory.ContainerScreen;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.RegistryKey;
 import net.minecraft.world.World;
@@ -388,16 +387,34 @@ public final class KeyBindings {
     /**
      * 当前界面是不是"玩家自己的背包界面"。
      *
-     * 单人的生存背包走 player.inventoryMenu，ContainerAccess 已经排除了；
-     * 但**创造模式的背包不走它** —— 它有自己的 ItemPickerMenu，
-     * 于是「containerMenu != inventoryMenu」为真，会被误判成"外部设备"。
+     * 单人的生存背包走 player.openContainer == player.container，{@link ContainerAccess}
+     * 已经排除了；但**创造模式的背包不走它** —— 它有自己的创造容器，
+     * 于是「openContainer != container」为真，会被误判成"外部设备"。
      * 实测表现：创造模式里在背包界面按快捷键会弹出面板（面板上还会列出一堆
      * 创造物品标签页的内容）。这不是崩溃，但语义是错的。
      *
-     * 两种背包界面共同的基类是 ContainerScreen，
-     * 按基类排除即可，也不必分别引用两个具体类。
+     * ★ 1.16.5 的坑：不能用 "instanceof ContainerScreen" 来排除。
+     *   这一代 ContainerScreen 是**所有容器界面的抽象基类**：
+     *     ContainerScreen
+     *       ├ ChestScreen（箱子 / 熔炉 / 各种模组设备界面）
+     *       └ DisplayEffectsScreen
+     *            ├ InventoryScreen（生存背包）
+     *            └ CreativeScreen（创造背包）
+     *   按基类排除＝把**箱子界面也排除掉**，于是箱子里的 F9 会走 openStandalone
+     *   → displayGuiScreen → 触发 ChestScreen.onClose() → **容器被关掉**
+     *   （实测现象："打开箱子按 F9，箱子界面被关闭"）。
+     *
+     * 所以这里问行为、不问类名：**这个界面绑定的容器就是玩家自己的背包容器**。
+     * 箱子界面的容器是 ChestContainer ≠ player.container，自然不算背包。
      */
     private static boolean isOwnInventoryScreen(@Nullable Screen screen) {
-        return screen instanceof ContainerScreen<?>;
+        if (!(screen instanceof ContainerScreen)) {
+            return false;
+        }
+        Minecraft mc = Minecraft.getInstance();
+        if (mc.player == null) {
+            return false;
+        }
+        return ((ContainerScreen<?>) screen).getContainer() == mc.player.container;
     }
 }

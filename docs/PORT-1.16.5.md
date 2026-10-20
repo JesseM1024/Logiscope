@@ -1,8 +1,8 @@
 # LogiScope · 1.16.5 Forge 移植记录
 
-分支：`1.16.5-forge`（从 `1.18.2-forge` 拉出）
-基线：Forge **1.16.5-36.2.42**（= 用户 HMCL 测试实例版本）
-映射：MCP snapshot **`20210309-1.16.5`**
+分支：`1.16.5-forge`（从 `1.18.2-forge` 拉出）  
+基线：Forge **1.16.5-36.2.42**（= 用户 HMCL 测试实例版本）  
+映射：MCP snapshot **`20210309-1.16.5`**  
 结论：**编译通过（Java 8 目标）、打包通过、离线门禁 461 条断言全过**；实机待验。
 
 ---
@@ -12,7 +12,7 @@
 NeoForge 的第一个版本是 MC 1.20.1。1.16.5 时代 Forge 是**唯一**平台：
 
 - 不存在"双加载器兼容"问题，也不需要为它做任何设计；
-- 1.20.1 那条"一份 jar 通吃 NeoForge / Forge"的结论**不可外推**（它依赖"NeoForge 47 仍用
+- 1.20.1 那条"一份 jar 通吃 NeoForge / Forge"的结论**不可外推**（它依赖"NeoForge 47 仍用  
   `net.minecraftforge` 包名 + 仍用 `forge` 这个 modId"这两个 1.20.1 独有的历史巧合）；
 - 反过来，1.16.5 的 API 是纯 Forge 的，可以放心用 `CapabilityItemHandler`、`GuiScreenEvent` 等平台能力。
 
@@ -22,17 +22,17 @@ NeoForge 的第一个版本是 MC 1.20.1。1.16.5 时代 Forge 是**唯一**平�
 
 `src/main/templates/META-INF/mods.toml` 经 `gradle.properties` 展开后的实际值：
 
-| 字段 | 值 | 理由 |
-|---|---|---|
-| `loaderVersion` | `[36,)` | 1.16.5 世代 `javafml` 的大版本是 36。写 `[36,)` = "任何 36.x 的 FML 都接受" |
-| `dependencies.forge.versionRange` | **`[36,)`** | **下界取 36（1.16.5 线的起点），不取编译用的 36.2.42** —— 否则 36.0.x / 36.1.x 的老整合包会被 FML 直接拒载，"本可用却用不了" |
-| `dependencies.minecraft.versionRange` | `[1.16.5]` | 只认 1.16.5，跨小版本不做承诺 |
-| 依赖 `side` | `CLIENT` | 纯客户端模组；服务端不装也不报错 |
+| 字段                                    | 值           | 理由                                                                                      |
+| ------------------------------------- | ----------- | --------------------------------------------------------------------------------------- |
+| `loaderVersion`                       | `[36,)`     | 1.16.5 世代 `javafml` 的大版本是 36。写 `[36,)` = "任何 36.x 的 FML 都接受"                            |
+| `dependencies.forge.versionRange`     | **`[36,)`** | **下界取 36（1.16.5 线的起点），不取编译用的 36.2.42** —— 否则 36.0.x / 36.1.x 的老整合包会被 FML 直接拒载，"本可用却用不了" |
+| `dependencies.minecraft.versionRange` | `[1.16.5]`  | 只认 1.16.5，跨小版本不做承诺                                                                      |
+| 依赖 `side`                             | `CLIENT`    | 纯客户端模组；服务端不装也不报错                                                                        |
 
-**为什么不写 `[36.2.42,)`**：编译基线只是为了拿到"最新 API + 最完整签名"，
-运行期能用到的最低版本由**实际调用的 API** 决定。本次用到的都是 1.16.x 世代早已存在的
-长稳 API（`ForgeConfigSpec`、`TickEvent.ClientTickEvent`、`GuiScreenEvent`、
-`CapabilityItemHandler`、`ForgeHooksClient.pushGuiLayer`、`ClientRegistry`），
+**为什么不写 `[36.2.42,)`**：编译基线只是为了拿到"最新 API + 最完整签名"，  
+运行期能用到的最低版本由**实际调用的 API** 决定。本次用到的都是 1.16.x 世代早已存在的  
+长稳 API（`ForgeConfigSpec`、`TickEvent.ClientTickEvent`、`GuiScreenEvent`、  
+`CapabilityItemHandler`、`ForgeHooksClient.pushGuiLayer`、`ClientRegistry`），  
 所以下界可以安全地压到 36。
 
 **为什么不再往下压（35.x）**：35.x 对应 MC 1.16.4，`minecraft_version_range=[1.16.5]` 本来就会拒掉。
@@ -41,29 +41,29 @@ NeoForge 的第一个版本是 MC 1.20.1。1.16.5 时代 Forge 是**唯一**平�
 
 ## 三、构建层改动
 
-| 文件 | 改动 |
-|---|---|
-| `build.gradle` | 换成 **ForgeGradle 5.1**（`apply plugin: 'net.minecraftforge.gradle'`）；`mappings channel: 'snapshot', version: '20210309-1.16.5'`；run 目录 `1_16_5_forge/`；`java.toolchain = 8`；新增 `copyMinecraftDeps` 任务（见下） |
-| `gradle.properties` | `forge_version=1.16.5-36.2.42`（**FG5 要求带 MC 前缀**）；`forge_version_range=[36,)`；`loader_version_range=[36,)`；`org.gradle.java.home` 指向 JDK 17（守护进程用），编译目标另由 toolchain 锁到 8 |
-| `gradle/wrapper/gradle-wrapper.properties` | Gradle **9.2.1 → 7.6.4**（FG5 不支持 Gradle 8+） |
-| `settings.gradle` | 去掉 `org.gradle.toolchains.foojay-resolver-convention`（Gradle 7.6 不认这个插件） |
-| `.gitignore` | 加 `1_16_5_forge/` |
-| `dev-check/offline-check.bat` | classpath 换成 `dev-check\lib\*;build\mcdeps\*`；jar 名 `logiscope-0.1.2-1.16.5-alpha.jar` |
-| `dev-check/TestChart.java` | `IntTag/ListTag/StringTag` → `IntNBT/ListNBT/StringNBT` |
+| 文件                                         | 改动                                                                                                                                                                                                       |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `build.gradle`                             | 换成 **ForgeGradle 5.1**（`apply plugin: 'net.minecraftforge.gradle'`）；`mappings channel: 'snapshot', version: '20210309-1.16.5'`；run 目录 `1_16_5_forge/`；`java.toolchain = 8`；新增 `copyMinecraftDeps` 任务（见下） |
+| `gradle.properties`                        | `forge_version=1.16.5-36.2.42`（**FG5 要求带 MC 前缀**）；`forge_version_range=[36,)`；`loader_version_range=[36,)`；`org.gradle.java.home` 指向 JDK 17（守护进程用），编译目标另由 toolchain 锁到 8                                 |
+| `gradle/wrapper/gradle-wrapper.properties` | Gradle **9.2.1 → 7.6.4**（FG5 不支持 Gradle 8+）                                                                                                                                                              |
+| `settings.gradle`                          | 去掉 `org.gradle.toolchains.foojay-resolver-convention`（Gradle 7.6 不认这个插件）                                                                                                                                 |
+| `.gitignore`                               | 加 `1_16_5_forge/`                                                                                                                                                                                        |
+| `dev-check/offline-check.bat`              | classpath 换成 `dev-check\lib\*;build\mcdeps\*`；jar 名 `logiscope-0.1.2-1.16.5-alpha.jar`                                                                                                                   |
+| `dev-check/TestChart.java`                 | `IntTag/ListTag/StringTag` → `IntNBT/ListNBT/StringNBT`                                                                                                                                                  |
 
 ### 为什么不是 MDG
 
-ModDevGradle 的 legacy 插件官方支持范围是 **Forge 1.17–1.20.1**（见其 `LEGACY.md`），
-**1.16.5 不在内**。这一代只能回到 ForgeGradle 5，配套 Gradle 7.6.4。
+ModDevGradle 的 legacy 插件官方支持范围是 **Forge 1.17–1.20.1**（见其 `LEGACY.md`），  
+**1.16.5 不在内**。这一代只能回到 ForgeGradle 5，配套 Gradle 7.6.4。  
 1.18.2 那条"构建栈与 1.20.1 同构、只换版本号"的便利在这里没有，**构建层是重建的**。
 
 ### `copyMinecraftDeps`：为离线门禁铺一条稳定 classpath
 
-离线断言需要「带映射名的 MC+Forge 类路径」。FG5 把 mapped jar 放在
-`~/.gradle/caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.16.5-36.2.42_mapped_snapshot_20210309-1.16.5/`
+离线断言需要「带映射名的 MC+Forge 类路径」。FG5 把 mapped jar 放在  
+`~/.gradle/caches/forge_gradle/minecraft_user_repo/net/minecraftforge/forge/1.16.5-36.2.42_mapped_snapshot_20210309-1.16.5/`  
 下 —— 路径里带映射版本号，`.bat` 里硬编码会随 mappings 变动而失效。
 
-所以加了一个 Copy 任务，把 `configurations.minecraft` 里的 jar 全部复制到 `build/mcdeps/`，
+所以加了一个 Copy 任务，把 `configurations.minecraft` 里的 jar 全部复制到 `build/mcdeps/`，  
 `.bat` 用通配符 `build\mcdeps\*` 引用：
 
 ```gradle
@@ -74,9 +74,9 @@ var copyMinecraftDeps = tasks.register('copyMinecraftDeps', Copy) {
 tasks.named('build') { dependsOn copyMinecraftDeps }
 ```
 
-`configurations.minecraft` 里不止一个文件（mapped jar / launcher jar / client-extra /
-accesstransformers / eventbus / coremods / brigadier / authlib …），
-**必须全给**：只拷 mapped jar 时运行期会 `NoClassDefFoundError: com/mojang/brigadier/Message`
+`configurations.minecraft` 里不止一个文件（mapped jar / launcher jar / client-extra /  
+accesstransformers / eventbus / coremods / brigadier / authlib …），  
+**必须全给**：只拷 mapped jar 时运行期会 `NoClassDefFoundError: com/mojang/brigadier/Message`  
 （`DataProbe` 的类链接阶段就会碰到 brigadier）。
 
 ---
@@ -85,10 +85,10 @@ accesstransformers / eventbus / coremods / brigadier / authlib …），
 
 ### 4.1 `Draw` 重建（`ui/Draw.java`）
 
-1.20 把「矩阵 + 绘制方法」收成了 `GuiGraphics`；1.16.5 拆得更碎：
+1.20 把「矩阵 + 绘制方法」收成了 `GuiGraphics`；1.16.5 拆得更碎：  
 矩阵是 `MatrixStack`，静态绘制在 `AbstractGui`，文字在 `FontRenderer`，物品在 `ItemRenderer`。
 
-处理手法与 1.18.2 相同 —— **只做一层与 `GuiGraphics` 同签名的替身**，让
+处理手法与 1.18.2 相同 —— **只做一层与 `GuiGraphics` 同签名的替身**，让  
 `ScopeScreen` / `ChartRenderer` 的绘制调用**方法体一行不改**：
 
 ```java
@@ -102,73 +102,73 @@ public void renderItemDecorations(FontRenderer, ItemStack, int, int)        // r
 
 两点与 1.18.2 不同：
 
-1. **字体是显式参数**。1.16.5 的 `FontRenderer` 没有全局入口，物品数量叠层
-   （`renderItemOverlayIntoGUI`）**必须**传 `FontRenderer`，所以 `renderItemDecorations`
+1. **字体是显式参数**。1.16.5 的 `FontRenderer` 没有全局入口，物品数量叠层  
+   （`renderItemOverlayIntoGUI`）**必须**传 `FontRenderer`，所以 `renderItemDecorations`  
    比 1.18.2 多一个 `font` 参数 —— 调用处随之传 `this.font`。
-2. **tooltip 不进 `Draw`**。1.16.5 的 `Screen#renderTooltip(MatrixStack, ItemStack, int, int)`
+2. **tooltip 不进 `Draw`**。1.16.5 的 `Screen#renderTooltip(MatrixStack, ItemStack, int, int)`  
    已经收矩阵，直接 `this.renderTooltip(g.pose(), stack, mouseX, mouseY)`。
 
-`ITextComponent` 这个名字在 1.16.5 **是对的**（1.18.2 叫 `Component`，1.20 又叫回
+`ITextComponent` 这个名字在 1.16.5 **是对的**（1.18.2 叫 `Component`，1.20 又叫回  
 `Component`）—— 版本间命名来回改过，只能按 srg/mapped jar 核实，不能靠记忆。
 
 ### 4.2 Java 8 降级清单
 
-1.16.5 是 **Java 8** 世代。`java.toolchain = 8` 让编译器直接拦住所有高版本语法，
+1.16.5 是 **Java 8** 世代。`java.toolchain = 8` 让编译器直接拦住所有高版本语法，  
 下面每一项都是被编译错误逼出来的：
 
-| 1.18.2 写法 | Java 8 处理 | 规模 |
-|---|---|---|
-| `record X(...)` | 改成 `final class` + 构造器 + getter + 手写 `equals/hashCode/toString` | **39 个**（36 个脚本转换 + 3 个手工：`ArchiveFormat.Header`、`ChartData.SeriesRange`、`ProbeTarget.SlotRef`） |
-| 箭头 `switch`（语句式 / 表达式式） | 经典 `case X:` + `break`；表达式式要先声明变量再赋值 | **约 145 个 case 区域**（`ScopeScreen` 115 个） |
-| `x instanceof Foo f` | `x instanceof Foo` + 显式强转 | 多处 |
-| `var x = ...` | 显式类型 | 多处 |
-| `str.isBlank()` | `str.trim().isEmpty()` | 1 处（`DataProbe`） |
-| `stream.toList()` | 项目自带 `List#toList()`（**不是** `Stream#toList`，别误改） | 5 处 |
-| `List.of / Set.of / Map.of` | `Arrays.asList` / `Collections.emptyXxx` | 多处 |
-| `Files.writeString / readString` | `Files.write` / `Files.readAllBytes` + 显式 `StandardCharsets.UTF_8` | `Archives` |
-| `Optional.isEmpty()` | `!isPresent()` | 多处 |
-| 被静态上下文使用的嵌套类 | 显式 `static` | 若干 |
+| 1.18.2 写法                        | Java 8 处理                                                          | 规模                                                                                              |
+| -------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------- |
+| `record X(...)`                  | 改成 `final class` + 构造器 + getter + 手写 `equals/hashCode/toString`    | **39 个**（36 个脚本转换 + 3 个手工：`ArchiveFormat.Header`、`ChartData.SeriesRange`、`ProbeTarget.SlotRef`） |
+| 箭头 `switch`（语句式 / 表达式式）          | 经典 `case X:` + `break`；表达式式要先声明变量再赋值                               | **约 145 个 case 区域**（`ScopeScreen` 115 个）                                                        |
+| `x instanceof Foo f`             | `x instanceof Foo` + 显式强转                                          | 多处                                                                                              |
+| `var x = ...`                    | 显式类型                                                               | 多处                                                                                              |
+| `str.isBlank()`                  | `str.trim().isEmpty()`                                             | 1 处（`DataProbe`）                                                                                |
+| `stream.toList()`                | 项目自带 `List#toList()`（**不是** `Stream#toList`，别误改）                   | 5 处                                                                                             |
+| `List.of / Set.of / Map.of`      | `Arrays.asList` / `Collections.emptyXxx`                           | 多处                                                                                              |
+| `Files.writeString / readString` | `Files.write` / `Files.readAllBytes` + 显式 `StandardCharsets.UTF_8` | `Archives`                                                                                      |
+| `Optional.isEmpty()`             | `!isPresent()`                                                     | 多处                                                                                              |
+| 被静态上下文使用的嵌套类                     | 显式 `static`                                                        | 若干                                                                                              |
 
 **降级过程中的两个坑**（都真实踩过）：
 
-- **机械替换会毁掉 import**。第一版脚本做了全局简单名替换，
-  结果 `import net.minecraft.inventory.container.Container;` 变成 `...IInventory`。
+- **机械替换会毁掉 import**。第一版脚本做了全局简单名替换，  
+  结果 `import net.minecraft.inventory.container.Container;` 变成 `...IInventory`。  
   正确做法：**import 行只做整行映射，不参与名字替换**，并从干净 checkout 重跑。
-- **`switch` 转换会丢掉终止语义**。语句式 `case` 里本来 `return` 掉的分支，
-  机械转换后又补了个 `break;` → `无法访问的语句`；穷举枚举的表达式 switch 转成经典 switch 后
-  javac 不再认为"穷尽" → `缺少返回语句`。两类都得手工补 `default` / 删死 `break`。
+- **`switch` 转换会丢掉终止语义**。语句式 `case` 里本来 `return` 掉的分支，  
+  机械转换后又补了个 `break;` → `无法访问的语句`；穷举枚举的表达式 switch 转成经典 switch 后  
+  javac 不再认为"穷尽" → `缺少返回语句`。两类都得手工补 `default` / 删死 `break`。  
   转换脚本本身不可信，**必须靠 javac 逐条兜底**。
 
 ### 4.3 API 差异（1.18.2 → 1.16.5）
 
 括号里是本次源码里的实际用量，用来判断"改得有多深"：
 
-| 主题 | 1.18.2 / 1.20.1 | 1.16.5 | 用量 |
-|---|---|---|---|
-| 变换矩阵 | `PoseStack` | `MatrixStack` | 8 |
-| 字体 | `Font`；`font.width(s)` | `FontRenderer`；`font.getStringWidth(s)` | 17 / 45 |
-| 静态绘制 | `GuiGraphics` | `AbstractGui.fill(MatrixStack, …)` | 5 |
-| 容器界面基类 | `AbstractContainerScreen` | `ContainerScreen` | 25 |
-| 世界 | `Level` / `ServerLevel` | `World` / `ServerWorld` | 55 / 25 |
-| 方块实体 | `BlockEntity`；`level.getBlockEntity` | `TileEntity`；`world.getTileEntity` | 19 / 10 |
-| 容器（物品栏接口） | `net.minecraft.world.Container` | `IInventory` | 26 |
-| 菜单 / 槽位列表 | `AbstractContainerMenu`；`menu.slots` | `Container`；`menu.inventorySlots` | 2 |
-| 槽位下标 | `Slot#getContainerSlot()` | **`Slot#getSlotIndex()`** | 4 |
-| NBT 类型 | `CompoundTag` / `ListTag` / `Tag` | `CompoundNBT` / `ListNBT` / `INBT`（另有 `IntNBT` `StringNBT` `FloatNBT` `DoubleNBT` `NumberNBT`） | 14 / 4 / 8 |
-| 文本组件 | `Component`；`Component.literal` | `ITextComponent`；`StringTextComponent` | 5 |
-| 注册表 | `ForgeRegistries.BLOCK_ENTITY_TYPES` | `ForgeRegistries.TILE_ENTITIES` | 1 |
-| 方块名 | `block.getName()` | **`block.getTranslatedName()`** | 1 |
-| 界面事件 | `ScreenEvent.InitScreenEvent / KeyboardKeyPressedEvent / KeyboardCharTypedEvent` | `GuiScreenEvent.InitGuiEvent / KeyboardKeyPressedEvent / KeyboardCharTypedEvent` | 16 |
-| 键位注册 | `RegisterKeyMappingsEvent`（1.19+） | `FMLClientSetupEvent` + `ClientRegistry.registerKeyBinding` | 3 |
-| 物品能力 | `ForgeCapabilities.ITEM_HANDLER` | `CapabilityItemHandler.ITEM_HANDLER_CAPABILITY` | 6 |
-| 右键交互 | `player.getInventory()` | `player.inventory` | 43 |
-| 打开的菜单 | `player.containerMenu` | `player.openContainer` | 2 |
-| 聊天回执 | `player.sendCommand(...)` | `player.sendChatMessage(...)` | 1 |
-| 右键发方块 | `useItemOn(...)` | **`playerController.func_217292_a(player, (ClientWorld) world, hand, hit)`** | 3 |
+| 主题        | 1.18.2 / 1.20.1                                                                  | 1.16.5                                                                                         | 用量         |
+| --------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- | ---------- |
+| 变换矩阵      | `PoseStack`                                                                      | `MatrixStack`                                                                                  | 8          |
+| 字体        | `Font`；`font.width(s)`                                                           | `FontRenderer`；`font.getStringWidth(s)`                                                        | 17 / 45    |
+| 静态绘制      | `GuiGraphics`                                                                    | `AbstractGui.fill(MatrixStack, …)`                                                             | 5          |
+| 容器界面基类    | `AbstractContainerScreen`                                                        | `ContainerScreen`                                                                              | 25         |
+| 世界        | `Level` / `ServerLevel`                                                          | `World` / `ServerWorld`                                                                        | 55 / 25    |
+| 方块实体      | `BlockEntity`；`level.getBlockEntity`                                             | `TileEntity`；`world.getTileEntity`                                                             | 19 / 10    |
+| 容器（物品栏接口） | `net.minecraft.world.Container`                                                  | `IInventory`                                                                                   | 26         |
+| 菜单 / 槽位列表 | `AbstractContainerMenu`；`menu.slots`                                             | `Container`；`menu.inventorySlots`                                                              | 2          |
+| 槽位下标      | `Slot#getContainerSlot()`                                                        | **`Slot#getSlotIndex()`**                                                                      | 4          |
+| NBT 类型    | `CompoundTag` / `ListTag` / `Tag`                                                | `CompoundNBT` / `ListNBT` / `INBT`（另有 `IntNBT` `StringNBT` `FloatNBT` `DoubleNBT` `NumberNBT`） | 14 / 4 / 8 |
+| 文本组件      | `Component`；`Component.literal`                                                  | `ITextComponent`；`StringTextComponent`                                                         | 5          |
+| 注册表       | `ForgeRegistries.BLOCK_ENTITY_TYPES`                                             | `ForgeRegistries.TILE_ENTITIES`                                                                | 1          |
+| 方块名       | `block.getName()`                                                                | **`block.getTranslatedName()`**                                                                | 1          |
+| 界面事件      | `ScreenEvent.InitScreenEvent / KeyboardKeyPressedEvent / KeyboardCharTypedEvent` | `GuiScreenEvent.InitGuiEvent / KeyboardKeyPressedEvent / KeyboardCharTypedEvent`               | 16         |
+| 键位注册      | `RegisterKeyMappingsEvent`（1.19+）                                                | `FMLClientSetupEvent` + `ClientRegistry.registerKeyBinding`                                    | 3          |
+| 物品能力      | `ForgeCapabilities.ITEM_HANDLER`                                                 | `CapabilityItemHandler.ITEM_HANDLER_CAPABILITY`                                                | 6          |
+| 右键交互      | `player.getInventory()`                                                          | `player.inventory`                                                                             | 43         |
+| 打开的菜单     | `player.containerMenu`                                                           | `player.openContainer`                                                                         | 2          |
+| 聊天回执      | `player.sendCommand(...)`                                                        | `player.sendChatMessage(...)`                                                                  | 1          |
+| 右键发方块     | `useItemOn(...)`                                                                 | **`playerController.func_217292_a(player, (ClientWorld) world, hand, hit)`**                   | 3          |
 
-**关于 `func_217292_a`**：这不是"硬编码混淆名"。1.16.5 的 MCP 快照 `20210309-1.16.5`
-**没有**给 `PlayerController#useItemOn` 起友好名，它就以 SRG 名发布；
-而生产运行时本来也走 SRG，所以这个写法在 dev 与实机都正确。
+**关于 `func_217292_a`**：这不是"硬编码混淆名"。1.16.5 的 MCP 快照 `20210309-1.16.5`  
+**没有**给 `PlayerController#useItemOn` 起友好名，它就以 SRG 名发布；  
+而生产运行时本来也走 SRG，所以这个写法在 dev 与实机都正确。  
 （1.12.2 线会遇到同类问题，届时同样只能按 mapped jar 核实。）
 
 ---
@@ -180,19 +180,19 @@ gradlew.bat build --offline                  → BUILD SUCCESSFUL
 cmd //c dev-check\offline-check.bat          → ALL_OK
 ```
 
-| 检查项 | 结果 |
-|---|---|
-| `compileJava`（javac 8 目标） | 0 错误 |
-| 产物 | `build/libs/logiscope-0.1.2-1.16.5-alpha.jar`，244,350 字节，84 个类 |
-| 字节码版本 | major **52**（= Java 8），全部一致 |
-| reobf 是否生效 | jar 内 **83 处 SRG 名**（`func_*` / `f_*`）→ FG5 的 `reobfJar` 确实跑了 |
-| refmap | 无（1.16.5 无 mixin，不需要） |
-| 资源 | `assets/logiscope/lang/{en_us,zh_cn}.json`、`pack.mcmeta`、`META-INF/mods.toml` 齐全 |
-| 离线断言 | TestChart **461 条，0 失败** |
-| 渲染基准 | BenchRender 通过 |
-| jar 验收 | `verify-jar.py` 三项全过（三类文件齐全 / 占位符已替换 / 元数据符合预期） |
-| SRG 名交叉核对 | jar 内 83 个 `func_*` / `f_*` **全部能在 `forge-1.16.5-36.2.42-srg.jar` 里找到**（0 缺失）→ 没有拼错的重混淆名 |
-| 类引用核对 | 引用的 99 个 `net.minecraft*` 类里 96 个在 srg jar 内；缺的 3 个是 `Dist` / `IEventBus` / `FMLEnvironment` —— 它们住在 Forge 启动器的库 jar（forgespi / eventbus / fmlcore）里，运行时由 Forge 提供，**不是缺陷** |
+| 检查项                       | 结果                                                                                                                                                                          |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `compileJava`（javac 8 目标） | 0 错误                                                                                                                                                                        |
+| 产物                        | `build/libs/logiscope-0.1.2-1.16.5-alpha.jar`，244,350 字节，84 个类                                                                                                              |
+| 字节码版本                     | major **52**（= Java 8），全部一致                                                                                                                                                 |
+| reobf 是否生效                | jar 内 **83 处 SRG 名**（`func_*` / `f_*`）→ FG5 的 `reobfJar` 确实跑了                                                                                                               |
+| refmap                    | 无（1.16.5 无 mixin，不需要）                                                                                                                                                       |
+| 资源                        | `assets/logiscope/lang/{en_us,zh_cn}.json`、`pack.mcmeta`、`META-INF/mods.toml` 齐全                                                                                            |
+| 离线断言                      | TestChart **461 条，0 失败**                                                                                                                                                    |
+| 渲染基准                      | BenchRender 通过                                                                                                                                                              |
+| jar 验收                    | `verify-jar.py` 三项全过（三类文件齐全 / 占位符已替换 / 元数据符合预期）                                                                                                                             |
+| SRG 名交叉核对                 | jar 内 83 个 `func_*` / `f_*` **全部能在 `forge-1.16.5-36.2.42-srg.jar` 里找到**（0 缺失）→ 没有拼错的重混淆名                                                                                    |
+| 类引用核对                     | 引用的 99 个 `net.minecraft*` 类里 96 个在 srg jar 内；缺的 3 个是 `Dist` / `IEventBus` / `FMLEnvironment` —— 它们住在 Forge 启动器的库 jar（forgespi / eventbus / fmlcore）里，运行时由 Forge 提供，**不是缺陷** |
 
 `mods.toml` 展开后的关键字段（实测从 jar 里读回）：
 
@@ -204,32 +204,120 @@ dependencies: forge [36,) side=CLIENT ; minecraft [1.16.5] side=CLIENT
 
 ---
 
-## 六、已知限制 / 待实机验证
+## 六、实机第一轮：F9 关掉容器 + 关闭面板闪退（2026-10-20，已修）
 
-1. **实机未验证**。`runClient` 需要图形界面，本机只跑到"编译 + 打包 + 离线断言"。
-   待验清单见 `docs/VERIFY.md`，重点：
+**现象**（用户 runClient 实测）：
+1. 打开箱子 → 按 F9 → **箱子界面被关闭**，但面板出来了，"创建探针"能用；
+2. 再点"关闭" → **卡死闪退**。
+
+**崩溃栈**（`crash-2026-10-20_17.18.32-client.txt`）：
+
+```
+java.lang.StackOverflowError: mouseClicked event handler
+  at Minecraft.displayGuiScreen(Minecraft.java:842)
+  at ScopeScreen.closeScope(ScopeScreen.java:558)
+  at ScopeScreen.onClose(ScopeScreen.java:564)
+  at Minecraft.displayGuiScreen(Minecraft.java:842)   ← 循环
+```
+
+**两个独立缺陷，都源于 1.16.5 与 1.17+ 的语义差异**：
+
+### 缺陷 1：`isOwnInventoryScreen` 判据选错（导致箱子被关）
+
+原写法 `screen instanceof ContainerScreen` —— 本意是"排除玩家自己的背包界面"，
+但 1.16.5 的 `ContainerScreen` 是**所有**容器界面的抽象基类：
+
+```
+ContainerScreen                 (abstract)   ← 判据命中的是这一层
+  ├ ChestScreen（箱子/熔炉/模组设备）
+  └ DisplayEffectsScreen        (abstract)
+       ├ InventoryScreen（生存背包）
+       └ CreativeScreen（创造背包）
+```
+
+于是箱子界面也被判成"自己的背包" → 不进 overlay → 走 `openStandalone` →
+`displayGuiScreen(ScopeScreen)` → 字节码里 `if (新屏 != 旧屏) 旧屏.onClose()` →
+`ChestScreen.onClose()` → `container.onContainerClosed(player)` → **容器关闭**。
+
+> 对照：1.18.2 线用的是 `EffectRenderingInventoryScreen`，那是**背包专有**基类，
+> 不会误伤箱子。移植时按"抽象容器界面基类"的语义把它换成了 `ContainerScreen`，
+> 层级选高了一层 —— 典型的"近名不同层级"。
+
+**修法**：改成行为判据，跨版本都成立：
+
+```java
+if (!(screen instanceof ContainerScreen)) return false;
+return ((ContainerScreen<?>) screen).getContainer() == mc.player.container;
+```
+
+箱子界面的容器是 `ChestContainer` ≠ `player.container` → 不算背包 → 走 overlay ✓
+
+### 缺陷 2：`onClose()` 里发起关闭（导致闪退）
+
+1.16.5 的两个关闭语义**没有分开**（1.17+ 才分开）：
+
+| 入口 | 角色 | 谁调它 |
+|---|---|---|
+| `closeScreen()` | **发起关闭** | vanilla `Screen#keyPressed` 的 ESC 分支 |
+| `onClose()` | **被通知关闭** | `Minecraft#displayGuiScreen`（切屏时对旧屏）、`ForgeHooksClient#popGuiLayerInternal`（弹层前） |
+
+原来的 `onClose() { closeScope(); }` 就是"关闭 → 被通知 onClose → 再关闭"：
+`displayGuiScreen(null)` 发现新屏(null) ≠ 旧屏(this) → 调 `this.onClose()` → 又关闭 → 无限递归。
+
+**修法**：
+- `onClose()` 改成空实现（只留注释说明范式）；
+- 新增覆写 `closeScreen() → closeScope()` —— 这样 ESC 也能正确走"弹层"而不是
+  vanilla 的 `displayGuiScreen(null)`（后者会 `clearGuiLayers`，把面板底下的容器界面
+  从栈里丢掉：容器还开着、界面再也回不来）；
+- `closeScope()` 加 `closing` 重入保护：将来若再有人在"被通知关闭"里调它，
+  代价是"关不掉"，而不是整个游戏崩掉。
+
+### 顺带
+
+- `openOverlay` 在 `mc.currentScreen == null` 时降级走 `openStandalone`（压层没意义）；
+- 三处关闭/打开路径各加一行 `LOGGER.debug`，日志里能直接看出走了哪条（`压浮层 parent=ChestScreen` / `独立打开 旧屏=...`）；
+- 清掉移植时留下的重复 `import ContainerScreen`。
+
+**回归**：`build` 通过；离线门禁 461 条断言全过。**实机待复测**（见下节）。
+
+### 复测点（按优先级）
+
+1. 箱子界面按 F9 → 面板浮在箱子上、**箱子还在**（背景可见、格子可点）；日志应为 `压浮层 parent=ChestScreen`。
+2. 面板上点「关闭」→ 回到箱子界面，不闪退；日志应为 `关闭面板 overlay=true`。
+3. 面板上按 ESC → 同上（走 `closeScreen` 覆写）。
+4. 背包界面按 F9 → 面板独立打开（`独立打开 旧屏=InventoryScreen`），关闭后回到游戏。
+5. 无界面按 F9 → 独立打开；再按 F9 → 收起。
+
+---
+
+## 七、已知限制 / 待实机验证
+
+1. **实机只跑了第一轮**（F9 呼出 / 关闭两条路径，发现的缺陷见 §六，已修待复测），
+   其余功能未验。待验清单见 `docs/VERIFY.md`，重点：
    - F9 在容器 GUI 内呼出面板（`GuiScreenEvent` 路由与 1.18.2 不同代，键位事件优先级要实测）；
    - 选格高亮（1.16.5 的 `renderSlotHighlight` 签名与 1.18.2 不同）；
    - 物品数量叠层（`renderItemOverlayIntoGUI` 的 `FontRenderer` 参数）；
    - 右键方块探测（`func_217292_a` 直调路径）。
-2. **`IClientItemExtensions` 不存在**（1.18.2 也没有）。物品数量叠层只能用默认字体，
+2. **`IClientItemExtensions` 不存在**（1.18.2 也没有）。物品数量叠层只能用默认字体，  
    与 1.18.2 线同一处理。
-3. **`BlockState#getMenuProvider` 不存在**（1.17+ 才有）。容器检测只能走
-   `TileEntity instanceof IInventory` / `ITEM_HANDLER_CAPABILITY` 这两条路，
+3. **`BlockState#getMenuProvider` 不存在**（1.17+ 才有）。容器检测只能走  
+   `TileEntity instanceof IInventory` / `ITEM_HANDLER_CAPABILITY` 这两条路，  
    即"结构判据 + 能力判据"，与 1.20.1 线的探测口径一致。
-4. **Java 8 语法上限**。后续从 `main`（1.21.1）cherry-pick 的改动，凡用到
-   record / 箭头 switch / 模式匹配 / `var` 的，都要手工降级 —— 编译器会逐条拦住，
+4. **Java 8 语法上限**。后续从 `main`（1.21.1）cherry-pick 的改动，凡用到  
+   record / 箭头 switch / 模式匹配 / `var` 的，都要手工降级 —— 编译器会逐条拦住，  
    但工作量不可忽略。
-5. **构建需要联网一次**。FG5 首次要下载 MC client、mappings 与 MCP 配置
-   （`downloadMcpConfig` / `extractSrg`），之后整个工具链在 `~/.gradle/caches/forge_gradle/` 落地，
+5. **构建需要联网一次**。FG5 首次要下载 MC client、mappings 与 MCP 配置  
+   （`downloadMcpConfig` / `extractSrg`），之后整个工具链在 `~/.gradle/caches/forge_gradle/` 落地，  
    日常 `--offline` 可用。
 
 ---
 
-## 七、与其它版本线的关系
+## 八、与其它版本线的关系
 
 | 分支 | MC / 加载器 | 构建栈 | Java | jar 名 |
-|---|---|---|---|---|
+| -- | -------- | --- | ---- | ----- |
+
+
 | `main` | 1.21.1 / NeoForge 21.1.x | MDG `net.neoforged.moddev` | 21 | `logiscope-0.1.2-1.21.1.jar` |
 | `1.20.1-neo` | 1.20.1 / NeoForge 47.1.x（同一 jar 也跑 Forge 47.x） | MDG legacy | 17 | `logiscope-0.1.2-1.20.1-alpha.jar` |
 | `1.18.2-forge` | 1.18.2 / Forge 40.x | MDG legacy | 17 | `logiscope-0.1.2-1.18.2-alpha.jar` |

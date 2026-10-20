@@ -500,6 +500,8 @@ public final class ScopeScreen extends Screen {
     @Nullable
     private final Screen parent;
     private final boolean overlayMode;
+    /** 关闭动作只发一次（防"关闭 → 被通知关闭 → 再关闭"的无限递归，见 closeScope） */
+    private boolean closing;
 
     public ScopeScreen(@Nullable Screen parent, Page page, int probeId) {
         super(new TranslationTextComponent("logiscope.title"));
@@ -515,9 +517,21 @@ public final class ScopeScreen extends Screen {
 
     /** 压在当前容器界面上打开 */
     public static void openOverlay(Minecraft mc, Page page, int probeId) {
+        if (mc.currentScreen == null) {
+            // 没有可压的父界面时压层没有意义：栈里不会进东西，关的时候还得按独立模式收尾。
+            // 直接走独立模式，两条路径各自自洽。
+            openStandalone(mc, page, probeId);
+            return;
+        }
         ScopeScreen scope = new ScopeScreen(mc.currentScreen, page, probeId);
+        // 排查用：1.16.5 上"压浮层"与"独立打开"的后果完全不同（前者不碰容器，
+        //   后者会触发旧屏 onClose），一行日志省得上机猜。注意要在 push 之前取 parent ——
+        //   pushGuiLayer 会把 currentScreen 直接换成我们自己。
+        Screen bg = mc.currentScreen;
         ForgeHooksClient.pushGuiLayer(mc, scope);
-        // pushGuiLayer 不会替你释放鼠标（那是 Minecraft#setScreen 干的活），
+        LogiScopeMod.LOGGER.debug("[LogiScope] 压浮层 page={} parent={}", page,
+                bg == null ? "null" : bg.getClass().getSimpleName());
+        // pushGuiLayer 不会替你释放鼠标（那是 Minecraft#displayGuiScreen 干的活），
         //   不手动释放的话界面上根本看不到光标，面板就没法点、没法拖、没法框选。
         mc.mouseHelper.ungrabMouse();
         KeyBinding.unPressAllKeys();
@@ -525,7 +539,12 @@ public final class ScopeScreen extends Screen {
 
     /** 没有容器界面可压时，当普通界面打开（例如关掉界面后只看波形） */
     public static void openStandalone(Minecraft mc, Page page, int probeId) {
+        Screen bg = mc.currentScreen;
         mc.displayGuiScreen(new ScopeScreen(null, page, probeId));
+        // ★ 1.16.5：displayGuiScreen 对"旧屏"会调 onClose()，所以这里会顺手把旧界面关掉
+        //   （箱子界面被关就是这么来的）。正常路径不该走到这里 —— 有容器界面时走 openOverlay。
+        LogiScopeMod.LOGGER.debug("[LogiScope] 独立打开 page={} 旧屏={}（旧屏将被 onClose 关闭）",
+                page, bg == null ? "null" : bg.getClass().getSimpleName());
     }
 
     /**
@@ -551,7 +570,16 @@ public final class ScopeScreen extends Screen {
 
     /** 关闭面板：浮层模式弹栈还原容器界面，独立模式回到游戏 */
     public void closeScope() {
+        // 重入保护：1.16.5 的关闭链是 closeScreen/closeScope → displayGuiScreen/popGuiLayer
+        //   → 旧屏 onClose()，任何一环再把关闭动作发起来就会无限递归（实测 StackOverflow 闪退）。
+        //   语义已经按本代规矩摆正（见下面的 closeScreen / onClose），这里再兜一层：
+        //   万一将来又有人在"被通知关闭"的回调里调它，代价是"关不掉"，而不是整个游戏崩掉。
+        if (closing) {
+            return;
+        }
+        closing = true;
         Minecraft mc = Minecraft.getInstance();
+        LogiScopeMod.LOGGER.debug("[LogiScope] 关闭面板 overlay={}", overlayMode);
         if (overlayMode) {
             ForgeHooksClient.popGuiLayer(mc);
         } else {
@@ -559,9 +587,35 @@ public final class ScopeScreen extends Screen {
         }
     }
 
+    /**
+     * ★ 1.16.5 发起关闭的入口，必须覆写。
+     *
+     * vanilla `Screen#keyPressed` 的 ESC 分支调的是 `closeScreen()`，其默认实现是
+     * `mc.displayGuiScreen(null)`；而 `displayGuiScreen` 第一件事是 `clearGuiLayers(mc)`
+     * —— 浮层模式下面板底下压着的容器界面会被直接从栈里丢掉：容器还开着，界面却再也回不来。
+     * 覆写成 closeScope() 后，ESC 与「关闭」按钮走同一条路：弹层 / 回游戏。
+     */
+    @Override
+    public void closeScreen() {
+        closeScope();
+    }
+
+    /**
+     * ★ 1.16.5 的 onClose 是「被通知要关闭」，**绝不能在这里再发起关闭**。
+     *
+     * 两个调用方：
+     *   · `Minecraft#displayGuiScreen(newScreen)`：新屏 != 旧屏时调 `旧屏.onClose()`；
+     *   · `ForgeHooksClient#popGuiLayerInternal`：弹层前调 `currentScreen.onClose()`。
+     *
+     * 所以在 onClose 里调 closeScope() 就是「关闭 → 通知 onClose → 再关闭」的无限递归，
+     * 实测就是 StackOverflowError（崩溃栈里 displayGuiScreen ↔ onClose ↔ closeScope 死循环）。
+     *
+     * 1.17+ 才把两者分开（切屏调 `removed()`、onClose 只给 ESC 用），
+     * 所以 1.18.2 / 1.20 的同名代码不炸 —— 这是本代独有的语义差异。
+     */
     @Override
     public void onClose() {
-        closeScope();
+        // 被通知关闭：这里只该做收尾（保存输入、清焦点）。当前没有这类状态。
     }
 
     @Override
@@ -1606,7 +1660,7 @@ public final class ScopeScreen extends Screen {
 
     @Override
     public void render(MatrixStack pose, int mouseX, int mouseY, float partialTick) {
-        // 1.18.2 没有 GuiGraphics：这里把它"synthesize"出来，
+        // 1.16.5 没有 GuiGraphics：这里把它"synthesize"出来，
         // 下面一整段沿用 1.20 线的绘制调用（g.fill / g.drawString / g.pose()）。
         Draw g = new Draw(pose);
         rebuildIfNeeded();
