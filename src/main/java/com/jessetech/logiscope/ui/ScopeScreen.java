@@ -2959,6 +2959,9 @@ public final class ScopeScreen extends Screen {
                 // 选格模式下由我们自己画"选中/可选中"的框，别叠上原版的高亮
                 if (!cellMode) {
                     AbstractGui.fill(g.pose(), sx, sy, sx + 16, sy + 16, 0x80FFFFFF);
+                    // 50% 白对物品是"洗白"效果：vanilla 里这层在物品**下面**，
+                    // 我们补画时在物品上面，所以必须把物品重画一遍盖回去
+                    repaintSlotItem(g, slot, left, top);
                 }
                 return;
             }
@@ -2993,13 +2996,48 @@ public final class ScopeScreen extends Screen {
             if (selected) {
                 g.fill(sx, sy, sx + 18, sy + 18, 0x4822CC88);
                 ring(g, sx, sy, 18, 18, 0xFF3FE0A0);
+                repaintSlotItem(g, slot, left, top);
             } else if (hover && selectable) {
                 ring(g, sx, sy, 18, 18, 0xFFFFFFFF);
             } else if (!selectable) {
                 // 玩家自己的背包格 / 模组假槽位：压暗，明确"这里点不了"
                 g.fill(sx, sy, sx + 18, sy + 18, 0x38000000);
+                // 压暗只该作用在格子底色上：物品照常清晰（与 vanilla 的不可用槽位一致），
+                //   否则用户根本看不出那格里是什么
+                repaintSlotItem(g, slot, left, top);
             }
         }
+    }
+
+    /**
+     * 把某一格的物品重新画一遍，压在我们刚补的底色/高亮**之上**。
+     *
+     * 为什么需要 ★ vanilla 的绘制顺序是「格子底色 → 悬停高亮 → 物品」，
+     * 也就是**高亮本来就该在物品下面**；而我们的浮层是在背景容器界面
+     * **整体画完之后**才画的（Forge 的 GuiLayer 机制），补画高亮必然盖住物品。
+     * 实测表现（实机反馈）：
+     *   · 选格模式 → 已选格里的 4 个草方块被绿色块洗成一片，看不清是什么；
+     *   · 非选格模式 → 悬停格的物品被 50% 白盖住（0x80FFFFFF）。
+     *
+     * 补画一次物品即可还原正确观感 —— 效果**等价于**"高亮在物品之下"，
+     * 而且不必接管背景层的渲染管线（那条路要放弃 pushGuiLayer 自己维护父屏，
+     * 输入转发/缩放/关闭语义全得重写，代价远大于收益）。
+     *
+     * z 抬高 1px：保证压在高亮之上又低于光标上的手持物品（那层用 232）。
+     * 数量/耐久叠层要跟着重画，否则数字被底色吃掉。
+     */
+    private void repaintSlotItem(Draw g, Slot slot, int guiLeft, int guiTop) {
+        ItemStack stack = slot.getStack();
+        if (stack.isEmpty()) {
+            return;
+        }
+        int sx = guiLeft + slot.xPos;
+        int sy = guiTop + slot.yPos;
+        g.pose().push();
+        g.pose().translate(0.0F, 0.0F, 1.0F);
+        g.renderItem(stack, sx, sy);
+        g.renderItemDecorations(this.font, stack, sx, sy);
+        g.pose().pop();
     }
 
     private static void ring(Draw g, int x, int y, int w, int h, int color) {

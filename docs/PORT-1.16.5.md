@@ -290,6 +290,52 @@ return ((ContainerScreen<?>) screen).getContainer() == mc.player.container;
 
 ---
 
+## 六之二、实机第二轮：格子高亮盖住物品（2026-10-20，已修）
+
+**现象**（用户截图）：选格提示框渲染正常，但——
+- 选格模式下，**已选格里的物品被绿色块洗成一片**（4 个草方块只剩轮廓）；
+- 未选格（普通悬停）时，**悬停格的物品被一层白蒙住**。
+
+**根因：绘制顺序**。vanilla 的 `ContainerScreen#render` 顺序是
+
+```
+格子底色 → 悬停高亮 → 物品（renderSlot）
+```
+
+也就是**高亮本来就该在物品下面**。但我们的浮层是在背景容器界面**整体画完之后**才画的
+（Forge `pushGuiLayer` + `ForgeHooksClient.drawScreen` 先遍历 guiLayers 再画当前屏），
+所以补画的高亮必然压在物品上。
+
+而且这个顺序**改不了**：`ForgeHooksClient.drawScreen` 给 `guiLayers` 里每一层传的鼠标坐标是
+硬编码的 `Integer.MAX_VALUE`（javap 已核实，`lambda$drawScreen$4` 里两个 `2147483647`），
+背景层永远算不出 `hoveredSlot` —— 这正是我们当初要自己补画高亮的原因。
+
+**修法：补画一次物品，压在高亮之上**（`repaintSlotItem`）。
+
+```java
+private void repaintSlotItem(Draw g, Slot slot, int guiLeft, int guiTop) {
+    ... g.pose().translate(0, 0, 1.0F);        // 抬 1px，压在高亮之上、低于手持物品(232)
+    g.renderItem(stack, sx, sy);               // renderItemAndEffectIntoGUI
+    g.renderItemDecorations(this.font, stack, sx, sy);   // 数量/耐久叠层跟着重画
+}
+```
+
+调用点三处：
+| 位置 | 被什么盖住 | 处理 |
+|---|---|---|
+| `renderBackgroundHover`（普通悬停） | `0x80FFFFFF` 50% 白 | 填完重画物品 |
+| `renderCellOverlay` 已选格 | `0x4822CC88` 绿填充 | 填完+框完重画物品 |
+| `renderCellOverlay` 不可选格 | `0x38000000` 压暗 | 压完重画物品（**底色变暗、物品照常清晰**，与 vanilla 的不可用槽位一致） |
+
+**为什么不用"接管背景层渲染"这种彻底方案**：那要放弃 `pushGuiLayer`、自己保存父屏并手动
+`parent.render(pose, 真实鼠标, ...)`，等于重写输入转发 / 缩放 / 关闭语义。
+代价远大于收益 —— 补画一次物品是**效果等价**的最小改动。
+
+**已知残留**：`hover` 态的 1px 白框（`ring` 画在 `sx-1 .. sx+17`）会压住格子最外 1px 的物品像素；
+vanilla 的选中框同样如此，不处理。
+
+---
+
 ## 七、已知限制 / 待实机验证
 
 1. **实机只跑了第一轮**（F9 呼出 / 关闭两条路径，发现的缺陷见 §六，已修待复测），
