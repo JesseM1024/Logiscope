@@ -24,7 +24,7 @@
 ## 快速开始
 
 ```bat
-:: 构建
+:: 构建（★ 发布 / 装进整合包只用这个）
 gradlew.bat build
 
 :: 进游戏自测（会启动一个独立的开发客户端，工作目录 = 1_16_5_forge\）
@@ -33,6 +33,19 @@ gradlew.bat runClient
 :: IDEA 运行配置（ForgeGradle 5 没有 createLaunchScripts，用这个生成 .idea 运行项）
 gradlew.bat genIntellijRuns
 ```
+
+> ⚠️ **装进真实游戏实例 / 整合包，必须用 `build`，不要用 `jar`**。
+> ForgeGradle 5 的分工：
+> - `jar` 只打包，产物是**开发映射（MCP 名）**，`getGuiLeft` / `getStack` 这类名字原样保留；
+> - `reobfJar` 才把 MCP 名重混淆成生产运行时用的 **SRG 名**（`func_*` / `f_*`）；
+> - `build` → `assemble` → 跑了 `reobfJar`，并**覆盖** `build/libs/` 里的同名 jar。
+>
+> 两个产物**同名同路径**，后跑的覆盖先跑的 —— 在 IDEA 里点一下 `jar`，刚 build 好的可用包就变成
+> dev 版了。**判据：可用包 ≈ 245 KB、jar 内 84 处 `func_*`；dev 包 ≈ 242 KB、只有源码手写的
+> `func_217292_a` 一处。**
+>
+> 安装步骤：删掉实例 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.2-1.16.5-alpha.jar` 过去。
+> 纯客户端模组，服务端不装也不会报错。
 
 > ⚠️ **Windows 上请用 `gradlew.bat`，不要用 Git Bash 的 `./gradlew`**
 > （cygpath 路径不匹配，会报 `ClassNotFoundException: GradleWrapperMain`）。

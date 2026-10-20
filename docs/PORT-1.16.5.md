@@ -79,6 +79,30 @@ accesstransformers / eventbus / coremods / brigadier / authlib …），
 **必须全给**：只拷 mapped jar 时运行期会 `NoClassDefFoundError: com/mojang/brigadier/Message`  
 （`DataProbe` 的类链接阶段就会碰到 brigadier）。
 
+### ★ 拿哪个任务出包：`build`，不是 `jar`
+
+这是 ForgeGradle 与 MDG 的一个实质差别，1.18.2 / 1.20 线**没有**这个坑。
+
+| 任务 | 做了什么 | 产物（实测） | 能不能装进实例 |
+|---|---|---|---|
+| `jar` | 只打包 | 242,419 B，**1 处 SRG 名**（只有源码手写的 `func_217292_a`），其余全是 `getGuiLeft` / `getStack` / `mouseClicked` 这类 MCP 友好名 | ❌ 生产运行时用 SRG，必然 `NoSuchMethodError` |
+| `build` | `assemble` → `jar` + **`reobfJar`** | 245,041 B，**84 处 SRG 名** | ✅ |
+
+`reobfJar` 把 MCP 名重混淆成 SRG 名，并**覆盖** `build/libs/` 里的同名 jar。
+也就是说两个产物**同名同路径**，后跑的覆盖先跑的 —— 在 IDEA 里点一下 `jar`，
+刚 build 好的可用包就退化成 dev 版了（实测：245,041 → 242,419，SRG 84 → 1）。
+
+**判据**（不用开游戏就能分辨）：
+
+```bat
+:: 看大小
+dir build\libs\
+:: 245,041 B = 可用；242,419 B = dev 版，别用
+```
+
+装进实例：删掉 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.2-1.16.5-alpha.jar`。
+纯客户端模组，服务端不装也不报错。
+
 ---
 
 ## 四、代码层
