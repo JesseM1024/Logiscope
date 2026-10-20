@@ -207,16 +207,17 @@ cmd //c dev-check\offline-check.bat          → ALL_OK
 | 检查项                       | 结果                                                                                                                                                                          |
 | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `compileJava`（javac 8 目标） | 0 错误                                                                                                                                                                        |
-| 产物                        | `build/libs/logiscope-0.1.2-1.16.5-alpha.jar`，244,350 字节，84 个类                                                                                                              |
+| 产物                        | `build/libs/logiscope-0.1.2-1.16.5-alpha.jar`，245,085 字节，84 个类                                                                                                              |
 | 字节码版本                     | major **52**（= Java 8），全部一致                                                                                                                                                 |
-| reobf 是否生效                | jar 内 **83 处 SRG 名**（`func_*` / `f_*`）→ FG5 的 `reobfJar` 确实跑了                                                                                                               |
+| reobf 是否生效                | jar 内 **84 处 SRG 名**（`func_*` / `f_*`）→ FG5 的 `reobfJar` 确实跑了                                                                                                               |
 | refmap                    | 无（1.16.5 无 mixin，不需要）                                                                                                                                                       |
 | 资源                        | `assets/logiscope/lang/{en_us,zh_cn}.json`、`pack.mcmeta`、`META-INF/mods.toml` 齐全                                                                                            |
 | 离线断言                      | TestChart **461 条，0 失败**                                                                                                                                                    |
 | 渲染基准                      | BenchRender 通过                                                                                                                                                              |
 | jar 验收                    | `verify-jar.py` 三项全过（三类文件齐全 / 占位符已替换 / 元数据符合预期）                                                                                                                             |
-| SRG 名交叉核对                 | jar 内 83 个 `func_*` / `f_*` **全部能在 `forge-1.16.5-36.2.42-srg.jar` 里找到**（0 缺失）→ 没有拼错的重混淆名                                                                                    |
+| SRG 名交叉核对                 | jar 内 84 个 `func_*` / `f_*` **全部能在 `forge-1.16.5-36.2.42-srg.jar` 里找到**（0 缺失）→ 没有拼错的重混淆名                                                                                    |
 | 类引用核对                     | 引用的 99 个 `net.minecraft*` 类里 96 个在 srg jar 内；缺的 3 个是 `Dist` / `IEventBus` / `FMLEnvironment` —— 它们住在 Forge 启动器的库 jar（forgespi / eventbus / fmlcore）里，运行时由 Forge 提供，**不是缺陷** |
+| **运行时引用检查（第 5 步）**        | `dev-check/check-runtime-refs.py`：101 个外部类引用全部可解析，且**无黑名单命中**（`org/slf4j` 清零）。见 §六之三 —— 这条是实机崩过一次才补上的 |
 
 `mods.toml` 展开后的关键字段（实测从 jar 里读回）：
 
@@ -380,6 +381,61 @@ vanilla 的槽位间距是 2px，两层框正好落在间隙里，**格内一个
 - `selected` / 不可选格仍然靠"补画物品"来压住底色；实机看着正常，但按上面那条实测，
   **它可能只是被 28% / 22% 的低不透明度掩盖了问题**。若将来把这两个填充调深，
   会重新出现"物品被蒙住"，届时同样改成外框。
+
+---
+
+## 六之三、实机第三轮：装进 HMCL 实例启动即崩（2026-10-20，已修）
+
+**现象**：把 `build/libs/logiscope-0.1.2-1.16.5-alpha.jar` 放进 HMCL 的 `1.16.5-Forge` 实例
+（mods 里还有 Mekanism / AE2 / Create / Flywheel / JEI），启动直接崩在 mod 加载阶段：
+
+```
+Description: Mod loading error has occurred
+Caused by 0: java.lang.NoClassDefFoundError: org/slf4j/LoggerFactory
+    at com.jessetech.logiscope.LogiScopeMod.<clinit>(LogiScopeMod.java:40)
+Failure message: LogiScope has class loading errors
+```
+
+**根因：`org.slf4j` 在 1.16.5 生产运行时不可见。**
+
+- 编译期它能过，是因为 FG5 的 `configurations.minecraft` 里确实有 `slf4j-api-1.8.0-beta4.jar`
+  （为 `runClient` 准备的）；
+- 生产实例的类加载器只暴露 Forge 的 libraries 集合，里面只有 `log4j-slf4j18-impl`（绑定层），
+  **没有 slf4j-api**；
+- 结果就是"开发客户端跑得好好的、装进实例立刻崩"，而且崩在 `<clinit>`——
+  `LOGGER` 是 static final 字段，类初始化时就炸，连一句日志都打不出来。
+
+1.18.2 / 1.20.1 线有 slf4j-api，所以同一个 import 在那两条线是好的 —— 这是移植时
+"看起来一样的代码，换一代就换了个可用性"的又一例。
+
+**修法**：改用 1.16.5 自带的 log4j2（MC 与 Forge 自己都用它）。
+
+```java
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+public static final Logger LOGGER = LogManager.getLogger("LogiScope");
+```
+
+调用处一行没改：`warn(String, Object...)` / `debug(String, Throwable)` 在 log4j2 上签名一致。
+
+### 补了一道离线门禁（`dev-check/check-runtime-refs.py`）
+
+这类问题 javac 抓不到（编译期有）、`verify-jar.py` 也抓不到（只看元数据）。新脚本做两件事：
+
+1. **正向**：解析 jar 里每个 class 常量池的 `CONSTANT_Class`，逐个到 `build/mcdeps` 里找 owner；
+2. **反向黑名单**：命中 `FORBIDDEN_PREFIXES` 直接报错。
+
+**为什么要反向**：`build/mcdeps` 是 dev classpath 的副本，**天然比生产多东西** ——
+`org/slf4j/LoggerFactory` 在 mcdeps 里就有，正向检查永远抓不到这次这个 bug。
+所以黑名单那条才是主力，正向负责兜"拼错类名""引用了不存在的类"。
+
+已接入 `offline-check.bat` 第 5 步，并且**验证过它有效**：把 slf4j 临时改回去重编，
+脚本准确报出 2 个 `FORBIDDEN` 且退出码 1。
+
+> 当前黑名单只有 `org/slf4j/`。将来再遇到同类问题（某包 dev 有、实机没有），
+> 追加到 `FORBIDDEN_PREFIXES` 并**写明实测依据**，别凭印象加。
+
+---
 
 ---
 

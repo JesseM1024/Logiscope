@@ -19,8 +19,8 @@ import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.config.ModConfig;
 import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 import net.minecraftforge.fml.loading.FMLEnvironment;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
 /**
  * LogiScope —— 纯客户端物流探测示波器。
@@ -37,7 +37,19 @@ import org.slf4j.LoggerFactory;
 public final class LogiScopeMod {
 
     public static final String MODID = "logiscope";
-    public static final Logger LOGGER = LoggerFactory.getLogger("LogiScope");
+    /**
+     * ★ 1.16.5 只能用 log4j2，**不能**用 slf4j。
+     *
+     * 实测崩溃：`NoClassDefFoundError: org/slf4j/LoggerFactory`（`<clinit>` 就炸，
+     * mod 在加载阶段被判 "has class loading errors"）。
+     * 原因：1.16.5 的运行时 classpath 里只有 `log4j-slf4j18-impl`（绑定层），
+     * **没有 slf4j-api**；而编译期它从别处漏进来了，于是"编得过、跑不了"。
+     * 1.18.2 / 1.20.1 线有 slf4j-api，所以同一个 import 在那两条线是好的。
+     *
+     * 1.16.5 的 MC / Forge 自己都用 log4j2（`Minecraft.LOGGER = LogManager.getLogger()`），
+     * 换成它即可；方法签名兼容（`warn(String, Object...)` / `debug(String, Throwable)` 都有）。
+     */
+    public static final Logger LOGGER = LogManager.getLogger("LogiScope");
 
     /**
      * 全局唯一的探针管理器。所有层都通过它拿数据。
