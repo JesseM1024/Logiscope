@@ -29,7 +29,6 @@ import com.mojang.blaze3d.matrix.MatrixStack;
 import net.minecraft.util.Util;
 import net.minecraft.client.settings.KeyBinding;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.AbstractGui;
 import net.minecraft.client.gui.FontRenderer;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraft.client.gui.screen.inventory.ContainerScreen;
@@ -2958,10 +2957,18 @@ public final class ScopeScreen extends Screen {
                 backgroundHoveredSlot = slot;
                 // 选格模式下由我们自己画"选中/可选中"的框，别叠上原版的高亮
                 if (!cellMode) {
-                    AbstractGui.fill(g.pose(), sx, sy, sx + 16, sy + 16, 0x80FFFFFF);
-                    // 50% 白对物品是"洗白"效果：vanilla 里这层在物品**下面**，
-                    // 我们补画时在物品上面，所以必须把物品重画一遍盖回去
-                    repaintSlotItem(g, slot, left, top);
+                    // ★ 只画**格子外侧**的光晕，格内 16×16 一个像素都不碰。
+                    //
+                    // 曾经这里是 vanilla 那套 `fill(0x80FFFFFF)` 整格填充 + 事后重画物品，
+                    // 实测**重画物品不生效**（物品照旧被 50% 白洗掉；同一份重画代码在
+                    // 选格覆盖层里却是好的，原因未定位到——两处坐标系、z、状态完全相同）。
+                    //
+                    // 结论：不要再依赖"事后再补画物品"这种和渲染顺序对抗的做法。
+                    // 物品铺满整个 16×16 格子，**任何**格内填充都必然盖住它，
+                    // 所以高亮只能画在格子外面：外圈半透明光晕 + 贴身 1px 实线，
+                    // 视觉上仍是"这一格被点亮了"，但物品永远不被遮。
+                    ring(g, sx - 2, sy - 2, 20, 20, 0x55FFFFFF);
+                    ring(g, sx - 1, sy - 1, 18, 18, 0xFFFFFFFF);
                 }
                 return;
             }

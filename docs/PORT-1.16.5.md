@@ -310,7 +310,7 @@ return ((ContainerScreen<?>) screen).getContainer() == mc.player.container;
 硬编码的 `Integer.MAX_VALUE`（javap 已核实，`lambda$drawScreen$4` 里两个 `2147483647`），
 背景层永远算不出 `hoveredSlot` —— 这正是我们当初要自己补画高亮的原因。
 
-**修法：补画一次物品，压在高亮之上**（`repaintSlotItem`）。
+**第一版修法（失败）：补画一次物品，压在高亮之上**
 
 ```java
 private void repaintSlotItem(Draw g, Slot slot, int guiLeft, int guiTop) {
@@ -320,19 +320,42 @@ private void repaintSlotItem(Draw g, Slot slot, int guiLeft, int guiTop) {
 }
 ```
 
-调用点三处：
-| 位置 | 被什么盖住 | 处理 |
-|---|---|---|
-| `renderBackgroundHover`（普通悬停） | `0x80FFFFFF` 50% 白 | 填完重画物品 |
-| `renderCellOverlay` 已选格 | `0x4822CC88` 绿填充 | 填完+框完重画物品 |
-| `renderCellOverlay` 不可选格 | `0x38000000` 压暗 | 压完重画物品（**底色变暗、物品照常清晰**，与 vanilla 的不可用槽位一致） |
+**实测无效**：重测时白块照旧盖住物品（`debug.log` 已确认跑的是含修复的构建 ——
+`压浮层 page=ROOT parent=ChestScreen` / `关闭面板 overlay=true` 都在）。
+反直觉的是同一份重画代码在 `renderCellOverlay`（选格页）里看着是好的，
+**两处的坐标系、z、渲染状态完全相同，原因未能定位**。
+
+> 这是本项目"别和渲染管线对抗"的一个实例：凡是"先画 A 再补画 B"的写法，
+> 一旦底层的深度/矩阵状态不明，就会变成靠运气。
+
+**最终修法：高亮不侵入格子内部**
+
+物品铺满整个 16×16 格子，**任何**格内填充都必然盖住它。所以悬停高亮改成只画格子**外侧**：
+
+```java
+ring(g, sx - 2, sy - 2, 20, 20, 0x55FFFFFF);   // 外圈半透明光晕
+ring(g, sx - 1, sy - 1, 18, 18, 0xFFFFFFFF);   // 贴身 1px 实线
+```
+
+vanilla 的槽位间距是 2px，两层框正好落在间隙里，**格内一个像素都不碰**，物品永远不被遮。
+视觉上仍是"这一格被点亮了"。
+
+| 位置 | 处理 |
+|---|---|
+| `renderBackgroundHover`（普通悬停） | **双层外框，不填充**（本次修的就是这里） |
+| `renderCellOverlay` 已选格 | 绿底 `0x4822CC88` + 绿框 + 重画物品（实机认可，保留） |
+| `renderCellOverlay` 不可选格 | 压暗 `0x38000000` + 重画物品（底色暗、物品清晰） |
 
 **为什么不用"接管背景层渲染"这种彻底方案**：那要放弃 `pushGuiLayer`、自己保存父屏并手动
 `parent.render(pose, 真实鼠标, ...)`，等于重写输入转发 / 缩放 / 关闭语义。
-代价远大于收益 —— 补画一次物品是**效果等价**的最小改动。
+那是唯一能真正复现 vanilla 顺序（高亮在物品下）的路，但代价太大，暂不做。
 
-**已知残留**：`hover` 态的 1px 白框（`ring` 画在 `sx-1 .. sx+17`）会压住格子最外 1px 的物品像素；
-vanilla 的选中框同样如此，不处理。
+**已知残留**：
+- `hover` 态的 1px 白框（`ring` 画在 `sx-1 .. sx+17`）会压住格子最外 1px 的物品像素；
+  vanilla 的选中框同样如此，不处理。
+- `selected` / 不可选格仍然靠"补画物品"来压住底色；实机看着正常，但按上面那条实测，
+  **它可能只是被 28% / 22% 的低不透明度掩盖了问题**。若将来把这两个填充调深，
+  会重新出现"物品被蒙住"，届时同样改成外框。
 
 ---
 
