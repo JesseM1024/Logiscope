@@ -191,6 +191,8 @@ cmd //c dev-check\offline-check.bat          → ALL_OK
 | 离线断言 | TestChart **461 条，0 失败** |
 | 渲染基准 | BenchRender 通过 |
 | jar 验收 | `verify-jar.py` 三项全过（三类文件齐全 / 占位符已替换 / 元数据符合预期） |
+| SRG 名交叉核对 | jar 内 83 个 `func_*` / `f_*` **全部能在 `forge-1.16.5-36.2.42-srg.jar` 里找到**（0 缺失）→ 没有拼错的重混淆名 |
+| 类引用核对 | 引用的 99 个 `net.minecraft*` 类里 96 个在 srg jar 内；缺的 3 个是 `Dist` / `IEventBus` / `FMLEnvironment` —— 它们住在 Forge 启动器的库 jar（forgespi / eventbus / fmlcore）里，运行时由 Forge 提供，**不是缺陷** |
 
 `mods.toml` 展开后的关键字段（实测从 jar 里读回）：
 
