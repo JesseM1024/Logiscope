@@ -230,6 +230,23 @@ API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PO
 
 ---
 
+### [1.12.2] 轮次 5：AE 真值生效后的三个尾巴（2026-10-22）
+
+轮次 4 的 AE 真值生效了（终端里数量与网络一致）。新报三条：
+
+| # | 反馈 | 根因 | 修法 |
+|---|---|---|---|
+| 1 | Pick cells 时面板变成**一片灰块** / 仍被盖住 | 只靠"注册得晚"保证不了派发顺序；且 `endPanel()` 之后若还有人画，会继承我们改过的 GL 状态（JEI 的列表整片渲染成灰块就是这个） | `PanelPainter` 的监听器加 **`priority = EventPriority.LOWEST`**：Forge 按优先级派发，我们一定最后 ⇒ 面板在最上层，且之后没人再画 |
+| 2 | AE **背包格仍能选中** | `SlotPlayerInv`/`SlotPlayerHotBar` 继承 **`AppEngSlot`**（不是 `SlotItemHandler`），而 `AppEngSlot` 的 `IItemHandler` 是 **private 字段、无访问器** ⇒ 上一版判据全漏 | `ContainerAccess#itemHandlerOf`：`SlotItemHandler` 走公开 getter，其它类在类层级里找第一个 `IItemHandler` 字段反射读（按类缓存）；`PlayerInvWrapper`/`InvWrapper#getInv()` 判据复用 |
+| 3 | 面板开着时 **AE 终端不刷新**（漏斗灌物品数字不动，关掉面板才跳） | 换掉 `mc.currentScreen` ⇒ 父界面不再 `updateScreen()`；AE 的 repo 正是在 `GuiMEMonitorable#updateScreen()` 里合网络推送。原版箱子不受影响（服务端 `detectAndSendChanges` 主动推） | `ScopeScreen#updateScreen` **转发**给 `parent.updateScreen()` |
+
+**已知遗留（显示问题，未改）**：AE 槽位的行首 `#N` 恒为 `#0`（那是容器内下标，AE 恒 0）。
+选格仍按菜单下标走、行靠名字区分；要改得同时动 `PickerFilter` 的 `#N` 语义。
+
+**产物**：250 KB，门禁 `ALL_OK`，已换装（旧包 `.old/…-r3.jar`）。
+
+---
+
 ## [1.20.1] 线：现状与移植记录
 
 **现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，

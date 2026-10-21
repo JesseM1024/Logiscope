@@ -342,6 +342,19 @@ IAEFluidStack#getFluidStack() → FluidStack
 2. **流体序列的名字是注册名**（`fluid:water` 这种短名），不是本地化名 —— 身份要稳定。
 3. AE 物品的身份用 registry id（丢 meta/NBT 区分），与其它线一致。
 
+### 轮次 4 的追加修复（2026-10-22 第二轮实机）
+
+| 反馈 | 根因 | 修法 |
+|---|---|---|
+| 选格页 Pick cells 时面板变成一片灰块 / 仍被盖住 | 光靠"我们注册得晚"不足以保证排在最后；而且我们 `endPanel()` 之后若还有人画，会继承我们改过的 GL 状态（实测：JEI 的列表整片渲染成灰块） | `PanelPainter` 的监听器加 **`priority = EventPriority.LOWEST`** —— Forge 按优先级派发，低优先级一定最后执行；面板之后**没人再画**，也就不会把状态传给别人 |
+| AE 背包格**仍然能选中** | `SlotPlayerInv`/`SlotPlayerHotBar` 继承的是 **`AppEngSlot`**（不是 `SlotItemHandler`），而 `AppEngSlot` 把 `IItemHandler` 放在 **private 字段、不给访问器** ⇒ 上一版只判 `SlotItemHandler` 全部漏过 | `ContainerAccess#itemHandlerOf`：先问 `SlotItemHandler#getItemHandler()`，否则在类层级里找第一个 `IItemHandler` 类型字段反射读（按类缓存）。`PlayerInvWrapper` / `InvWrapper#getInv()` 两条判据复用 |
+| 面板开着时 **AE 终端不刷新**（漏斗往网络里灌，数字不动；关上探针才跳一下） | 我们换掉了 `mc.currentScreen` ⇒ 父界面**再也不 `updateScreen()`**；AE 的 repo 正是在 `GuiMEMonitorable#updateScreen()` 里把网络推送合进来的。原版箱子不受影响是因为容器内容由服务端 `detectAndSendChanges` 主动推 | `ScopeScreen#updateScreen` 里**转发**给 `parent.updateScreen()` |
+| 界面上流体行全是 `#0` | 行首 `#N` 用的是**容器内下标**（`getSlotIndex()`），AE 流体/物品槽这个值恒 0 | **未改**（显示问题）：选格仍按菜单下标走，行靠名字区分。要改需要同时动 `PickerFilter` 的 `#N` 语义，留到下一轮 |
+
+> 顺带记一条自己的坑：`HANDLER_FIELD_CACHE` 一开始用了 `ConcurrentHashMap`，
+> 而"这个类没有 IItemHandler 字段"的结果是 **null** ⇒ 所有原版格子第一次判就是 NPE。
+> 换成 `HashMap`（客户端单线程用，不需要并发容器）。
+
 ---
 
 ## 四、分阶段计划

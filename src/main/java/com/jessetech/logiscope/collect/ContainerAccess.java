@@ -2,12 +2,15 @@ package com.jessetech.logiscope.collect;
 
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.fml.common.registry.ForgeRegistries;
+import net.minecraftforge.items.IItemHandler;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.entity.player.InventoryPlayer;
 import net.minecraft.inventory.Container;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
+import org.jetbrains.annotations.Nullable;
 
+import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -63,10 +66,11 @@ public final class ContainerAccess {
      *   1. vanilla 给玩家背包建的槽位是 {@code new Slot(player.getInventory(), i, x, y)}，
      *      也就是 {@code slot.inventory} 恰好是玩家的 InventoryPlayer（`Slot.container` 是 public 字段）。
      *   2. ★ **模组经常把玩家背包包成 IItemHandler 再建槽**（AE2 rv6 的终端就是
-     *      `new PlayerInvWrapper(player.inventory)` + `SlotPlayerInv`/`SlotPlayerHotBar`），
-     *      这时 {@code slot.inventory} 是 `SlotItemHandler` 内部那个**占位空 InventoryBasic**，
-     *      第 1 条必然判不出来 —— 实测症状：打开 AE 终端，选格页把玩家背包 36 格全列了出来
-     *      （用户 2026-10-22 的反馈）。所以对 `SlotItemHandler` 再往下看一眼它包的是谁。
+     *      `new PlayerInvWrapper(player.inventory)` + `SlotPlayerInv`/`SlotPlayerHotBar`，
+     *      而 `AppEngSlot` **连访问器都不给**），这时 {@code slot.inventory} 是内部那个
+     *      **占位空 InventoryBasic**，第 1 条必然判不出来 —— 实测症状：打开 AE 终端，
+     *      选格页把玩家背包 36 格全列了出来（用户 2026-10-22 的反馈）。
+     *      所以再往下看一眼它包的是谁（见 {@link #itemHandlerOf}）。
      */
     public static boolean isPlayerSlot(Slot slot) {
         Minecraft mc = Minecraft.getMinecraft();
@@ -77,21 +81,85 @@ public final class ContainerAccess {
         if (slot.inventory == inv) {
             return true;
         }
+        // ★ 模组普遍把玩家背包包成 IItemHandler 再建槽（AE2 rv6 的终端就是
+        //   `new PlayerInvWrapper(player.inventory)` + `SlotPlayerInv`/`SlotPlayerHotBar`）。
+        //   这时 `slot.inventory` 是那个**占位空 InventoryBasic**，第 1 条判不出来 ——
+        //   实测症状：打开 AE 终端，选格页把玩家背包 36 格全列了出来。
+        IItemHandler h = itemHandlerOf(slot);
+        if (h == null) {
+            return false;
+        }
+        // AE 用的是 PlayerInvWrapper（它继承 CombinedInvWrapper，**不是** InvWrapper，两样都要判）
+        if (h instanceof net.minecraftforge.items.wrapper.PlayerInvWrapper) {
+            return true;
+        }
+        return h instanceof net.minecraftforge.items.wrapper.InvWrapper
+                && ((net.minecraftforge.items.wrapper.InvWrapper) h).getInv() == inv;
+    }
+
+    /**
+     * 取这个槽位背后的 `IItemHandler`（**通用探测**，不改第三方代码）。
+     *
+     * 两条路：
+     *   1. `SlotItemHandler` —— 它有公开的 `getItemHandler()`，直接问；
+     *   2. 其它实现（**AE2 的 `AppEngSlot` 就是这样**：构造器收一个 `IItemHandler`，
+     *      字段 `private final IItemHandler itemHandler`，**没有任何访问器**）——
+     *      在类层级里找第一个 `IItemHandler` 类型的字段，反射读它。
+     *
+     * 反射在这里是安全的：只读第三方模组自己的字段（不是原版方法，不受 SRG 改名影响），
+     * 而且**按类缓存**，每个类只解析一次。读不到就当"没有 handler"，绝不影响其它判定。
+     */
+    @Nullable
+    private static IItemHandler itemHandlerOf(Slot slot) {
         if (slot instanceof net.minecraftforge.items.SlotItemHandler) {
-            net.minecraftforge.items.IItemHandler h =
-                    ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler();
-            // AE 用的是 PlayerInvWrapper（它继承 CombinedInvWrapper，不是 InvWrapper，
-            // 所以两样都要判）
-            if (h instanceof net.minecraftforge.items.wrapper.PlayerInvWrapper) {
-                return true;
+            return ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler();
+        }
+        Class<?> cls = slot.getClass();
+        if (HANDLER_FIELD_CACHE.containsKey(cls)) {
+            return readHandler(slot, HANDLER_FIELD_CACHE.get(cls));
+        }
+        Field found = null;
+        for (Class<?> k = cls; k != null && k != Slot.class; k = k.getSuperclass()) {
+            for (Field f : k.getDeclaredFields()) {
+                if (IItemHandler.class.isAssignableFrom(f.getType())) {
+                    try {
+                        f.setAccessible(true);
+                        found = f;
+                    } catch (Throwable ignored) {
+                        // 打不开就放弃这个类（不影响判定，最多是这一格判不出来）
+                    }
+                    break;
+                }
             }
-            if (h instanceof net.minecraftforge.items.wrapper.InvWrapper
-                    && ((net.minecraftforge.items.wrapper.InvWrapper) h).getInv() == inv) {
-                return true;
+            if (found != null) {
+                break;
             }
         }
-        return false;
+        HANDLER_FIELD_CACHE.put(cls, found);
+        return readHandler(slot, found);
     }
+
+    @Nullable
+    private static IItemHandler readHandler(Slot slot, @Nullable Field f) {
+        if (f == null) {
+            return null;
+        }
+        try {
+            Object v = f.get(slot);
+            return v instanceof IItemHandler ? (IItemHandler) v : null;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /**
+     * 槽位类 → 它那个 IItemHandler 字段（null = 这个类没有）。每种槽位类只解析一次。
+     *
+     * 用 `HashMap` 而不是 `ConcurrentHashMap`：后者**不允许 null 值**，
+     * 而"这个类没有 IItemHandler 字段"正是最常走的结果（所有原版格子）。
+     * 只在客户端（渲染线程 / 客户端 tick）用，不需要并发容器。
+     */
+    private static final java.util.Map<Class<?>, Field> HANDLER_FIELD_CACHE = new java.util.HashMap<>();
 
     /**
      * 这个槽位能否被选作监控目标（设备槽）。

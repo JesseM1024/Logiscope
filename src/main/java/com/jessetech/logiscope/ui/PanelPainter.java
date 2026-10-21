@@ -3,6 +3,7 @@ package com.jessetech.logiscope.ui;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.fml.common.eventhandler.EventPriority;
 import net.minecraftforge.fml.common.eventhandler.SubscribeEvent;
 
 /**
@@ -57,7 +58,16 @@ public final class PanelPainter {
         return registered;
     }
 
-    @SubscribeEvent
+    /**
+     * ★ `priority = LOWEST`：这是"面板永远在最上层"的**保证**，不是可选项。
+     *
+     * Forge 按**优先级**派发（同优先级才轮到注册顺序），JEI 等模组用的都是默认的
+     * `NORMAL` ⇒ 我们用 `LOWEST` 就一定排在它们之后。
+     * 原先只靠"我们注册得晚"，实测会被反超（选格页整片物品/灰块压住面板）——
+     * 而且我们 `endPanel()` 之后若还有别人要画，他们还会继承我们改过的 GL 状态。
+     * 用 LOWEST 之后这两件事一起解决：面板是最后一个画的。
+     */
+    @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onDrawScreenPost(GuiScreenEvent.DrawScreenEvent.Post event) {
         GuiScreen gui = event.getGui();
         if (!(gui instanceof ScopeScreen)) {

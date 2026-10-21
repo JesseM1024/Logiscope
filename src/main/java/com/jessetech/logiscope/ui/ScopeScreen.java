@@ -675,6 +675,15 @@ public final class ScopeScreen extends GuiScreen {
 
     @Override
     public void updateScreen() {
+        // ★ 被压住的父界面**必须继续 tick** —— 1.12.2 的实测坑（2026-10-22）：
+        //   AE 终端的物品/流体列表是在 `GuiMEMonitorable#updateScreen()` 里把网络推送
+        //   合进 repo 的。我们换掉了 `mc.currentScreen`，父界面就再也不 updateScreen ⇒
+        //   **终端画面冻结、探针读到的也是旧值**（症状：漏斗往网络里灌东西，数字不动，
+        //   直到关掉探针面板才刷新）。原版箱子不受影响，是因为容器内容由服务端
+        //   `detectAndSendChanges` 主动推下来，不依赖 GUI 自己轮询。
+        if (overlayMode && parent != null) {
+            parent.updateScreen();
+        }
         refreshSnapshots();
         if (page == Page.DATA) {
             tickDataPage();
