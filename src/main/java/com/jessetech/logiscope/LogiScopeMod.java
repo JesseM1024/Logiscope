@@ -1,5 +1,10 @@
 package com.jessetech.logiscope;
 
+import com.jessetech.logiscope.bind.ContainerAnchor;
+import com.jessetech.logiscope.bind.DataCommand;
+import com.jessetech.logiscope.bind.KeyBindings;
+import com.jessetech.logiscope.collect.ProbeManager;
+import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
@@ -9,28 +14,15 @@ import org.apache.logging.log4j.Logger;
 /**
  * LogiScope —— 纯客户端物流探测示波器（MC 1.12.2 线）。
  *
- * <h2>这一代与另外三条线的差别（都写在 docs/PORT-1.12.2.md，动手前先读）</h2>
- * <ul>
- *   <li><b>没有 mods.toml</b>：元数据是 {@code src/main/resources/mcmod.info}，
- *       模组声明靠 {@link Mod} 注解本身。</li>
- *   <li><b>客户端专用靠注解</b>：{@code clientSideOnly = true}（1.13+ 才改成
- *       运行时判 {@code FMLEnvironment.dist}）。专用的服务端会直接跳过本模组。</li>
- *   <li><b>只有游戏总线</b>：这一代没有 {@code IEventBus} / 模组总线，
- *       所有监听一律 {@code MinecraftForge.EVENT_BUS.addListener(...)} /
- *       {@code @SubscribeEvent} 静态方法。</li>
- *   <li><b>生命周期是事件方法</b>：{@code @Mod.EventHandler} 的
- *       {@code preInit} / {@code init} / {@code postInit}，不是构造器。</li>
- *   <li><b>没有 GUI 图层栈</b>（{@code pushGuiLayer} 是 1.13+ 才有的）——
- *       面板只能自己当一层 {@code GuiScreen} 打开，见 CP8 的 1.12.2 妥协方案。</li>
- * </ul>
- *
- * <h2>当前状态：骨架</h2>
- * 本类目前只做"能被 FML 加载 + 打一行日志"。其余模块按 docs/PORT-1.12.2.md 的
- * 顺序逐轮搬过来（纯逻辑层已在 {@code analysis} / {@code store} / {@code archive}）。
- * <p>
- * 待搬清单（对应 1.16.5 线的同名文件，可 {@code git show 1.16.5-forge:<路径>} 取回）：
- * {@code LogiScopeConfig}（→ {@code Configuration} + {@code @Config}）、
- * {@code bind/*}、{@code collect/*}、{@code ui/*}。
+ * 【这一代与另外三条线的注册方式差别（详见 docs/PORT-1.12.2.md）】
+ *   · **没有 mod 总线**：只有 {@code MinecraftForge.EVENT_BUS}，没有 {@code IEventBus}；
+ *     监听器靠 {@code @SubscribeEvent} 静态方法 + {@code EVENT_BUS.register(类)}。
+ *   · **没有构造器式初始化**：生命周期是 {@code @Mod.EventHandler} 的
+ *     {@code preInit} / {@code init}。
+ *   · **客户端专用靠注解**：{@code clientSideOnly = true}（1.13+ 才改成运行时判 dist）。
+ *   · **快捷键注册**在 preInit（{@code ClientRegistry.registerKeyBinding}）。
+ *   · **配置**是 {@code @Config} 类（见 {@link LogiScopeConfig}），由 FML 注入，
+ *     不需要（也不能）手动 registerConfig。
  */
 @Mod(
         modid = LogiScopeMod.MODID,
@@ -48,7 +40,7 @@ public final class LogiScopeMod {
     /**
      * 版本号。这一代没有 {@code mods.toml} 的占位符展开，注解要求**编译期常量**，
      * 所以只能手写一份 —— 改 {@code gradle.properties} 的 {@code mod_version} 时
-     * 必须同步这里（offline-check 会核对两者一致）。
+     * 必须同步这里（`dev-check/check-version.py` 会核对两者一致）。
      */
     public static final String VERSION = "0.1.0-1.12.2";
 
@@ -59,15 +51,40 @@ public final class LogiScopeMod {
      */
     public static final Logger LOGGER = LogManager.getLogger("LogiScope");
 
+    /**
+     * 全局唯一的探针管理器。所有层都通过它拿数据。
+     *
+     * 它持有**多个** {@code ProbeInstance}，并且是每客户端 / 每服务端 tick 驱动采样的唯一入口。
+     */
+    private static final ProbeManager PROBES = new ProbeManager();
+
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
         LOGGER.info("[LogiScope] {} {} preInit (MC 1.12.2 / Forge 14.23.5.2859)", NAME, VERSION);
+
+        // 快捷键：注册键位 + 把 KeyBindings 挂上游戏总线（tick 轮询在里面）
+        KeyBindings.register();
+
+        // 探针驱动：客户端 tick（状态机 / 时钟）与服务端 tick（单人下的真值采样）
+        MinecraftForge.EVENT_BUS.register(ProbeManager.class);
+
+        // 「Probe data」：抓 `data get block` 的系统回执；以及命令回执的超时计时
+        MinecraftForge.EVENT_BUS.register(DataCommand.class);
+
+        // 记录最近一次右键的方块（容器界面的持久锚点）
+        MinecraftForge.EVENT_BUS.register(ContainerAnchor.class);
     }
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent event) {
-        // 这里将来要接：快捷键注册（ClientRegistry.registerKeyBinding）、
-        // 游戏总线上的 GuiScreenEvent / TickEvent / ClientChatReceivedEvent 监听。
-        LOGGER.info("[LogiScope] init done (skeleton — 功能模块尚未搬完，见 docs/PORT-1.12.2.md)");
+        // 配置由 FML 注入（@Config 类），这里只记一行，方便排查"配置没生效"
+        LOGGER.info("[LogiScope] config: bufferSamples={} maxProbes={} maxItemKinds={} dataRefreshTicks={}",
+                LogiScopeConfig.bufferSamples(), LogiScopeConfig.maxProbes(),
+                LogiScopeConfig.maxItemKinds(), LogiScopeConfig.dataRefreshTicks());
+        LOGGER.info("[LogiScope] init done");
+    }
+
+    public static ProbeManager probes() {
+        return PROBES;
     }
 }

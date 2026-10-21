@@ -149,7 +149,7 @@ wasDown = down;
 
 ---
 
-## 三、已完成的这一轮
+## 三、轮次 1：工具链与骨架（2026-10-21）
 
 | 件 | 内容 |
 |---|---|
@@ -167,16 +167,70 @@ wasDown = down;
 
 ---
 
+## 三之二、轮次 2：MC 面全量移植（2026-10-21）
+
+**结果**：`bind/` `collect/` `ui/` `archive/Archives` `LogiScopeConfig` 全部搬完，
+`gradlew build` 出包 `logiscope-0.1.0-1.12.2.jar`（243 KB，85 个 class），
+离线门禁 `ALL_OK`（TestChart 476 + BenchRender + 版本一致性）。已装入 `1.12.2-Forge` 实例。
+
+### 做法：机械改名 + 用编译器收割
+
+先写脚本做**包路径级**的批量替换（`Screen→GuiScreen`、`ContainerScreen→GuiContainer`、
+`CompoundNBT→NBTTagCompound`、`Direction→EnumFacing`、`ForgeRegistries` 换包…），
+然后反复 `gradlew compileJava`，按 100 → 40 → 15 → 1 → 0 收敛。
+一共 4 轮，每轮的错误都是**具体 API 差异**，不是猜出来的。
+
+### 这一轮新核实的事实（都在映射名 jar 上 `javap` 过）
+
+| 1.16.5 的写法 | 1.12.2 的真实 API |
+|---|---|
+| `ResourceLocation#getNamespace()/getPath()` | **`getResourceDomain()/getResourcePath()`**（1.13 才改名） |
+| `mc.mouseHelper.ungrabMouse()` | `ungrabMouseCursor()` |
+| `Util.getOSType().openFile(dir)` | `Util.EnumOS` **没有 openFile** ⇒ 退回 `java.awt.Desktop` |
+| `block.getTranslatedName().getString()` | `block.getLocalizedName()`（直接返回 String） |
+| `TileEntity#write(CompoundNBT)` / `#getType()` | `writeToNBT(NBTTagCompound)` / **`TileEntity.getKey(be.getClass())`**（静态） |
+| `ForgeRegistries.TILE_ENTITIES` | **不存在**（用 `TileEntity.getKey`） |
+| `level.isRemote()` | `world.isRemote`（**字段**） |
+| `server.getServerConfiguration().getWorldName()` | `server.getWorldName()` |
+| `cap.getCapability(...).orElse(null)` | `tile.getCapability(cap, side)` **直接返回或 null** |
+| `NBTTagList#size()` | `tagCount()` |
+| `IBlockState#onBlockActivated(...)` 返回 `EnumActionResult` | `Block#onBlockActivated(World,Pos,IBlockState,Player,Hand,Facing,f,f,f)` 返回 **boolean** |
+| `Item#onItemUseFirst(ItemStack, ItemUseContext)` | 8 参版本（`EntityPlayer, World, BlockPos, EnumFacing, float×3, EnumHand`） |
+| `PlayerController#func_217292_a(...)` | `processRightClickBlock(EntityPlayerSP, WorldClient, BlockPos, EnumFacing, Vec3d, EnumHand)` |
+| `lang/en_us.json` | **`lang/en_us.lang`**（`key=value` 行；JSON 在这一代根本不读） |
+| `GuiContainer#getContainer().inventorySlots` | `GuiContainer.inventorySlots` 是 **Container 本身**，槽位在 `.inventorySlots.inventorySlots` |
+
+### 三处必须"换实现"而不是"换名字"的地方
+
+1. **`Draw` 重写**（66 → 90 行）：没有 `MatrixStack`，全部走立即模式
+   （`Gui.drawRect` / `FontRenderer` 老签名 / `RenderItem`）。
+   对外方法签名保持不变 ⇒ `ChartRenderer` / `ScopeScreen` 里 200+ 处绘制调用**一行没改**。
+   `g.pose()` 那三处 z 层次改成 `Draw#pushZ/popZ`（`GlStateManager.pushMatrix + translate`）。
+2. **`ScopeScreen` 的屏幕生命周期**：`openOverlay` 改成直接改 `mc.currentScreen` 字段
+   （`displayGuiScreen` 会触发 `onGuiClosed → closePlayerScreen`，把容器关掉），
+   并手动补 `setWorldAndResolution` + `initGui` + `ungrabMouseCursor`；
+   `drawScreen` 开头先 `parent.drawScreen(...)` 替父界面作画；关闭时把 `currentScreen` 换回父界面。
+   `init/tick/isPauseScreen/render/mouse*/charTyped+keyPressed` 全部换成 1.12.2 的对应名字。
+3. **`TextInputGuard` 重写**：没有焦点 API、没有 charTyped 事件 ⇒ 只用两条判据
+   （功能键永不挡 / 会打字的键遇界面就让路），并把 `GuiChat` 单独挡掉。
+
+### 还没解决的（写进 §五）
+
+面板外点击/滚轮无法转交给容器 —— `GuiContainer#mouseClicked/mouseReleased/mouseScroll` 在这一代是
+**protected**，跨包调不到；反射又要撞 SRG 命名（生产是 `func_73864_a`），违反"只反射 AE"的铁律。
+
+---
+
 ## 四、分阶段计划（下一轮从这里接）
 
 | 阶段 | 内容 | 难点 |
 |---|---|---|
-| ~~0~~ | 工具链 + 骨架 + 纯逻辑层 + 门禁 | ✅ 本轮完成 |
-| 1 | `LogiScopeConfig`（`Configuration` + `@Config`）、`LogiScopeMod` 补全事件注册 | 1.12.2 的配置类在 `preInit` 里由 FML 注入，写法与 `ForgeConfigSpec` 完全不同 |
-| 2 | `bind/` 层：`ProbeTarget`（维度从 `RegistryKey<World>` 改成 **`int` dimension**）、`DataTarget`、`ContainerAnchor`、`DataCommand`（`data get block` 的回执文本格式也不同） | 维度表示是全线性的改动，`DataTarget`/`ProbeTarget` 的持久化格式也要跟着变 |
-| 3 | `collect/` 层：`ContainerAccess`、`ProbeSlots`、`WorldProbe`（capability）、`ServerClock`、`ProbeManager`、`ProbeInstance` | 无 `LazyOptional`；`TileEntity` 名字是 `TileEntity`（不是 `BlockEntity`）；集成服务端 API 不同 |
-| 4 | `ui/Draw` 重做（`GlStateManager` + `Gui.drawRect` + `Tessellator`）→ `ChartRenderer` → `ScopeScreen` | **最大的一块**（`ScopeScreen` 5655 行）；`Draw` 这一层做对了，`ChartRenderer` 里 160+ 处绘制调用就能方法体零改动 |
-| 5 | `archive/Archives`（`mcDataDir`）、`KeyBindings`（tick 轮询）、`TextInputGuard`（砍第 3 层）、CP8 的"自己管 currentScreen + 重画背景" | 见 §2.2 断层 1 |
+| ~~0~~ | 工具链 + 骨架 + 纯逻辑层 + 门禁 | ✅ 轮次 1 |
+| ~~1~~ | `LogiScopeConfig`（`@Config`）、`LogiScopeMod` 事件注册 | ✅ 轮次 2 |
+| ~~2~~ | `bind/` 层：维度用 `compat/Dim`（包一层 `int`，语义等价 `RegistryKey`）、`ProbeTarget`/`DataTarget`/`ContainerAnchor`/`DataCommand` | ✅ 轮次 2（`Dim` 让 20 多处调用点只换类型名） |
+| ~~3~~ | `collect/` 层：`ContainerAccess`、`ProbeSlots`、`WorldProbe`、`ServerClock`、`ProbeManager`、`ProbeInstance` | ✅ 轮次 2（去 `LazyOptional`、`isSingleplayer()`、`getTotalWorldTime()`） |
+| ~~4~~ | `ui/Draw` 重做 → `ChartRenderer` → `ScopeScreen` | ✅ 轮次 2。`Draw` 对外签名不变，所以 200+ 处绘制调用零改动 |
+| ~~5~~ | `archive/Archives`、`KeyBindings`（tick 轮询）、`TextInputGuard`、CP8 的"自己管 currentScreen + 重画背景" | ✅ 轮次 2 |
 
 每阶段的验收：`gradlew build` 绿 + `offline-check.bat` 全过 + 该阶段新增的 API 核实写回本文件。
 
@@ -191,5 +245,11 @@ wasDown = down;
 2. **AE 不做**（本轮用户明确要求）。`AeKeys` / `AeNetworkReader` 不搬；`TestAe` 不进门禁。
    将来要搬的话，AE2 rv6 的 API 与 8.x 又不一样（`AEApi.instance().grid()` 那一套），别照抄 1.16.5。
 3. **`pack.mcmeta` 不是必须**（1.12.2 的资源包元数据可选），留着是为了与其它线一致。
-4. **`verify-jar.py` 未适配**：它读 `mods.toml`，本线用 `mcmod.info`，所以本线门禁暂不含这一步。
+4. **面板外的鼠标事件不再转交给容器**（新）：`GuiContainer#mouseClicked/mouseReleased/mouseDragged`
+   在 1.12.2 是 **protected**，跨包调不到；反射又要撞 SRG 命名（`func_73864_a`），
+   违反"只反射 AE"的铁律。所以面板开着时点不到容器 —— 按 F9 / Esc 收起后再点。
+   另外 `GuiContainer` 没有 `mouseScrolled`，**面板外滚轮也不转交**。
+5. **Gradle 编译基线是 Forge 2859，实例装的是 2864**：只差官方小版本，
+   `acceptedMinecraftVersions="[1.12.2]"` 不锁 Forge，两者二进制兼容（待网络方便时对齐）。
+6. **`verify-jar.py` 未适配**：它读 `mods.toml`，本线用 `mcmod.info`，所以本线门禁暂不含这一步。
    等有实机之后再补一个 `verify-mcmod.py`（校验 mcmod.info 的版本/描述与 jar 内类版本号）。

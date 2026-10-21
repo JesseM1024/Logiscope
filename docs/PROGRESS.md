@@ -97,7 +97,8 @@
 
 ## [1.12.2] 线：现状与移植记录
 
-**现状（2026-10-21）**：**工具链跑通、骨架能出包、纯逻辑层全过门禁**；MC 相关模块尚未搬。
+**现状（2026-10-21）**：**代码面已全量移植完，出包可用**（243 KB / 85 class），已装入
+`1.12.2-Forge` 实例；离线门禁全过。**实机尚未验证**。
 分支 `1.12.2-forge` 从 `1.16.5-forge@846818d` 分出，版本 `0.1.0-1.12.2`，
 产物 `build/libs/logiscope-0.1.0-1.12.2.jar`。
 **本线明确不做 AE 兼容**（用户要求），AE 的类与断言留在 1.16.5 线。
@@ -135,6 +136,34 @@ API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PO
    好在默认键位 F9 是功能键，本来就不该被文本框挡。
 
 **未完成**：实机验证（本机没有 1.12.2 实例）。
+
+---
+
+### [1.12.2] 轮次 2：MC 面全量移植，出包可用（2026-10-21）
+
+**结果**：`bind/` `collect/` `ui/` `archive/Archives` `LogiScopeConfig` 全部搬完；
+`gradlew build` 出包 **243 KB / 85 个 class**，已装入 `1.12.2-Forge` 实例（Forge 14.23.5.2864）。
+离线门禁 `ALL_OK`（TestChart 476 + BenchRender + 版本一致性）。
+
+| 件 | 做法 |
+|---|---|
+| 批量改名 | 脚本做包路径级替换（`Screen→GuiScreen`、`CompoundNBT→NBTTagCompound`、`Direction→EnumFacing`、`ForgeRegistries` 换到 `fml.common.registry`…），再用编译器收割：100 → 40 → 15 → 1 → 0，四轮收敛 |
+| 维度 | 新增 `compat/Dim`（包一层 `int`，语义等价 `RegistryKey<World>`）⇒ 20 多处调用点只换类型名，不用散落魔数 |
+| `Draw` | **重写为立即模式**（`Gui.drawRect` / `FontRenderer` / `RenderItem`）；对外签名不变 ⇒ `ChartRenderer`+`ScopeScreen` 200+ 处绘制调用零改动；`pose()` 的 z 层次改成 `pushZ/popZ` |
+| `ScopeScreen` | 生命周期整体换名（`init→initGui`、`render→drawScreen`、`tick→updateScreen`、`keyPressed+charTyped→keyTyped`、`isPauseScreen→doesGuiPauseGame`、`onClose→onGuiClosed`）；`openOverlay` 改成手管 `mc.currentScreen` 并替父界面作画 |
+| `TextInputGuard` | 重写：没有焦点 API / 没有 charTyped ⇒ 功能键永不挡 + 会打字的键遇界面让路 + 单挡 `GuiChat` |
+| 语言文件 | `lang/*.json` → **`lang/*.lang`**（1.12.2 只读 `.lang`，185 键原样转换） |
+| AE | 明确不做：`AeNetworkReader` 删除、`ContainerAccess` 的 `viewOfAe` 删除、`ProbeInstance` 的 AE 分支留空记 no_data、选格页 AE 模式保留但不触发 |
+
+**新核实的一批 1.12.2 事实**（`javap`，都写进 PORT §三之二 的表）：`ResourceLocation` 用
+`getResourceDomain/getResourcePath`（1.13 才改名）；`TileEntity.getKey(Class)` 静态；
+`ForgeRegistries` 没有 `TILE_ENTITIES`；`world.isRemote` 是字段；`NBTTagList.tagCount()`；
+`onBlockActivated` 返回 boolean；`Item#onItemUseFirst` 是 8 参；`Util.EnumOS` 没有 `openFile`。
+
+**新增已知限制**：面板外的点击/滚轮不再转交给容器（`GuiContainer#mouseClicked` 是 protected，
+跨包调不到，反射又撞 SRG）⇒ 面板开着时先收起再操作容器。编译基线 2859 / 实例 2864（二进制兼容）。
+
+**未完成**：实机验证（jar 已装进实例，等你启动）。
 
 ---
 
