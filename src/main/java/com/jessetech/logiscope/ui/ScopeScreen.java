@@ -2827,6 +2827,11 @@ public final class ScopeScreen extends Screen {
                 }
             }
         } else if (page == Page.PICKER) {
+            if (source == Source.NONE) {
+                // 这一页此时只画了一句提示（见 renderSlotPicker），没有可点的行 ——
+                // 别让点击落到"看不见的清单"上（worldSlots 可能还留着上一次的残留）
+                return true;
+            }
             // 筛选框：点在框上 → 聚焦（吃掉这次点击）
             if (inPickerFilter(L, mx, my)) {
                 pickerFilterFocus = true;
