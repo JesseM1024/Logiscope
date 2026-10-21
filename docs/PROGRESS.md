@@ -38,7 +38,7 @@ F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误�
 | 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.3-1.20.1-alpha.jar`（reobf） |
 | 离线 | TestChart **489 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **184** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
-| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.2-1.20.1-alpha` |
+| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.3-1.20.1-alpha`（旧 jar 移入 `mods/.old/`） |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
 | 未做 | 实机验收（重点 A 组采样保真 + C-4 右键「按数值读取」填入值格） |
 
