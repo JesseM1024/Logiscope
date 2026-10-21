@@ -358,8 +358,10 @@ public final class KeyBindings {
             return;
         }
         if (screen instanceof GuiContainer) {
+            // ★ 传 Container 对象本身，不传 windowId：这一代 InitGuiEvent.Post 触发时
+            //   windowId 还没被 handleOpenWindow 赋值（恒 0），详见 ContainerAnchor 类注释
             GuiContainer containerScreen = (GuiContainer) screen;
-            ContainerAnchor.onContainerScreenOpened(containerScreen.inventorySlots.windowId);
+            ContainerAnchor.onContainerScreenOpened(containerScreen.inventorySlots);
         }
 
         // 我们自己弹出/收起的界面不算"服务端给出的答复"；

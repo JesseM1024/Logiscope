@@ -68,8 +68,65 @@ public final class Draw {
         net.minecraft.client.renderer.GlStateManager.popMatrix();
     }
 
+    /**
+     * 进入"画面板"的干净状态。**必须**在整段面板绘制之前调一次。
+     *
+     * 【为什么必须要关深度 —— 1.12.2 的图层优先级陷阱】
+     * 这一代 {@code RenderItem#setupGuiTransform} 把物品固定画在
+     *   {@code translate(x, y, 100.0F + zLevel)}
+     * 而面板的方块/{@code Gui#drawRect} 与文字都画在 **z = 0**。
+     * 深度测试开着时，z=100 的那一层**永远赢**（它更靠近相机）——
+     * 于是"先画父界面（含物品）→ 再画面板"这个顺序**不起作用**：
+     * 物品会直接从面板里穿出来，看起来就是"物品被绘制在界面之上"。
+     * 实测实机症状正是这个（C 组同批反馈的第 1 条）。
+     *
+     * 面板是最后画的，按语义就该在最上层 ⇒ 关掉深度，让**绘制顺序**决定层次。
+     * 顺带把光照/缩放归零：面板只画方块和文字，不该继承父界面留下的物品光照。
+     *
+     * 收尾见 {@link #endPanel()} —— 不还原会把 HUD / 别的模组覆盖层一起带坏。
+     */
+    public void beginPanel() {
+        net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting();
+        net.minecraft.client.renderer.GlStateManager.disableLighting();
+        net.minecraft.client.renderer.GlStateManager.disableRescaleNormal();
+        net.minecraft.client.renderer.GlStateManager.disableDepth();
+        net.minecraft.client.renderer.GlStateManager.enableBlend();
+        net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
+                net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
+                net.minecraft.client.renderer.GlStateManager.DestFactor.ONE_MINUS_SRC_ALPHA,
+                net.minecraft.client.renderer.GlStateManager.SourceFactor.ONE,
+                net.minecraft.client.renderer.GlStateManager.DestFactor.ZERO);
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+    }
+
+    /**
+     * 退出面板绘制，把状态还原成**别的绘制者期望的样子**。
+     * vanilla {@code GuiContainer#drawScreen} 的收尾就是 disableLighting + enableDepth，
+     * 这里照抄，免得"画完我们的面板之后，HUD / 其它模组覆盖层全都变暗或错位"。
+     */
+    public void endPanel() {
+        net.minecraft.client.renderer.GlStateManager.disableBlend();
+        net.minecraft.client.renderer.GlStateManager.disableLighting();
+        net.minecraft.client.renderer.GlStateManager.disableRescaleNormal();
+        net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting();
+        net.minecraft.client.renderer.GlStateManager.enableDepth();
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+    }
+
+    /**
+     * 单个物品图标。
+     *
+     * 物品需要 **GUI 标准光照**才有立体感，否则是一团死黑；但光照**必须**当场关掉：
+     * 开着它，后面所有普通绘制（文字 / 方块）都会被当成受光物体处理 → 整体发暗。
+     * 这是 1.12.2 的经典坑（vanilla 是在整段物品循环外面统一开关的，
+     * 我们只有一个图标要画，所以逐次开关最省心）。
+     */
     public void renderItem(ItemStack stack, int x, int y) {
+        net.minecraft.client.renderer.RenderHelper.enableGUIStandardItemLighting();
         Minecraft.getMinecraft().getRenderItem().renderItemAndEffectIntoGUI(stack, x, y);
+        net.minecraft.client.renderer.RenderHelper.disableStandardItemLighting();
+        net.minecraft.client.renderer.GlStateManager.disableLighting();
+        net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
     }
 
     public void renderItemDecorations(FontRenderer font, ItemStack stack, int x, int y) {

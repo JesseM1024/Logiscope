@@ -221,7 +221,75 @@ wasDown = down;
 
 ---
 
-## 四、分阶段计划（下一轮从这里接）
+## 三之三、轮次 3：首轮实机反馈的四个问题（2026-10-21）
+
+### 实测结果（先入档，再改代码）
+
+实机回来四条问题，其中三条其实是同一个根因。**硬证据**来自模组自己写的归档头
+`versions\1.12.2-Forge\logiscope\2026-10-21_23-16-55\recording.json`：
+
+```json
+"probe":{"name":"open container (no coords)","description":"slots 0 · runtime identity"}
+```
+
+`name` 是 `logiscope.anchor.open_menu`（"界面开着但推不出坐标"），
+`description` 里的 `runtime identity` 是 `logiscope.anchor.runtime`（"没有持久身份"）。
+⇒ **`ProbeTarget#hasPersistentId()` 恒为 false** —— 锚点从来没拿到过。
+
+| # | 反馈 | 根因 |
+|---|---|---|
+| 1 | 物品被绘制在面板**之上** | `RenderItem` 固定把物品画在 **z=100**，面板画在 z=0；深度测试开着 ⇒ z=100 必胜，绘制顺序失效 |
+| C | 关掉容器界面就 `paused` / `no-data`；点「继续」报 `source unavailable` | 锚点 null ⇒ 没有坐标 ⇒ 关界面后既不能走服务端读，也不能 FOLLOWING |
+| D | 「Probe data」按钮**点不了** | 同一件事：置灰条件就是 `target().hasPersistentId()` |
+| — | 顺带核实 | 1.12.2 **没有 `/data` 命令**（1.13 才有）；但单人下 `DataCommand` 本来就走服务端直读，不依赖命令 ⇒ 用户猜的这条不是 D 的原因 |
+
+### 四个坑（都在映射名 jar 上 `javap` 核实过）
+
+**坑 1（致命）：`InitGuiEvent.Post` 触发时 `windowId` 还是 0。**
+这一代客户端开窗的顺序是：
+
+```
+handleOpenWindow
+  └─ EntityPlayerSP#displayGUIChest → displayGuiScreen(new GuiChest(...))
+       └─ GuiScreen#setWorldAndResolution
+            ├─ initGui()          ← GuiContainer#initGui: mc.player.openContainer = this.inventorySlots
+            └─ InitGuiEvent.Post  ← ★ 我们在这里记锚点，此时 windowId = 0（int 默认值）
+  └─ player.openContainer.windowId = packet.getWindowId()   ★ 真实窗口号在这之后才写进去
+```
+
+旧实现把锚点记在 `windowId` 上（`activeContainerId`），于是"打开时记 0、之后 `currentContainerId()`
+返回 1" —— **永远对不上**，`activeFor()` 恒为 null。
+**修法**：锚点挂在 **`Container` 对象身份**上。windowId 会在原地被改写，对象身份不会。
+
+**坑 2：物品的 z=100 让"先画的面板"失效。**
+`RenderItem#setupGuiTransform` 是 `translate(x, y, 100.0F + this.zLevel)`，
+而面板的 `Gui#drawRect` / 文字都在 z=0。深度测试开着时 z=100 更靠近相机 ⇒
+**物品直接穿透面板**，与我们画在前还是在后无关。
+**修法**：整段面板绘制前 `beginPanel()`（关深度 + 关光照 + 归一混合），画完 `endPanel()` 还原；
+另外 `Draw#renderItem` 逐次开关 GUI 光照（开着会让后面的文字发暗）。
+`drawHoveringText` 收尾会把 depth **重新打开**，所以画完 tooltip 要再断言一次。
+
+**坑 3：双联箱子不能直接读方块实体。**
+菜单里的下标是 `InventoryLargeChest` 合起来的 0..53，而锚点只指向**一个** `TileEntityChest`（27 格）
+⇒ 右半边下标越界 ⇒ 整体 `no_data`（用户测的就是 Large Chest）。
+**修法**：`WorldProbe#containerOf` 先问**方块自己** ——
+`BlockChest#getContainer(World, Pos, boolean)` 是 public 的，它返回的包装器顺序与客户端菜单一致。
+`ProbeSlots` 与 `verifyNow` 都改走同一个 helper，保证"清单"与"读数"用同一套下标。
+
+**坑 4：`/data` 不存在。** 多人下这一代**结构性**读不到设备 NBT。
+`DataCommand` 不再发那条注定失败的命令，直接如实报"读不到"（单人不受影响）。
+
+### 没有证据支持、但值得记下来的两条
+
+- 用户怀疑"图层优先级"，实际是**深度**问题，不是绘制顺序问题 —— 关掉深度就够了。
+- 截图里满屏散落的物品图标**不是我们画的**（全项目只有两处 `renderItem` 调用，各画一个图标；
+  面板底色 0xF2 经像素采样也印证了"底下的东西只能透出 5%"）。
+  改完 z 层次后若还有残留，那只能是别的模组在我们之后画的 ——
+  判别方法：按 **F1**（隐藏 HUD）。面板会留下、HUD 级覆盖层会消失。
+
+---
+
+## 四、分阶段计划
 
 | 阶段 | 内容 | 难点 |
 |---|---|---|
@@ -238,9 +306,9 @@ wasDown = down;
 
 ## 五、已知限制
 
-1. **没有实机**。本机没有 1.12.2 实例（只有 1.16.5 / 1.18.2 / 1.20.1 / 1.21.1 等）。
-   要实机验证必须先建一个：Forge 14.23.5.2859 + 一个干净 `mods/`。
-   建议同时备 **Cleanroom** 的第二运行时（1.12.2 是唯一能复刻"一份 jar 通吃"的版本，
+1. **实机环境**：`versions\1.12.2-Forge`（Forge 14.23.5.2864 + AE2 rv6 / MEK 9.8.3 / TE 5.5.7 / CoFH / JEI 4.22）。
+   构建基线是 2859，差一个官方小版本，二进制兼容。
+   另建议备 **Cleanroom** 的第二运行时（1.12.2 是唯一能复刻"一份 jar 通吃"的版本，
    见 `C:\Users\JesseTech\WorkBuddy\Minecraft mod\docs\port-feasibility-legacy.md` §3）。
 2. **AE 不做**（本轮用户明确要求）。`AeKeys` / `AeNetworkReader` 不搬；`TestAe` 不进门禁。
    将来要搬的话，AE2 rv6 的 API 与 8.x 又不一样（`AEApi.instance().grid()` 那一套），别照抄 1.16.5。
@@ -253,3 +321,8 @@ wasDown = down;
    `acceptedMinecraftVersions="[1.12.2]"` 不锁 Forge，两者二进制兼容（待网络方便时对齐）。
 6. **`verify-jar.py` 未适配**：它读 `mods.toml`，本线用 `mcmod.info`，所以本线门禁暂不含这一步。
    等有实机之后再补一个 `verify-mcmod.py`（校验 mcmod.info 的版本/描述与 jar 内类版本号）。
+7. **多人下读不到设备 NBT**（新，结构性）：1.12.2 没有 `/data`，客户端进程里又没有方块实体。
+   DATA 页在多人下只会显示"读不到"；逐 tick 采样同理（只在单人成立）。
+8. **NBT 槽位模式对双联箱子只覆盖一半**（新）：`DataProbe` 读的是**锚点那个方块实体**的 NBT，
+   双联箱子的两半各有一份 27 格的 NBT。要测整只大箱子请用**普通槽位模式**
+   （`WorldProbe#containerOf` 已经按 54 格处理），别用 NBT 槽位模式。

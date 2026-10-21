@@ -1,16 +1,21 @@
 package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.bind.ProbeTarget;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockChest;
 import net.minecraft.client.Minecraft;
 import net.minecraft.server.integrated.IntegratedServer;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.EnumFacing;
 import net.minecraftforge.fml.common.registry.ForgeRegistries;
 import net.minecraft.server.MinecraftServer;
+import net.minecraft.world.ILockableContainer;
+import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.tileentity.TileEntityChest;
 import net.minecraftforge.items.CapabilityItemHandler;
 import net.minecraftforge.items.IItemHandler;
 import org.jetbrains.annotations.Nullable;
@@ -168,8 +173,8 @@ public final class WorldProbe {
         TileEntity be = level.getTileEntity(target.pos());
 
         // vanilla IInventory：getContainerSlot() 就是容器内下标，vanilla 保证，直接可信
-        if (be instanceof IInventory) {
-            IInventory container = (IInventory) be;
+        IInventory container = containerOf(level, target.pos(), be);
+        if (container != null) {
             int size = container.getSizeInventory();
             boolean ok = true;
             for (int i = 0; i < n; i++) {
@@ -289,7 +294,7 @@ public final class WorldProbe {
             return null;
         }
 
-        IInventory container = be instanceof IInventory ? (IInventory) be : null;
+        IInventory container = containerOf(level, target.pos(), be);
         IItemHandler handler = container == null ? itemHandler(level, target.pos(), be) : null;
         if (container == null && handler == null) {
             return null;
@@ -323,6 +328,43 @@ public final class WorldProbe {
             out.add(ContainerAccess.make(-1, idx, handler.getStackInSlot(idx)));
         }
         return new java.util.ArrayList<>(out);
+    }
+
+    /**
+     * 「这个方块的物品容器」—— 优先问**方块自己**，问不到再退回方块实体。
+     *
+     * 【为什么不能直接用方块实体：双联箱子】
+     * 客户端菜单里的下标是 **大箱子合起来**的 0..53（`InventoryLargeChest` 把两个 27 格拼起来），
+     * 而锚点只指向其中**一个**方块实体（`TileEntityChest`，只有 27 格）。
+     * 直接用 TE 读 ⇒ 右半边（下标 27..53）永远越界 ⇒ 越界就整体 no_data
+     * （实测：截图里用户测的正是 Large Chest）。
+     *
+     * `BlockChest#getContainer(World, BlockPos, boolean)` 是 public 的，它会把
+     * **同一对大箱子的两半**按 vanilla 的固定顺序包成一个 54 格容器 ——
+     * 顺序与客户端菜单完全一致，所以下标直接对得上。
+     *
+     * 只在**服务端线程**调用（客户端同名字段里的内容不可信）。
+     * 其它实现 `IInventory` 的方块（熔炉 / 漏斗 / 木桶 / 模组机器）行为不变。
+     */
+    @Nullable
+    static IInventory containerOf(World level, BlockPos pos, @Nullable TileEntity be) {
+        if (be == null) {
+            return null;
+        }
+        if (be instanceof TileEntityChest) {
+            try {
+                Block block = level.getBlockState(pos).getBlock();
+                if (block instanceof BlockChest) {
+                    ILockableContainer large = ((BlockChest) block).getContainer(level, pos, true);
+                    if (large != null) {
+                        return large;
+                    }
+                }
+            } catch (Throwable ignored) {
+                // 极端情况下（世界正在卸载）宁可退回单格 TE，也不要抛穿服务端 tick
+            }
+        }
+        return be instanceof IInventory ? (IInventory) be : null;
     }
 
     /**

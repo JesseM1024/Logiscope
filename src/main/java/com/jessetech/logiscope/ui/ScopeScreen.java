@@ -733,7 +733,8 @@ public final class ScopeScreen extends GuiScreen {
 
     /** 当前开着的容器界面是不是"这个实例要探测的那台设备" */
     private boolean matchesOpenContainer(ProbeTarget t) {
-        ContainerAnchor.Anchor a = ContainerAnchor.activeFor(ContainerAccess.currentContainerId());
+        // 1.12.2：锚点用 Container 的**对象身份**匹配（windowId 在 InitGuiEvent 时还没赋值）
+        ContainerAnchor.Anchor a = ContainerAnchor.activeFor(ContainerAccess.currentMenu());
         if (a == null || !t.hasPersistentId()) {
             return false;
         }
@@ -1700,6 +1701,10 @@ public final class ScopeScreen extends GuiScreen {
         Draw g = new Draw();
         rebuildIfNeeded();
         refreshAnalyze();
+        // ★ 整段面板绘制都在"关深度 + 无光照 + 混合正常"的干净状态里做。
+        //   原因见 Draw#beginPanel：1.12.2 的物品固定画在 z=100，深度开着时它们会
+        //   直接穿透面板（实机症状："物品被绘制于界面上方"）。
+        g.beginPanel();
         // 悬浮详情每帧重建（鼠标动一下就可能换目标）
         tipKey = 0;
         tipTitle = "";
@@ -1718,7 +1723,10 @@ public final class ScopeScreen extends GuiScreen {
         // 只有面板本身，不再整屏压黑 —— 被压住的容器界面要能看见
         g.fill(x + 2, y + 3, x + L.w() + 3, y + L.h() + 4, 0x66000000);
         g.fill(x - 1, y - 1, x + L.w() + 1, y + L.h() + 1, 0xFF5A5A68);
-        g.fill(x, y, x + L.w(), y + L.h(), 0xF2101017);
+        // ★ 面板底必须**完全不透明**：0xF2（95%）会让底下的物品以 5% 透出来
+        //   （实测采样：白物品透过处是 (25,25,34)，纯面板是 (15,15,20)）。
+        //   这是个观测工具 —— 面板里的每一个像素都该是我们画的。
+        g.fill(x, y, x + L.w(), y + L.h(), 0xFF101017);
 
         // 光效必须画在标题栏背景**之后**：renderTitle 会整条 fill 标题区，
         //   先画就被完全盖住（实测踩过）
@@ -1759,12 +1767,16 @@ public final class ScopeScreen extends GuiScreen {
         // 悬浮详情最后画：它永远在最上层，且位置跟着鼠标
         updateHoverTips(L, mouseX, mouseY);
         renderTip(g, L, mouseX, mouseY);
+        // ★ 重新断言一次面板状态：vanilla 的 drawHoveringText 收尾会把 depth
+        //   **重新打开**，之后继续画的东西就又会被"z=100 物品规则"顶掉。
+        g.beginPanel();
         renderFlash(g, y);
 
         // 最后两样必须压在最上层，和 vanilla 的顺序一致：
         // 手持物品永远跟着光标可见，悬浮提示在它下面。
         renderCarriedItem(g, mouseX, mouseY);
         renderBackgroundTooltip(g, mouseX, mouseY);
+        g.endPanel();
     }
 
     /** 组装这一帧要画的东西：可见窗口 + 隐藏集合 + 框选状态 + 波形标记 */

@@ -962,7 +962,8 @@ public final class ProbeInstance {
             return false;
         }
         int id = ContainerAccess.currentContainerId();
-        ContainerAnchor.Anchor anchor = ContainerAnchor.activeFor(id);
+        // 1.12.2：锚点按 Container 对象身份匹配（见 ContainerAnchor 类注释）
+        ContainerAnchor.Anchor anchor = ContainerAnchor.activeFor(ContainerAccess.currentMenu());
         if (anchor == null) {
             return false;
         }

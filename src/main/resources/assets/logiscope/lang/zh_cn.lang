@@ -122,7 +122,7 @@ logiscope.data.hint.pick=左键 数值 = 取值路径 · 左键 文字 = 当名�
 logiscope.data.status.idle=尚未请求
 logiscope.data.status.waiting=读取中…
 logiscope.data.status.ok=已获取
-logiscope.data.status.no_permission=多人且无命令权限（单人无需权限）
+logiscope.data.status.no_permission=多人下读不到设备 NBT（1.12.2 没有 /data；单人可用）
 logiscope.data.status.fail=读取失败（没有方块实体？）
 logiscope.flash.data_need_path=先填一个取值路径
 logiscope.flash.data_sampling=已开始按 NBT 路径采样：%s

@@ -97,21 +97,13 @@ public final class DataCommand {
             }
             return;
         }
-        // ---- 多人降级：命令路（需要权限）----
-        if (mc.player != null && mc.player.canUseCommand(2, "") && mc.getConnection() != null) {
-            waiting = true;
-            requestedAt = clientTicks;
-            status = Status.WAITING;
-            try {
-                mc.player.sendChatMessage(
-                        "/data get block " + pos.getX() + " " + pos.getY() + " " + pos.getZ());
-            } catch (Exception e) {
-                waiting = false;
-                status = Status.FAIL;
-                LogiScopeMod.LOGGER.warn("[LogiScope] data get failed: {}", e.toString());
-            }
-            return;
-        }
+        // ---- 多人：这一代没有可用的降级通道 ----
+        // ★ 1.12.2 **没有 `/data` 命令**（`/data` 是 1.13 才引入的），
+        //   客户端进程里又没有方块实体 ⇒ 多人下**结构性地**读不到设备 NBT。
+        //   所以这里如实报"读不到"，**不发**一条注定被服务端打回的命令
+        //   （发了也只会在聊天框里留一句红字，还顺带让状态机多等一整个超时）。
+        //   注意：逐 tick 的**采样**不受影响 —— 数据探针的采样走 DataProbe 的服务端直读，
+        //   而多人下服务端根本不在本进程里，所以那条路本来就只在单人成立（见 PORT-1.12.2 §五）。
         status = Status.NO_PERMISSION;
         text = "";
     }

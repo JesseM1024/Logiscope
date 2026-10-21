@@ -140,7 +140,7 @@ public final class ProbeContext {
             return null;
         }
         if (ContainerAccess.hasForeignContainerOpen()) {
-            ContainerAnchor.Anchor a = ContainerAnchor.activeFor(ContainerAccess.currentContainerId());
+            ContainerAnchor.Anchor a = ContainerAnchor.activeFor(ContainerAccess.currentMenu());
             if (a != null) {
                 // 设备名从锚点坐标现取（方块名只用于显示，取不到也无所谓）
                 return new Candidate(a.dimension(), a.pos(), true, blockName(mc.world, a.pos()));

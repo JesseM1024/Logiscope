@@ -138,8 +138,10 @@ public final class ProbeSlots {
         }
         List<ContainerAccess.SlotView> out = new ArrayList<>();
 
-        if (be instanceof IInventory) {
-            IInventory container = (IInventory) be;
+        // 与 WorldProbe#readOnServer 走**同一个**容器解析：
+        // 双联箱子必须问方块（54 格），直接用方块实体只有一半 —— 清单与读数不一致就必然对不上
+        IInventory container = WorldProbe.containerOf(level, pos, be);
+        if (container != null) {
             int n = Math.min(container.getSizeInventory(), MAX_SLOTS);
             for (int i = 0; i < n; i++) {
                 out.add(ContainerAccess.make(-1, i, container.getStackInSlot(i)));

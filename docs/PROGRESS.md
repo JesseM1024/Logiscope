@@ -97,8 +97,8 @@
 
 ## [1.12.2] 线：现状与移植记录
 
-**现状（2026-10-21）**：**代码面已全量移植完，出包可用**（243 KB / 85 class），已装入
-`1.12.2-Forge` 实例；离线门禁全过。**实机尚未验证**。
+**现状（2026-10-21）**：**代码面已全量移植完，出包可用**（244 KB / 85 class），已装入
+`1.12.2-Forge` 实例；离线门禁全过。**首轮实机已完成，四条反馈已修（轮次 3），待复核**。
 分支 `1.12.2-forge` 从 `1.16.5-forge@846818d` 分出，版本 `0.1.0-1.12.2`，
 产物 `build/libs/logiscope-0.1.0-1.12.2.jar`。
 **本线明确不做 AE 兼容**（用户要求），AE 的类与断言留在 1.16.5 线。
@@ -164,6 +164,50 @@ API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PO
 跨包调不到，反射又撞 SRG）⇒ 面板开着时先收起再操作容器。编译基线 2859 / 实例 2864（二进制兼容）。
 
 **未完成**：实机验证（jar 已装进实例，等你启动）。
+
+---
+
+### [1.12.2] 轮次 3：首轮实机反馈（四个问题 → 三个根因）（2026-10-21）
+
+**先入档实测结果，再改代码**（便于回滚到"已知可用"）。
+
+实机反馈四条，其中 C / D 是**同一个根因**。硬证据不是猜的，是模组自己写的归档头：
+
+```json
+// versions\1.12.2-Forge\logiscope\2026-10-21_23-16-55\recording.json
+"probe":{"name":"open container (no coords)","description":"slots 0 · runtime identity"}
+```
+
+⇒ 探针的 `ProbeTarget` **没有持久身份**（`hasPersistentId() == false`），锚点从来没拿到过。
+
+| # | 反馈 | 根因（都 `javap` 过） |
+|---|---|---|
+| 1 | 物品被绘制在面板之上 | `RenderItem#setupGuiTransform` 固定 `translate(x,y,100+zLevel)`，面板在 z=0；深度测试开着 ⇒ **z=100 必胜**，绘制顺序失效 |
+| C | 关界⾯即 `paused`、点「继续」报 `source unavailable` | 锚点 null ⇒ 无坐标 ⇒ 不能 FOLLOWING，也不能走服务端读 |
+| D | 「Probe data」按钮置灰点不了 | 同一件事（置灰条件就是 `hasPersistentId()`） |
+| — | 用户猜"1.12.2 没有 `data get block`" | 属实（`/data` 是 1.13 才加的），但**不是 D 的原因** —— 单人下 `DataCommand` 走服务端直读，不碰命令 |
+
+**致命根因：`InitGuiEvent.Post` 触发时 `windowId` 还是 0。**
+`handleOpenWindow → displayGUIChest → displayGuiScreen → setWorldAndResolution`
+（`initGui` 里 `player.openContainer = this.inventorySlots` → `InitGuiEvent.Post` ←我们在这里记锚点）
+**之后**才 `player.openContainer.windowId = packet.getWindowId()`。
+旧代码把锚点记在窗口号上 ⇒ "打开时记 0、之后比 1"，永远对不上。
+
+**改动**
+
+| 件 | 改动 |
+|---|---|
+| `ContainerAnchor` | 锚点改挂 **`Container` 对象身份**（`activeContainer`），不再用 `windowId`；新增 `anchorFromContainer`（槽位 `inventory` 自己就是 `TileEntity` 时反推坐标，作为"右键事件没抓到"的兜底）；绑定时打一条 INFO 日志（锚点成功/失败都能从 latest.log 看出来） |
+| `KeyBindings#onScreenInit` / `ProbeContext` / `ProbeInstance#tryRebind` / `ScopeScreen#matchesOpenContainer` | 跟着改成传/比 `Container` |
+| `Draw` | 新增 `beginPanel()` / `endPanel()`：**关深度**（这是"物品盖面板"的正解）+ 关光照 + 归一混合，画完还原成 vanilla 期望的状态；`renderItem` 改成逐次开关 GUI 光照（否则后面的文字发暗） |
+| `ScopeScreen#drawScreen` | 整段面板包在 `beginPanel/endPanel` 里；面板底色 `0xF2101017` → **`0xFF101017`**（95% 会让底下物品以 5% 透出来，实机像素采样证实）；`renderTip` 之后**再断言一次**（`drawHoveringText` 收尾会把 depth 打开） |
+| `WorldProbe` | 新增 `containerOf`：双联箱子先问**方块**（`BlockChest#getContainer` 返回 54 格包装器，顺序与客户端菜单一致），不再直接用 27 格的 TE（右半边必然越界 → no_data）。`verifyNow` / `readOnServer` / `ProbeSlots` 共用它 |
+| `DataCommand` | 多人分支不再发 `/data get block`（这一代没有），直接如实报"读不到"；单人直读路径不变 |
+
+**产物**：`logiscope-0.1.0-1.12.2.jar`（244 KB），门禁 `ALL_OK`，已换装进 `1.12.2-Forge` 实例
+（旧包移到 `mods/.old/logiscope-0.1.0-1.12.2-r1.jar`）。
+
+**待实机复核**：见 [`VERIFY.md`](VERIFY.md) 的 **G 组**（本轮四条修复的定向复核）。
 
 ---
 

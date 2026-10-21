@@ -122,7 +122,7 @@ logiscope.data.hint.pick=click number = value path · click text = use as name �
 logiscope.data.status.idle=idle
 logiscope.data.status.waiting=reading…
 logiscope.data.status.ok=ok
-logiscope.data.status.no_permission=multiplayer without command permission
+logiscope.data.status.no_permission=multiplayer: cannot read block NBT (1.12.2 has no /data; singleplayer works)
 logiscope.data.status.fail=failed (no block entity?)
 logiscope.flash.data_need_path=set a value path first
 logiscope.flash.data_sampling=NBT sampling started: %s
