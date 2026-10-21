@@ -269,6 +269,15 @@ handleOpenWindow
 另外 `Draw#renderItem` 逐次开关 GUI 光照（开着会让后面的文字发暗）。
 `drawHoveringText` 收尾会把 depth **重新打开**，所以画完 tooltip 要再断言一次。
 
+> 截图里满屏散落的图标是**JEI 的物品列表**（放大可辨：Mekanism 各等级管道/线缆）。
+> 它被画进来的路径是：我们调 `parent.drawScreen(...)` → Forge 在 `GuiContainer.drawScreen`
+> 末尾发 `GuiContainerEvent.DrawForeground` → JEI 的 `ingredientListOverlay.drawOnForeground`。
+> 位置错乱的原因是**我们的假屏从不更新 JEI 的 `GuiProperties`**（JEI 的
+> `updateScreen` 挂在 `GuiScreenEvent.DrawScreenEvent.Post` 上，而我们从不调 `super.drawScreen`，
+> 那个事件一次都不发）⇒ 它拿着上一帧容器的属性画到了别处。
+> 而这些图标同样是 `RenderItem` 画的 ⇒ 同样在 z=100 ⇒ 同样被深度测试顶到面板之上。
+> **关掉深度之后，面板就把它们盖住了** —— 一条修法同时解决"父界面的物品"和"别的模组的物品"。
+
 **坑 3：双联箱子不能直接读方块实体。**
 菜单里的下标是 `InventoryLargeChest` 合起来的 0..53，而锚点只指向**一个** `TileEntityChest`（27 格）
 ⇒ 右半边下标越界 ⇒ 整体 `no_data`（用户测的就是 Large Chest）。
@@ -281,11 +290,12 @@ handleOpenWindow
 
 ### 没有证据支持、但值得记下来的两条
 
-- 用户怀疑"图层优先级"，实际是**深度**问题，不是绘制顺序问题 —— 关掉深度就够了。
-- 截图里满屏散落的物品图标**不是我们画的**（全项目只有两处 `renderItem` 调用，各画一个图标；
-  面板底色 0xF2 经像素采样也印证了"底下的东西只能透出 5%"）。
-  改完 z 层次后若还有残留，那只能是别的模组在我们之后画的 ——
-  判别方法：按 **F1**（隐藏 HUD）。面板会留下、HUD 级覆盖层会消失。
+- 用户怀疑"图层优先级"，实际是**深度**问题，不是绘制顺序问题 —— 关掉深度就够了
+  （而且 1.12.2 的 `EntityRenderer#updateCameraAndRender` 是 **先 HUD 再 `currentScreen`**，
+  屏幕级绘制天然最后，所以"顺序"这条本来就不可能错）。
+- 截图里那批散落图标**不是我们画的**（全项目只有两处 `renderItem` 调用，各画一个图标），
+  是 JEI 的物品列表被画进了父界面帧（路径见坑 2 的引注）。改完 z 层次后它们会被面板盖住；
+  若还想彻底不画，就得不再转交 `GuiContainerEvent.DrawForeground`（代价见 §五）。
 
 ---
 
