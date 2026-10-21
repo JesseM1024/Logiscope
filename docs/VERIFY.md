@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.3-1.18.2-alpha）
+# LogiScope · 实机验证清单（当前版本 0.1.3-1.18.2）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④、
 > [1.20.1] 轮次 4（DATA 页右键「按数值读取」两步式 · F9 回滚）的
@@ -10,7 +10,7 @@
 > `VERIFY-HISTORY.md` 的历轮结论来自 1.21.1 线，是"算法与交互已通过"的依据，
 > **不等于 1.18.2 线已跑过**。
 > ⚠️ A–F 组是从 `1.20.1-neo` 派生时继承的文本（含 1.20.1 的实例说明），按 1.18.2 读时
-> 把"实例 / 产物名"换成 `1.18.2-Forge` + `logiscope-0.1.3-1.18.2-alpha` 即可；
+> 把"实例 / 产物名"换成 `1.18.2-Forge` + `logiscope-0.1.3-1.18.2` 即可；
 > **G / H / I 组是本轮（2026-10-21）新增，按 1.18.2 写的**。
 >
 > 分支差异（详见 [`PORT-1.20.1.md`](PORT-1.20.1.md) §七 / §八）：
@@ -186,7 +186,7 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.3-1.18.2-alpha.jar
+python verify-jar.py build/libs/logiscope-0.1.3-1.18.2.jar
 ```
 
 | # | 检查 | 期望 |
@@ -195,7 +195,7 @@ python verify-jar.py build/libs/logiscope-0.1.3-1.18.2-alpha.jar
 | E2 | `TestChart` | **489 条**断言全过；lang 中英各 **185** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.18.2-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.18.2`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
 
 ## F. 回归抽查
 
@@ -206,7 +206,7 @@ python verify-jar.py build/libs/logiscope-0.1.3-1.18.2-alpha.jar
 | R3 | MEK：NBT 追踪选格（点 2 格就只测 2 格）+ 反复开关 GUI 读数一致 | 与第十六轮④一致 |
 | R4 | 普通容器（箱子）选格 + 无 slot 列表的设备（机械手） | 行为不变 |
 | R5 | 切英文环境 | 无中文残留 |
-| R6 | 在 **`1.18.2-Forge` 实例**（Forge 40.3.12 + AE2 11.7.6 + MEK 10.2.5 + Create 0.5.1）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.3-1.18.2-alpha`）；F9 面板 / 选格 / 采样曲线与 main 一致 |
+| R6 | 在 **`1.18.2-Forge` 实例**（Forge 40.3.12 + AE2 11.7.6 + MEK 10.2.5 + Create 0.5.1）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.3-1.18.2`）；F9 面板 / 选格 / 采样曲线与 main 一致 |
 
 ## G. 选格页筛选框 + 忽略空槽（第十九轮①③）
 

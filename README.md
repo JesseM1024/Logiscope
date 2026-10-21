@@ -48,11 +48,11 @@ gradlew.bat createLaunchScripts
 | Minecraft | 1.18.2 |
 | Forge | 1.18.2-40.3.12（构建插件用 legacy 线 `net.neoforged.moddev.legacyforge`） |
 | 适配区间 | `loaderVersion=[40,)`、`forge=[40.2,)`、`minecraft=[1.18.2]` —— 40.2.x 的老整合包也能装，见 [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) §二 |
-| 模组版本 | `0.1.3-1.18.2-alpha`（本分支） |
+| 模组版本 | `0.1.3-1.18.2`（本分支） |
 
 > **版本分支约定**：`main` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
 > `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，jar 名 `logiscope-0.1.2-1.20.1-alpha`）；
-> 本分支 `1.18.2-forge` = MC 1.18.2 + Forge 40.x（JDK 17 / 同一 legacy 插件，jar 名 `logiscope-0.1.3-1.18.2-alpha`）。
+> 本分支 `1.18.2-forge` = MC 1.18.2 + Forge 40.x（JDK 17 / 同一 legacy 插件，jar 名 `logiscope-0.1.3-1.18.2`）。
 > 移植方案与逐项 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) 与
 > [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md)。
 > 通用 bugfix 默认进 main，再 cherry-pick 到各版本线。
