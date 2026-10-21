@@ -1,6 +1,7 @@
-# LogiScope · 实机验证清单（当前版本 0.1.2-1.20.1-alpha）
+# LogiScope · 实机验证清单（当前版本 0.1.3-1.20.1-alpha）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④、
+> 十九轮①–③（选格页筛选 / 忽略空槽 / AE 非物品键）、
 > [1.20.1] 轮次 4（DATA 页右键「按数值读取」两步式 · F9 回滚）的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
 > [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md)；原理索引在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
@@ -184,16 +185,16 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
+python verify-jar.py build/libs/logiscope-0.1.3-1.20.1-alpha.jar
 ```
 
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build --offline`（代理进程在跑时可直接联网构建；代理关闭时用 `--offline`，本机缓存完整） | `BUILD SUCCESSFUL`。联网构建需校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
-| E2 | `TestChart` | **461 条**断言全过；lang 中英各 **179** 键一致 |
+| E2 | `TestChart` | **489 条**断言全过；lang 中英各 **184** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.2-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
 
 ## F. 回归抽查
 
@@ -204,7 +205,46 @@ python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
 | R3 | MEK：NBT 追踪选格（点 2 格就只测 2 格）+ 反复开关 GUI 读数一致 | 与第十六轮④一致 |
 | R4 | 普通容器（箱子）选格 + 无 slot 列表的设备（机械手） | 行为不变 |
 | R5 | 切英文环境 | 无中文残留 |
-| R6 | 在 **Forge 47.3.7** 整合包（GregTech Leisure）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.2-1.20.1-alpha`，无红字）；F9 面板 / 选格 / 采样曲线与 NeoForge 侧一致（加载器兼容性回归，见 PORT §十） |
+| R6 | 在 **Forge 47.3.7** 整合包（GregTech Leisure）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.3-1.20.1-alpha`，无红字）；F9 面板 / 选格 / 采样曲线与 NeoForge 侧一致（加载器兼容性回归，见 PORT §十） |
+
+## G. 选格页筛选框 + 忽略空槽（第十九轮①③，自 main 移植）
+
+> 规则 = 空白分词取**与**；`#N` 是序号**精确**匹配（不命中 `#10`、`#007` 算 7）；
+> 其余按子串（物品 id / 短名 / AE 显示名，大小写不敏感）。
+> 「忽略空槽」在筛选框右边，默认关、跨开关面板保持（静态字段），与文字筛选**叠加**。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★G1 | 打开一个大箱子（≥ 27 格）→ 选格页 → 点筛选框 → 敲 `iron` | 只剩名称含 iron 的行；页脚显示 `命中 / 全部` |
+| ★G2 | 清空后敲 `#1` | **只**剩 `#1` 那一行（`#10`~`#19` 不出现） |
+| G3 | 敲 `#1 iron_ingot` | 序号 1 且名称含 iron_ingot 才显示（两条件是与） |
+| G4 | 筛选中滚轮 / 点行 | 翻的是**筛选后**的清单；点哪行选哪行（看到的 = 点的） |
+| G5 | 筛选框聚焦时按 Esc / Enter | Esc 清空并收起焦点；Enter 保留筛选、只收焦点 |
+| G6 | 筛选框聚焦时敲面板快捷键（默认 F9） | 快捷键**不触发**；点空白处失焦后恢复 |
+| ★G7 | 箱子里放几样东西、其余空 → 点「忽略空槽」 | 只剩有物品的行；按钮文字转绿；页脚出现 `命中 / 全部` |
+| ★G8 | 开着「忽略空槽」再敲筛选词 | 两个条件叠加；Esc 只清文字，空槽仍被隐藏 |
+| G9 | 全是空格子的容器 + 开着「忽略空槽」 | 提示"这个容器里没有非空格子·关掉「忽略空槽」看看"（不是"没有匹配的格子"） |
+| G10 | 英文环境 / 面板拖到最窄 | 「ignore empty」完整显示、不与搜索框重叠 |
+| G11 | 切到图表页再回来 | 筛选框内容保留（会话内），焦点已收起 |
+
+## H. AE 非物品键（第十九轮②，自 main 移植）
+
+> **本组在外部实例 `1.20.1-NeoForge`（AE2 `15.3.6`）里验** —— dev 实例的 AE2 在 `mods-disabled/`。
+> 1.20.1 的 AE 键序列化与 19.x 不同（无注册表参数），见 PORT §4.3；能读到值就说明那条链成立。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★H1 | AE 网络里存流体（如水 2,100,000 mB）→ 开终端 → 选格页 | 显示**流体真名**与**真实数量**（`x2100000`），不再是 `wrapped_generic_stack x1` |
+| ★H2 | 勾该流体 → 「完成」→ 图表页 | 读数是 mB 真值（不是 0、不是 no_data）；推/抽流体时曲线跟着变 |
+| H3 | 看**物品**行（如铁锭 2100 个） | 数量列是 `x2100`（不是 `x1`）；勾选后读数同样是真值（回归） |
+| H4 | 同时勾「水」和「岩浆」 | 两条**独立**的线（以前塌成同一个身份 → 互判重复） |
+| H5 | 勾一个"可合成但存量 0"的条目 | 行**可勾选**；读数为 **0**（网络在线、真值），不是 no_data |
+| H6 | 化学品（Applied Mekanistics）/ 电力（Applied Flux）各一个 | 显示真名与真值（1.20.1 侧若没装这些附属就跳过本项，结论记为"未覆盖"） |
+| H7 | 数据页追踪目标列表 | 显示 `ae:network[水]`（不是一长串 SNBT） |
+| H8 | 拆掉网络供电 | 该线变 `no_data`（不是 0） |
+| H9 | 一个 AE 探针挂 5 个目标，`/tick rate 200` 跑 10 秒 | 读数逐 tick 变化、无明显卡顿 |
+| ★H10 | 挂两个 AE 目标（水 + 岩浆）→ 数据页点其中一行的 × | **只删那一行**（回归：以前按 `ae:network` 路径删会把全部 AE 目标一起删） |
+| H11 | 老目标（0.1.2 之前建的 AE 物品目标） | 继续能读（裸 registry id 那条路没动），选格页里仍显示为已勾选 |
 
 ---
 

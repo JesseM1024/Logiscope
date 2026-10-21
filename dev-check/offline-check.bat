@@ -22,7 +22,7 @@ echo === [1/4] javac TestChart ===
 javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\TestChart.java
 if errorlevel 1 goto fail
 
-echo === [2/4] TestChart (expect 461 assertions, 0 failures) ===
+echo === [2/4] TestChart (expect 489 assertions, 0 failures) ===
 java -Dfile.encoding=UTF-8 -cp "build\dev-check;%CP%" TestChart
 if errorlevel 1 goto fail
 
@@ -33,7 +33,7 @@ java -Dfile.encoding=UTF-8 -cp "build\dev-check;build\classes\java\main" BenchRe
 if errorlevel 1 goto fail
 
 echo === [4/4] verify-jar ===
-python verify-jar.py build\libs\logiscope-0.1.2-1.20.1-alpha.jar
+python verify-jar.py build\libs\logiscope-0.1.3-1.20.1-alpha.jar
 if errorlevel 1 goto fail
 
 echo ALL_OK

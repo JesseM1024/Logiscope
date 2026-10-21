@@ -220,7 +220,7 @@ public final class ProbeInstance {
      *
      * 同一条普通路径只留一条 —— 旧的（{@code old}）换成新的（{@code now}），原子完成。
      * 只按**精确相等**匹配 {@code old}：slot 锚点 / AE 目标即便路径字符串偶然相同也不碰
-     * （{@link #removeDataTarget} 按 valuePath 删、会误伤它们，这里不能用它）。
+     * （它们是另一套身份，见 {@link DataTarget#isDuplicate}）。
      *
      * @return 是否真的替换了（false = {@code old} 已不在列表里，竞争条件下才可能）
      */
@@ -313,11 +313,20 @@ public final class ProbeInstance {
         }
     }
 
-    /** 删除一个数据追踪目标（DATA 页目标列表行尾的 ×）。@return 是否真的删了 */
-    public boolean removeDataTarget(String valuePath) {
+    /**
+     * 删除**一个**数据追踪目标（DATA 页目标列表行尾的 ×）。
+     *
+     * 按目标本身（record 相等）删，**不是**按 valuePath 删 —— 第十九轮② 之前是按路径删，
+     * 而所有 AE 目标共用 `"ae:network"` 这个标记路径，于是"删掉列表里这一行"会
+     * 把**全部 AE 目标**一起删掉（流体 + 物品各一条时尤其明显）。
+     * 槽位锚点也踩过同一个坑（见 {@link #replaceDataTarget} 的注释）。
+     *
+     * @return 是否真的删了（false = 这个目标已经不在列表里）
+     */
+    public boolean removeDataTarget(DataTarget target) {
         synchronized (sampleLock) {
             List<DataTarget> n = new ArrayList<>(dataTargets);
-            boolean gone = n.removeIf(d -> d.valuePath().equals(valuePath));
+            boolean gone = n.remove(target);
             if (gone) {
                 dataTargets = List.copyOf(n);
                 // 最后一个目标也没了、又没有槽位 → 回到待配置，不留一个空转的探针

@@ -7,8 +7,9 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **179** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **184** 键一致。
+  （以上数字为 main 与 1.20.1 两条线**同步后**的共同值，见「[1.20.1] 轮次 6」。）
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
   [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
@@ -23,7 +24,8 @@
 
 ## [1.20.1] 线：现状与移植记录
 
-**现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，
+**现状（2026-10-21）**：功能已与 main **对齐到第十九轮③**（选格页筛选框 / 忽略空槽 / AE 非物品键，见「轮次 6」）；
+此前的记录（2026-10-15）：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，
 **轮次 4 的 DATA 右键「按数值读取」已回流 main（两步式定稿 `3ddb77c` + 表头截断 `d2dc8c5`）**；
 F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误交互保留不修 —— 见「轮次 4」）。dev 启动
 问题已定位并处理（AE2 的 SRG-mixin 缺陷 → `mods-disabled/`，外部实例渠道打通并完成兼容性审计，
@@ -33,8 +35,8 @@ F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误�
 
 | 项 | 值 |
 |---|---|
-| 构建 | `gradlew.bat build --offline` 通过（代理关闭时；代理在跑可直接联网构建）；产物 `build/libs/logiscope-0.1.2-1.20.1-alpha.jar`（reobf） |
-| 离线 | TestChart **461 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **179** 键 |
+| 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.3-1.20.1-alpha.jar`（reobf） |
+| 离线 | TestChart **489 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **184** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
 | 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.2-1.20.1-alpha` |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
@@ -155,6 +157,29 @@ AE 目标）；非标量条目右键明确提示，不填。**已回流 main（`
 `data modify` 造字符串键的方法）。
 
 ---
+
+### [1.20.1] 轮次 6：同步 main 第十九轮①–③（选格页筛选 / 忽略空槽 / AE 非物品键）+ 版本 0.1.3（2026-10-21）
+
+**来源**：main `ae1c95e`（筛选框）/ `8ebb2f4`（AE 非物品键）/ `12e1a67`（点击守卫）/ `b62587c`（忽略空槽 + 0.1.3）。
+两分支历史无共同祖先 ⇒ **不是 cherry-pick**，是按同一份改动手工搬运并适配 1.20.1 的 API。
+
+| 件 | 1.20.1 侧的适配 |
+|---|---|
+| `analysis/PickerFilter` / `analysis/AeKeyText` | 纯逻辑，**原样搬**（无 MC 依赖） |
+| `bind/AeKeys` | AE2 **15.x 的键序列化不带注册表**：`toTagGeneric()` 无参 / `fromTagGeneric(CompoundTag)` 单参（19.x 要 `HolderLookup.Provider`，且 1.20.1 没有 HolderLookup 这个类型）⇒ encode/decode/unwrap 全部去掉注册表参数 |
+| `bind/AeKeys#repoHasEntry` | **不能反射 `Slot#hasItem()`**：1.20.1 生产运行时是 SRG 命名（`m_6657_`），按名字反射只会在 dev 里碰巧成功。改反射 AE 自己的 `RepoSlot#getEntry()`（dev / 生产同名），语义也正好是"条目在不在" |
+| `collect/ContainerAccess` | 去掉 `HolderLookup`；`isSelectable` 保持本分支的「无 `Slot#isFake()`」版本（不把 1.21 的判据搬过来） |
+| `collect/AeNetworkReader` | `ResourceLocation.parse` → `new ResourceLocation`（1.21 API）；其余同 main（含反射链只解析一次、同 tick 弱引用缓存） |
+| `ui/ScopeScreen` | 逐处搬：`Layout` 加 `filterTop/filterH`、`pickerVisible`、筛选框 / 忽略空槽的几何与渲染、键鼠分支、`accentFor`。**不碰**本分支的 `ForgeHooksClient` 与单参数 `mouseScrolled` |
+| `ui/ChartRenderer` | 只改 `label()`；**保留**本分支的 `ticksPerSecond() = 20`（1.20.1 无 `tickRateManager`） |
+| lang | 新增 5 键（中英各 **184**）：`picker.filter_hint` / `ignore_empty` / `no_match` / `all_empty` / `filtered` |
+
+**离线实证**：`dev-check/ProbeAeApi.java` 按 15.x 签名重写，对 AE2 **15.3.6** 逐个 `getMethod`，
+19 条签名全过、输出 `AE_API_OK`（含 `RepoSlot#getEntry`）。不进门禁（依赖实例里的第三方 jar）。
+
+**版本**：`mod_version` → `0.1.3-1.20.1-alpha`；产物 `build/libs/logiscope-0.1.3-1.20.1-alpha.jar`
+（248 KB）；`offline-check.bat` 的断言数 / 产物名同步。**实机待验**：`VERIFY.md` G / H 组
+（H 组在外部实例 `1.20.1-NeoForge` + AE2 15.3.6 上做）。
 
 ## 第十八轮①：物品探针采样统一到服务端（菜单降为兜底，2026-10-15）
 

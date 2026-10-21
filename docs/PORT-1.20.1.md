@@ -2,7 +2,8 @@
 
 > 状态（2026-10-15）：配置层 + API 移植完成（2026-09-20）；main 的第十七轮①、第十八轮①–④
 > 与文档体系重构已全部搬运；离线验证全过；AE2 已移出 dev、外部实例渠道已打通并完成兼容性审计
-> （§八）；版本号提至 `0.1.2-1.20.1-alpha`；**实机验收待做**（清单见本分支 [`VERIFY.md`](VERIFY.md)）。
+> （§八）；版本号提至 `0.1.3-1.20.1-alpha`（轮次 6 已同步 main 第十九轮①–③）；
+> **实机验收待做**（清单见本分支 [`VERIFY.md`](VERIFY.md)）。
 > 本文件在两分支各自维护，结论以 `1.20.1-neo` 分支上的版本为准。
 >
 > 纪律：两分支 git 历史**互不相关**（main 曾 rebase 重写，2026-10-14 核查）——
@@ -21,7 +22,7 @@
 | 目标 MC | 1.20.1 |
 | 目标 NeoForge | `1.20.1-47.1.106`（构建基线 == 该版本，产物在 `build/moddev/artifacts/`） |
 | Java | **17**（`org.gradle.java.home` 与 toolchain 同时锁定） |
-| 模组版本 | `0.1.2-1.20.1-alpha`（版本号带 MC 后缀的约定见 `gradle.properties`） |
+| 模组版本 | `0.1.3-1.20.1-alpha`（版本号带 MC 后缀的约定见 `gradle.properties`） |
 | 分支 | `1.20.1-neo`（自 main 线 `c00c545`「版本号带 MC 后缀」提交切出；2026-10-15 经文档 blob 比对核实） |
 
 **测试实例**：dev 实例（`1_20_1_neo/`，NeoForge 47.1.106）用于常规验证；AE / 精妙存储
@@ -105,7 +106,10 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 | `LogiScopeMod` | `@Mod(dist = Dist.CLIENT)` | Forge 1.20.1 的 `@Mod` 无 dist 参数；改为构造时检查 `FMLEnvironment.dist` |
 | `bind/DataCommand` | `ClientChatReceivedEvent.System` | 无 System 子类型；用 `event.isSystem()` 判定 |
 | `bind/TextInputGuard` | `ScreenEvent.CharacterTyped.Pre / Post` | 同形（该事件在 1.20.1 已存在，已核实） |
-| `collect/AeNetworkReader` | AE2 1.21.1 grid / node API | AE2 1.20.1 对应 API（反射，零编译期依赖） |
+| `collect/AeNetworkReader` | AE2 1.21.1 grid / node API | AE2 1.20.1 对应 API（反射，零编译期依赖）。**读值链两代一致**（`GridHelper#getNodeHost` / `IGridNode#isActive` / `IStorageService#getInventory` / `MEStorage#getAvailableStacks` / `KeyCounter#get`），差别只在取键（下一行） |
+| `bind/AeKeys`（AE 键序列化） | `AEKey#toTagGeneric(HolderLookup.Provider)` / `fromTagGeneric(Provider, CompoundTag)`（AE2 **19.x**） | `toTagGeneric()` **无参** / `fromTagGeneric(CompoundTag)` **单参**（AE2 **15.x**，已对 15.3.6 javap 核实）；1.20.1 也没有 `HolderLookup` 这个类型 ⇒ 本分支的 encode/decode 不传注册表 |
+| `bind/AeKeys`（终端显示格空/非空） | 反射 `Slot#hasItem()`（1.21 生产用 Mojang 名，能反射到） | **不能按名反射 MC 方法**：1.20.1 生产是 SRG（`hasItem` = `m_6657_`），dev 能过、生产扑空。改反射 AE 自己的 `RepoSlot#getEntry()`（dev / 生产同名，语义 = 条目在不在） |
+| `collect/AeNetworkReader`（解析 id） | `ResourceLocation.parse(str)` | `new ResourceLocation(str)`（`parse` 是 1.21 新增） |
 | `analysis/Snbt` / `archive/*` | DataComponent 系 | `getTag()` NBT（引用面已 grep 核实） |
 | 其余 | `mouseScrolled(…, scrollX, scrollY)` / `saveWithoutMetadata(registryAccess)` / `ResourceLocation.parse` | 单滚动参数 / `saveWithoutMetadata()` / `new ResourceLocation(...)` |
 
