@@ -4,11 +4,13 @@ build/
 !gradle/wrapper/gradle-wrapper.jar
 
 # 开发运行实例（存档、日志、配置，体积很大）
+# 三条版本线各有独立 run 目录（见 build.gradle 的 runs.xxx.directory）；
+# 切分支时别的线的目录也会出现在工作区里 —— 所以**四个分支统一忽略这三个**。
 run/
-1_20_1_neo/
-1_18_2_forge/
-1_16_5_forge/
 run-data/
+1_16_5_forge/
+1_18_2_forge/
+1_20_1_neo/
 
 # IDE
 .idea/
