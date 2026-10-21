@@ -7,6 +7,7 @@ import net.minecraft.client.gui.IGuiEventListener;
 import net.minecraft.client.gui.screen.Screen;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import org.jetbrains.annotations.Nullable;
+import org.lwjgl.glfw.GLFW;
 
 import java.lang.reflect.Method;
 
@@ -92,6 +93,31 @@ public final class TextInputGuard {
     /** 玩家此刻是不是在打字？是的话快捷键要让路。 */
     public static boolean isTypingNow(@Nullable Screen screen) {
         return hasVanillaTextFocus(screen) || JeiSearchProbe.hasKeyboardFocus() || lastCharWasConsumed();
+    }
+
+    /**
+     * 这个按键该不该被"正在打字"挡下。
+     *
+     * 【功能键永不挡】（2026-10-22，1.16.5 实机踩坑后加）
+     * 功能键（F1–F25）不产生字符，**不可能是"打字"的一部分**，挡它没有任何好处。
+     * 而挡它有一个实实在在的坏处：AE2 8.x 的终端界面**一打开就把焦点交给搜索框**
+     * （`MEMonitorableScreen#init`：`isAutoFocus = terminalSearchMode ∈ {AUTOSEARCH*}`，
+     * 出厂配置就是 `AUTOSEARCH`，于是紧接着 `setListener(searchField)`），
+     * 守卫第 1 层把"有文本框聚焦"一律当成"玩家在打字" ⇒
+     * **在 AE 终端里按 F9 永远没反应**（实测症状：F9 呼不出面板）。
+     * 15.x / 19.x 的 AE 不再自动聚焦搜索框，所以这个问题只在 8.x 暴露，
+     * 但判据本身与哪个模组无关：不产生字符的键，天然不属于输入框。
+     *
+     * 代价（写在明处）：真有哪个模组的输入框把 F9 当自己的快捷键，这里会抢走它。
+     * 那属于模组冲突，宁可让用户的 LogiScope 能用 —— 而且用户随时可以改快捷键。
+     */
+    public static boolean blocksHotkey(@Nullable Screen screen, int keyCode) {
+        return !isFunctionKey(keyCode) && isTypingNow(screen);
+    }
+
+    /** GLFW 的功能键（F1 = 290 … F25 = 314） */
+    private static boolean isFunctionKey(int keyCode) {
+        return keyCode >= GLFW.GLFW_KEY_F1 && keyCode <= GLFW.GLFW_KEY_F25;
     }
 
     /**

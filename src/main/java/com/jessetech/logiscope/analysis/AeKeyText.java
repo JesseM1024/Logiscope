@@ -53,17 +53,38 @@ public final class AeKeyText {
         if (!isAe(id)) {
             return shortId(id);
         }
-        String snbt = id.substring(PREFIX.length());
-        Snbt.Node root = Snbt.parse(snbt);
-        if (root != null) {
-            Snbt.Node idNode = root.children().get("id");
-            String text = idNode == null ? null : idNode.text();
-            if (text != null && !text.trim().isEmpty()) {   // Java 8：String#isBlank 是 11 才有的
-                return shortId(text);
-            }
+        String raw = idOf(id);
+        if (raw != null) {
+            return shortId(raw);
         }
         // 解析不出来（键格式变了 / 文本被截断）：宁可露出原文，也不要编一个名字
+        String snbt = id.substring(PREFIX.length());
         return "~" + (snbt.length() > 24 ? snbt.substring(0, 24) : snbt);
+    }
+
+    /**
+     * 键串里 {@code id} 字段的**原文**（保留命名空间，如 {@code minecraft:water}）。
+     *
+     * 与 {@link #label} 的区别：label 是给人看的（去掉命名空间），这个是拿来**反查注册表**的
+     * （读值链要按它去 {@code ForgeRegistries.FLUIDS} 找流体，1.16.5 线用）。
+     *
+     * @return null = 不是 AE 键串 / 没有 id 字段 / 解析不出来
+     */
+    @Nullable
+    public static String idOf(@Nullable String id) {
+        if (!isAe(id)) {
+            return null;
+        }
+        Snbt.Node root = Snbt.parse(id.substring(PREFIX.length()));
+        if (root == null) {
+            return null;
+        }
+        Snbt.Node idNode = root.children().get("id");
+        String text = idNode == null ? null : idNode.text();
+        if (text == null || text.trim().isEmpty()) {   // Java 8：String#isBlank 是 11 才有的
+            return null;
+        }
+        return text;
     }
 
     /**

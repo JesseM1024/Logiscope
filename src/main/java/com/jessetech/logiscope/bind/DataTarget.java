@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.bind;
 
+import com.jessetech.logiscope.analysis.AeKeyText;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.RegistryKey;
 import net.minecraft.world.World;
@@ -224,7 +225,11 @@ public final class DataTarget {
      * "同种物品多格求和"不受这个后缀影响（需求：聚合计算不要被后缀干扰）。*/
     public String displayValue() {
         if (isAeNetwork()) {
-            return "ae:network[" + fallbackName() + "]";
+            // 物品目标原样显示 registry id（老样子）；流体键是一整段 SNBT，只显示人能认的名字
+            String name = AeKeyText.isAe(fallbackName())
+                    ? AeKeyText.label(fallbackName())
+                    : fallbackName();
+            return "ae:network[" + name + "]";
         }
         return isSlotAnchor() ? valuePath + "[slot=" + nbtSlot + "]" : valuePath;
     }

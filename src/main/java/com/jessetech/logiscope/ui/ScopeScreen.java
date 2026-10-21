@@ -2430,7 +2430,7 @@ public final class ScopeScreen extends Screen {
                 continue;   // ① 忽略空槽
             }
             boolean hit = !byText || PickerFilter.matches(pickerFilter, v.containerSlotIndex(),
-                    v.itemId(), v.shortName(), v.shortName(), v.empty() ? emptyLabel : null);
+                    v.itemId(), v.shortName(), v.displayName(), v.empty() ? emptyLabel : null);
             if (hit) {
                 out.add(v);
             }
@@ -2508,8 +2508,8 @@ public final class ScopeScreen extends Screen {
             g.drawString(this.font, selected ? "[x]" : "[ ]", x + 8, ry,
                     selected ? 0xFF3FE0A0 : 0xFF6A6A78, false);
             String label = "#" + v.containerSlotIndex()
-                    // 本线（AE2 8.x）没有"通用包裹堆栈"那套键，显示名就是物品短名
-                    + "  " + (v.empty() ? tr("logiscope.slot.empty") : v.shortName() + " x" + v.count());
+                    // 名字：普通格子 = 物品短名；AE 流体 = 游戏内真名（"水"而不是 fluid_dummy）
+                    + "  " + (v.empty() ? tr("logiscope.slot.empty") : v.displayName() + " x" + v.count());
             g.drawString(this.font, label, x + 30, ry,
                     v.empty() ? (selected ? 0xFFA8C8B8 : 0xFF707070) : 0xFFE0E0E0, false);
         }
@@ -3749,7 +3749,7 @@ public final class ScopeScreen extends Screen {
                 continue;
             }
             refs.add(new ProbeTarget.SlotRef(v.menuSlotIndex(), v.containerSlotIndex(),
-                    v.itemId(), v.count()));
+                    v.itemId(), (int) v.count()));
             forVerify.add(v);
         }
         if (refs.isEmpty()) {
@@ -3758,7 +3758,7 @@ public final class ScopeScreen extends Screen {
                     continue;
                 }
                 // 无 GUI 容器没有菜单槽下标 → -1，只能走世界侧读取
-                refs.add(new ProbeTarget.SlotRef(-1, v.containerSlotIndex(), v.itemId(), v.count()));
+                refs.add(new ProbeTarget.SlotRef(-1, v.containerSlotIndex(), v.itemId(), (int) v.count()));
                 forVerify.add(v);
             }
         }

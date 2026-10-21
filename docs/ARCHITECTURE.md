@@ -1477,26 +1477,44 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
 所以这是一条**特例覆盖**，不能套 NBT / 菜单两条路。
 
 **契约**：
-- **C27-1 检测靠菜单家族，不靠方块**：`AeNetworkReader.isAeStorageMenu(menu)` 用
-  反射判 `menu` 是否 `appeng.menu.me.common.MEStorageMenu` 的实例（终端 / 合成终端 /
-  单元仓；wtlib 无线终端也是这个家族 —— 字节码核实过继承链）。
-  PatternAccessTerm **不是**这个家族（它显示的是 pattern 供给，语义不同，自动排除）。
-  AE2 未安装 → 返回 false，一切照旧。
-- **C27-2 目标身份 = 物品 registry id**：`DataTarget.aeNetwork(itemId, …)`，
-  `valuePath` 固定为标记 `"ae:network"`（**不是路径**）。去重按 `literalName` ——
-  所有 AE 目标的 valuePath 相同，**绝不能拿 valuePath 去重**（`DataTarget.isDuplicate`
-  的 AE 分支 + t38 断言钉住）。
+- **C27-1 检测靠菜单家族，不靠方块**：`AeNetworkReader.isAeStorageMenu(menu)` **沿父类链比对类名**
+  （不用 `Class.forName` —— 模组各有自己的类加载器，`forName` 用的是调用方的加载器）。
+  第 15/19 代认 `appeng.menu.me.common.MEStorageMenu`（终端 / 合成终端 / 单元仓；
+  wtlib 无线终端也是这个家族 —— 字节码核实过继承链），PatternAccessTerm **不是**
+  这个家族（显示的是 pattern 供给，语义不同，自动排除）。
+  **第 8 代（1.16.5）的基类叫 `appeng.container.me.common.MEMonitorableContainer`** ——
+  只认高版本那个名字的话，AE 终端会被判成普通容器，AE 模式整条不生效（实机症状：
+  在终端里按 F9 与 AE 相关的界面全不出来）。AE2 未安装 → 返回 false，一切照旧。
+- **C27-2 目标身份**：`DataTarget.aeNetwork(keyId, …)`，`valuePath` 固定为标记
+  `"ae:network"`（**不是路径**）。`keyId` 两种形态：
+  - **物品 = 裸 registry id**（`minecraft:iron_ingot`）—— 0.1.2 之前建的老目标就是这个格式，
+    必须继续能读、继续能勾上；
+  - **非物品（流体 / 化学品…）= `"ae:"` + AE 键序列化**，如
+    `ae:{#t:"ae2:f",id:"minecraft:water"}`（`#t` 是键类型 id）。第 8 代没有键序列化 API，
+    由 `AeKeys.fluidId` **手工编出同形状的串**，解码统一走 `AeKeyText.idOf`（纯文本层，t42 断言覆盖）。
+  去重按 `literalName` —— 所有 AE 目标的 valuePath 相同，**绝不能拿 valuePath 去重**
+  （`DataTarget.isDuplicate` 的 AE 分支 + t38 断言钉住）。
 - **C27-3 选格交互**：AE 模式下只有**网络列表的显示格**（`RepoSlot`，按 slot 类名判定）
   可以选；背包 / 合成格的物品不是"网络中的物品"，点击忽略。cell_mode（可视化选格）
   在 AE 模式禁用（两套语义不能混）。「完成」= **覆写**全部 AE 目标（与槽位锚点同一
   覆写语义）；一个都没选 = 什么都不动。
-- **C27-4 读值链（服务端，全反射，零编译依赖）**：
-  `GridHelper.getNodeHost(level, pos)` → 遍历 6 个面取第一个非 null 的
-  `getGridNode(dir)`（不能只试一个方向：CableBus 的 default 实现按
-  `isExposedOnSide` 过滤，节点被部件遮住的面返回 null；也不能用
-  `getActionableNode()` —— CableBusBlockEntity 不实现 IActionHost，字节码核实过）→
-  `isActive()` → `getGrid().getStorageService().getInventory().getAvailableStacks()`
-  （KeyCounter）→ `AEItemKey.of(stack)` → `counter.get(key)`。
+- **C27-4 读值链（服务端，全反射，零编译依赖）** —— **三代 AE 是三套 API，照抄必错**：
+
+  | 代 | 链 |
+  |---|---|
+  | 19.x（1.21.1） | `GridHelper.getNodeHost(level,pos)` → 6 面 `getGridNode(dir)` → `isActive()` → `getGrid().getStorageService().getInventory().getAvailableStacks()`（KeyCounter）→ `AEItemKey.of`/`AEKey.fromTagGeneric` → `counter.get(key)` |
+  | 15.x / 11.x（1.20.1 / 1.18.2） | 同上，但 `getNodeHost` 的历史签名不同（11.x 收 `LevelAccessor`），键序列化不带注册表 |
+  | **8.x（1.16.5）** | `TileEntity instanceof IGridHost` → `getGridNode(AEPartLocation)`（**INTERNAL 优先**再扫 6 面：电缆上的部件由 `CableBusTileEntity` 代理、只在对应面返回节点；满方块设备认 INTERNAL）→ `isActive()` → `IGrid.getCache(IStorageGrid.class)` → `IStorageMonitorable.getInventory(通道)` → `IMEInventory.getAvailableItems(通道.createList())` → 遍历按 registry id 比 → `IAEStack.getStackSize()` |
+
+  两条共同要点：
+  1. **不能只试一个方向**（CableBus 按面暴露节点；也**不能**用 `getActionableNode()` ——
+     CableBus 不实现 IActionHost，字节码核实过）；
+  2. **没有按单键查的接口**，两种链都要把网络清单走一遍（成本与"探几种"无关），
+     所以同 tick 内按 (monitor, 通道, gameTime) 缓存，避免多目标重复遍历。
+  8.x 的通道实例来自 `appeng.core.Api.instance().storage().getStorageChannel(Class)`；
+  取它的**类**必须用 `Class.forName(name, false, …)`（不初始化）—— 单参 `forName`
+  会在解析反射链的那一刻把 AE 的 `Api.<clinit>` 跑起来（离线探针当场炸在
+  `LocatableEventAnnounce.<init>()`，实机只是"碰巧早就初始化过了"）。
 - **C27-5 三种语义**（延续"读不到 / 空格子 / 没在记录"的纪律）：
   - 返回 **null** = 设备读不到（不是 AE 节点 / 网络断电 `isActive()==false` /
     AE2 未安装 / 物品已不在注册表）→ 上层记 **no_data**；
@@ -1508,6 +1526,22 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
 - **C27-7 已知边界**：`"ae:network"` 是保留的 valuePath —— 用户在数据页手输这个路径
   会被当成 AE 目标分流（文档明示，勿在别的模组上测试该路径）。六面全被遮挡的设备
   读不到（no_data）。
+- **C27-8 终端显示格 → 身份（第 8 代的流体陷阱）**：8.x 的流体终端把流体渲染成
+  **同一个占位物品**（`ae2:fluid_dummy` + 流体 NBT），直接读物品 id 会让水 / 岩浆 / 原油
+  **塌成同一个身份**（与 19.x 的 `wrapped_generic_stack` 是同一类陷阱：显示成"某物品 x1"、
+  点一行选中全部）。所以身份一律从 **`RepoSlot#getEntry()` → `GridInventoryEntry#getStack()`**
+  拿：流体走 `IAEFluidStack#getFluidStack()` → 流体 registry id（显示名用
+  `FluidStack#getDisplayName()`，即游戏内名"水"），物品走 `IAEItemStack#getDefinition()`。
+  数量同样不能用 `ItemStack#getCount()`（那是图标，恒为 1）—— 用 `getStoredAmount()`；
+  空判据用 `getEntry() != null`（可合成但零存货的条目是"真实存在的 0"，不是空）。
+  **只反射 AE，MC/Forge 的方法一律直接调**（生产环境是 SRG 命名，按名字反射 MC 方法
+  dev 能过、装进实例必扑空）。
+- **C27-9 快捷键与"文本框焦点"**：`TextInputGuard` 的三层守卫会拦下"有文本框聚焦"时的
+  快捷键 —— 但 AE2 **8.x 的终端一打开就把焦点交给搜索框**
+  （`MEMonitorableScreen#init`：`isAutoFocus = terminalSearchMode ∈ {AUTOSEARCH*}`，
+  出厂配置就是 `AUTOSEARCH`，紧接着 `setListener(searchField)`），于是"守卫"变成了
+  "在 AE 终端里 F9 永久失效"。判据因此收紧为：**功能键（F1–F25）不受文本框焦点影响** ——
+  功能键不产生字符，不可能是"打字"的一部分。与具体模组无关，别把它改回去。
 
 ---
 
@@ -1693,12 +1727,26 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
 
 ### 5.3 第三方模组 API（反射调用，零编译依赖）
 
+> 前 4 行 = JEI（三层守卫第 2 层）；其余 = **AE2 8.4.7（1.16.5 线）**，逐条 `javap` 核实过，
+> 并由 `dev-check/ProbeAeApi.java` 在构建后自动验证（输出 `AE_API_OK`）。
+
 | API | 真实签名 / 位置 | 用途 |
 |---|---|---|
 | `mezz.jei.common.Internal#getJeiRuntime` | `public static IJeiRuntime`（**内部类，所以整段包 try/catch**） | 拿 JEI 运行时的入口 |
 | `mezz.jei.api.runtime.IJeiRuntime#getIngredientListOverlay()` | `IIngredientListOverlay` | 公开 API |
 | `mezz.jei.api.runtime.IIngredientListOverlay#hasKeyboardFocus()` | `boolean` | 判断 JEI 搜索框是否有焦点 |
 | `mezz.jei.gui.input.GuiTextFieldFilter` | **`extends EditBox`**，但**不挂进 `screen.children()`** | 解释了为什么第 1 层守卫看不见它 |
+| `appeng.api.networking.IGridHost#getGridNode(AEPartLocation)` | 8.x 只有这一个重载（收 `Direction` 是 12+） | 从方块实体拿网络节点（电缆上的部件由 `CableBusTileEntity` 代理） |
+| `appeng.api.util.AEPartLocation` | 7 个常量（DOWN…EAST + **INTERNAL**）；`SIDE_LOCATIONS` 不含 INTERNAL | INTERNAL 优先 + 再扫 6 面 |
+| `appeng.api.networking.IGrid#getCache(Class)` | `<C extends IGridCache> C` | 拿 `IStorageGrid` |
+| `appeng.api.storage.IStorageMonitorable#getInventory(IStorageChannel)` | 泛型擦除后即 `getInventory(IStorageChannel)` | 物品 / 流体两条通道 |
+| `appeng.api.storage.IMEInventory#getAvailableItems(IItemList)` | 传入的空清单被填满、**返回同一个实例** | 全量走一遍网络（没有按单键查的接口） |
+| `appeng.api.storage.data.IAEStack#getStackSize()` | `long` | 存量（交 `Val` 精确承载） |
+| `appeng.api.storage.data.IAEFluidStack#getFluidStack()` | Forge 的 `FluidStack`（`getFluid()` / `getDisplayName()` 直接调） | 流体身份与显示名 |
+| `appeng.api.storage.data.IAEItemStack#getDefinition()` | 原版 `ItemStack` | 物品身份 |
+| `appeng.client.gui.me.items.RepoSlot#getStoredAmount() / getEntry()` | `long` / `GridInventoryEntry`；**`repo.hasPower()` 为假时 `getEntry()` 恒 null** | 终端格真实存量 / 条目在不在 |
+| `appeng.container.me.common.GridInventoryEntry#getStack()` | `IAEStack` | 条目背后的键（物品 or 流体） |
+| `appeng.core.Api#instance() / storage()` | 入口；`<clinit>` 会建整套注册表 ⇒ **取 Class 时必须 `initialize=false`** | 拿通道实例 |
 
 > 反查方法：`javap -p -cp run/mods/<mod>.jar <类名>`（直接读 class，不需要源码）。
 
@@ -1728,13 +1776,14 @@ src/main/java/com/jessetech/logiscope/
 │  ├─ ProbeTarget.java          绑定层：探针目标（一组槽位引用 + 持久身份）（CP16）
 │  ├─ ProbeContext.java         绑定层：当前可探测的容器（容器界面 / 准星）（CP17）
 │  ├─ DataTarget.java           绑定层：NBT 数据目标（路径 / 名称 / 锚点；含 slot 锚点与 AE 变体）（CP20 / CP24 / CP27）
+│  ├─ AeKeys.java              绑定层：AE 键的身份与显示名（终端显示格 → ae: 串 / registry id）（CP27）
 │  └─ DataCommand.java          绑定层：读方块 NBT 的取数通道（服务端直读 / 多人命令回退）（CP20）
 ├─ collect/
 │  ├─ ContainerAccess.java      采集层：读菜单槽位（菜单兜底路径）（CP1）
 │  ├─ WorldProbe.java           采集层：同步读方块实体 + 下标映射验证 —— 每实例一份（CP9）
 │  ├─ ProbeSlots.java           采集层：无 GUI 容器的槽位清单（CP16）
 │  ├─ DataProbe.java            采集层：按 NBT 路径读值（服务端 tick 采样）（CP20 / CP24）
-│  ├─ AeNetworkReader.java      采集层：AE 网络物品数量（全反射，零编译依赖）（CP27）
+│  ├─ AeNetworkReader.java      采集层：AE 网络物品 / 流体数量（全反射，零编译依赖；三代 API 各一套）（CP27）
 │  ├─ ServerClock.java          采集层：全局权威世界 tick（状态机 / 回退路径）（CP15）
 │  ├─ ProbeInstance.java        采集层：一个探针的状态机 + 每 tick 采样（CP4 / CP5 / CP9 / CP16 / CP20）
 │  └─ ProbeManager.java         采集层：实例表 / 创建 / 删除 / 两个驱动点（CP4 / CP16）

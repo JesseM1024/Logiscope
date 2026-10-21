@@ -1575,6 +1575,12 @@ public class TestChart {
         yes("AE 键 坏文本不抛异常", AeKeyText.label("ae:{broken").startsWith("~"));
         eq("AE 键 空串", "", AeKeyText.label(""));
         eq("AE 键 null 安全", "", AeKeyText.label(null));
+
+        // idOf：**保留命名空间**的原文（读值链要拿它反查注册表，label 是给人看的、会去前缀）
+        eq("AE 键 idOf 流体", "minecraft:water", AeKeyText.idOf(fluid));
+        eq("AE 键 idOf 组件物品", "minecraft:iron_ingot", AeKeyText.idOf(item));
+        eq("AE 键 idOf 普通 id 返回 null", null, AeKeyText.idOf("minecraft:iron_ingot"));
+        eq("AE 键 idOf 坏文本返回 null", null, AeKeyText.idOf("ae:{broken"));
     }
 
     private static void eq(String what, Object expect, Object actual) {

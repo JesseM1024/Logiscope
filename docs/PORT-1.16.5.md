@@ -439,10 +439,63 @@ public static final Logger LOGGER = LogManager.getLogger("LogiScope");
 
 ---
 
+## 六之四、AE2 支持：8.4.7 与 11/15/19 是**三套** API（2026-10-21）
+
+前三条版本线的 AE 实现对这条线**一行都用不上** —— AE2 8.4.7（1.16.5 最后一代）没有
+`AEKey` / `GenericStack` / `MEStorage` / `KeyCounter` / `GridHelper`，那是 AE2 10+ 才有的。
+本分支最初带过来的 `AeNetworkReader` 是照抄 19.x 的，**一条签名都解析不了** ⇒
+AE 目标恒 `no_data`。本轮按 8.x 重写，并顺带修掉一个"F9 在终端里没反应"的键盘问题。
+
+### 现象与根因
+
+| 现象 | 根因 |
+|---|---|
+| 打开 AE 终端按 F9，面板不出现（其它容器界面正常） | **AE2 8.x 终端一打开就把焦点交给搜索框**：`MEMonitorableScreen#init` 里 `isAutoFocus = terminalSearchMode ∈ {AUTOSEARCH, AUTOSEARCH_KEEP, JEI_AUTOSEARCH*}`，出厂配置就是 `AUTOSEARCH`（实例里 `config/appliedenergistics2-client.toml` 实测值），紧接着 `setListener(searchField)`。而 `TextInputGuard` 第 1 层把"有文本框聚焦"一律当成"玩家在打字" ⇒ 快捷键被吞 |
+| AE 目标恒 `no_data`；即便进了选格页也列不出一条网络条目 | ① 菜单判据只认 `appeng.menu.me.common.MEStorageMenu`（19.x 的名字），8.x 的基类是 `appeng.container.me.common.MEMonitorableContainer` ⇒ AE 模式根本不触发；② 读值链整条不存在于 8.x |
+
+### 三代读值链对照（别照抄）
+
+| 代 | 链 |
+|---|---|
+| 19.x（1.21.1） | `GridHelper.getNodeHost(level,pos)` → 6 面 `getGridNode(Direction)` → `getStorageService().getInventory().getAvailableStacks()`（KeyCounter）→ `AEItemKey.of` |
+| 15.x / 11.x | 同上；`getNodeHost` 的历史签名不同（11.x 收 `LevelAccessor`），键序列化不带注册表 |
+| **8.x（本线）** | `Ter instanceof IGridHost` → `getGridNode(AEPartLocation)`（INTERNAL 优先 + 6 面）→ `isActive()` → `IGrid.getCache(IStorageGrid.class)` → `IStorageMonitorable.getInventory(通道)` → `IMEInventory.getAvailableItems(通道.createList())` → 遍历比 registry id → `IAEStack#getStackSize()` |
+
+### 8.x 专属的四个坑
+
+1. **`appeng.core.Api` 不能单参 `Class.forName`**：它的 `<clinit>` 会 new 一整套注册表容器并往
+   Forge EventBus 挂监听。解析反射链时把它初始化掉，离线探针当场炸在
+   `LocatableEventAnnounce.<init>()`（实机因为 AE 早就初始化过，看不出问题）。
+   一律用 `Class.forName(name, false, loader)`。
+2. **流体是"占位物品"**：流体终端把流体渲染成同一个 `ae2:fluid_dummy`，
+   读物品 id 会让水 / 岩浆 / 原油塌成一个身份（与 19.x 的 `wrapped_generic_stack` 同类陷阱）。
+   身份必须走 `RepoSlot#getEntry()` → `GridInventoryEntry#getStack()` →
+   `IAEFluidStack#getFluidStack()`，显示名用 `FluidStack#getDisplayName()`（"水"）。
+3. **终端格不是菜单的"内容"但确实在菜单里**：8.x 的 `MEMonitorableScreen#init` 会往
+   `inventorySlots` 里塞 `RepoSlot`，所以选格页仍可读菜单；但 `Repo.get(offset)` 会**加上滚动偏移**，
+   列表 = "终端当前这一屏"，这与"按显示的来"那条纪律一致，不是 bug。
+4. **`getEntry()` 在 `repo.hasPower()==false` 时恒 null**：网络没电时终端本来就什么都不显示，
+   于是选格页全空。这是真值，不要"兜底"去读 `ItemStack`。
+
+### 验证手法（不启动游戏）
+
+`dev-check/ProbeAeApi.java`：用反射把**真实的**私有 `AeNetworkReader.chain()` 与
+`AeKeys.init()` 调起来（不是复制一份签名表 ⇒ 探针通过等价于"实机那条链能建立"），
+再逐个 `getMethod` 验 `RepoSlot#getStoredAmount/getEntry`、`GridInventoryEntry#getStack`，
+最后确认物品 / 流体终端都继承 `MEMonitorableContainer`。输出 `AE_API_OK`。
+
+```bat
+:: 一次性跑（classpath 需要实例里的 AE2 jar + build\mcdeps）
+build\probe-ae.bat   :: 本地临时脚本，不进仓库
+```
+
+---
+
 ## 七、已知限制 / 待实机验证
 
-1. **实机只跑了第一轮**（F9 呼出 / 关闭两条路径，发现的缺陷见 §六，已修待复测），
-   其余功能未验。待验清单见 `docs/VERIFY.md`，重点：
+1. **实机已过**：F9 呼出 / 关闭两条路径（§六 三处缺陷修完复测通过）、UI 新功能
+   （选格页筛选框 / 忽略空槽 / 回放页打开存档文件夹，见 PROGRESS「[1.16.5] 轮次 1」）。
+   **本轮 AE 部分待验**（§六之四，清单见 `docs/VERIFY.md` J 组），其余重点：
    - F9 在容器 GUI 内呼出面板（`GuiScreenEvent` 路由与 1.18.2 不同代，键位事件优先级要实测）；
    - 选格高亮（1.16.5 的 `renderSlotHighlight` 签名与 1.18.2 不同）；
    - 物品数量叠层（`renderItemOverlayIntoGUI` 的 `FontRenderer` 参数）；
@@ -467,10 +520,10 @@ public static final Logger LOGGER = LogManager.getLogger("LogiScope");
 | -- | -------- | --- | ---- | ----- |
 
 
-| `main` | 1.21.1 / NeoForge 21.1.x | MDG `net.neoforged.moddev` | 21 | `logiscope-0.1.2-1.21.1.jar` |
-| `1.20.1-neo` | 1.20.1 / NeoForge 47.1.x（同一 jar 也跑 Forge 47.x） | MDG legacy | 17 | `logiscope-0.1.2-1.20.1-alpha.jar` |
-| `1.18.2-forge` | 1.18.2 / Forge 40.x | MDG legacy | 17 | `logiscope-0.1.2-1.18.2-alpha.jar` |
-| **`1.16.5-forge`** | **1.16.5 / Forge 36.x** | **ForgeGradle 5** | **8** | **`logiscope-0.1.2-1.16.5-alpha.jar`** |
+| `main` | 1.21.1 / NeoForge 21.1.x | MDG `net.neoforged.moddev` | 21 | `logiscope-0.1.3-1.21.1.jar` |
+| `1.20.1-neo` | 1.20.1 / NeoForge 47.1.x（同一 jar 也跑 Forge 47.x） | MDG legacy | 17 | `logiscope-0.1.3-1.20.1.jar` |
+| `1.18.2-forge` | 1.18.2 / Forge 40.x | MDG legacy | 17 | `logiscope-0.1.3-1.18.2.jar` |
+| **`1.16.5-forge`** | **1.16.5 / Forge 36.x** | **ForgeGradle 5** | **8** | **`logiscope-0.1.3-1.16.5-alpha.jar`** |
 
 三条低版本线（1.18.2 / 1.16.5 / 1.12.2）都**只有 Forge**，不需要加载器兼容设计；
 `1.12.2` 那代还有 Cleanroom 这个"第二运行时"，但它与 Forge 同包名同 SRG，属另一类问题

@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.collect;
 
+import com.jessetech.logiscope.bind.AeKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.util.ResourceLocation;
@@ -97,12 +98,16 @@ public final class ContainerAccess {
         if (menu == null) {
             return out;
         }
+        // AE 终端：菜单里的 RepoSlot 是"网络列表的显示窗口"，数量与身份都得另读
+        // （见 viewOfAe）。8.x 与 19.x 在这一点上一致：终端界面 init 时把 RepoSlot
+        // 塞进菜单，所以选格页不用另开一条数据源。
+        boolean aeMenu = AeNetworkReader.isAeStorageMenu(menu);
         for (int i = 0; i < menu.inventorySlots.size(); i++) {
             Slot slot = menu.inventorySlots.get(i);
             if (!isSelectable(slot)) {
                 continue;
             }
-            out.add(make(i, slot.getSlotIndex(), slot.getStack()));
+            out.add(aeMenu ? viewOfAe(i, slot) : make(i, slot.getSlotIndex(), slot.getStack()));
         }
         return out;
     }
@@ -134,7 +139,42 @@ public final class ContainerAccess {
 
     private static SlotView toView(Container menu, int index) {
         Slot slot = menu.inventorySlots.get(index);
+        if (AeNetworkReader.isAeStorageMenu(menu)) {
+            return viewOfAe(index, slot);
+        }
         return make(index, slot.getSlotIndex(), slot.getStack());
+    }
+
+    /**
+     * **AE 终端显示格**的快照。
+     *
+     * 与普通槽位的两点差别：
+     *   1. 数量：AE 的格子里 `ItemStack.getCount()` 恒为 1（它只是个图标），
+     *      真实存量在 `RepoSlot#getStoredAmount()`；
+     *   2. 身份：流体在 8.x 里被渲染成同一个占位物品（`ae2:fluid_dummy`），
+     *      直接读物品 id 会让所有流体塌成一个身份 —— 这里换成 AE 键身份（见 {@link AeKeys}）。
+     */
+    private static SlotView viewOfAe(int menuSlotIndex, Slot slot) {
+        Long amount = AeKeys.repoAmount(slot);
+        if (amount == null) {
+            return make(menuSlotIndex, slot.getSlotIndex(), slot.getStack());
+        }
+        boolean hasEntry = AeKeys.repoHasEntry(slot);
+        AeKeys.KeyName known = AeKeys.describe(slot);
+        if (known == null) {
+            // 认不出是什么（条目为空 / 键类型没见过）→ 退回物品栈的身份，
+            // 但**空判据仍用条目在不在**，不能拿"数量是不是 0"冒充。
+            return new SlotView(menuSlotIndex, slot.getSlotIndex(),
+                    itemIdOf(slot.getStack()), amount, !hasEntry, null);
+        }
+        return new SlotView(menuSlotIndex, slot.getSlotIndex(),
+                known.keyId(), amount, !hasEntry, known.label());
+    }
+
+    /** 物品栈 → registry id（拿不到就 "unknown"，绝不编一个像样的假 id） */
+    public static String itemIdOf(ItemStack stack) {
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id == null ? "unknown" : id.toString();
     }
 
     /**
@@ -143,11 +183,10 @@ public final class ContainerAccess {
      */
     public static SlotView make(int menuSlotIndex, int containerSlotIndex, ItemStack stack) {
         boolean empty = stack.isEmpty();
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return new SlotView(
                 menuSlotIndex,
                 containerSlotIndex,
-                id == null ? "unknown" : id.toString(),
+                itemIdOf(stack),
                 empty ? 0 : stack.getCount(),
                 empty);
     }
@@ -160,15 +199,24 @@ public final class ContainerAccess {
         private final int menuSlotIndex;
         private final int containerSlotIndex;
         private final String itemId;
-        private final int count;
+        // long：AE 的存量可以超过 int（创造元件单键就是 2^31-1），别在这里截断
+        private final long count;
         private final boolean empty;
+        /** 行上显示的名字（AE 流体用游戏内名）；null = 用 itemId 的短名 */
+        private final String label;
 
-        public SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, int count, boolean empty) {
+        public SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, long count, boolean empty) {
+            this(menuSlotIndex, containerSlotIndex, itemId, count, empty, null);
+        }
+
+        public SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, long count, boolean empty,
+                        String label) {
             this.menuSlotIndex = menuSlotIndex;
             this.containerSlotIndex = containerSlotIndex;
             this.itemId = itemId;
             this.count = count;
             this.empty = empty;
+            this.label = label;
         }
 
         public int menuSlotIndex() {
@@ -183,8 +231,17 @@ public final class ContainerAccess {
             return itemId;
         }
 
-        public int count() {
+        public long count() {
             return count;
+        }
+
+        public String label() {
+            return label;
+        }
+
+        /** 列表上画出来的名字：有 label 就用它（AE 流体显示真名），否则用 itemId 的短名 */
+        public String displayName() {
+            return label != null && !label.trim().isEmpty() ? label : shortName();
         }
 
         public boolean empty() {
@@ -200,17 +257,17 @@ public final class ContainerAccess {
                 return false;
             }
             SlotView other = (SlotView) o;
-            return java.util.Objects.equals(this.menuSlotIndex, other.menuSlotIndex) && java.util.Objects.equals(this.containerSlotIndex, other.containerSlotIndex) && java.util.Objects.equals(this.itemId, other.itemId) && java.util.Objects.equals(this.count, other.count) && java.util.Objects.equals(this.empty, other.empty);
+            return java.util.Objects.equals(this.menuSlotIndex, other.menuSlotIndex) && java.util.Objects.equals(this.containerSlotIndex, other.containerSlotIndex) && java.util.Objects.equals(this.itemId, other.itemId) && this.count == other.count && java.util.Objects.equals(this.empty, other.empty) && java.util.Objects.equals(this.label, other.label);
         }
 
         @Override
         public int hashCode() {
-            return java.util.Objects.hash(menuSlotIndex, containerSlotIndex, itemId, count, empty);
+            return java.util.Objects.hash(menuSlotIndex, containerSlotIndex, itemId, count, empty, label);
         }
 
         @Override
         public String toString() {
-            return "SlotView[" + "menuSlotIndex=" + menuSlotIndex + ", " + "containerSlotIndex=" + containerSlotIndex + ", " + "itemId=" + itemId + ", " + "count=" + count + ", " + "empty=" + empty + "]";
+            return "SlotView[" + "menuSlotIndex=" + menuSlotIndex + ", " + "containerSlotIndex=" + containerSlotIndex + ", " + "itemId=" + itemId + ", " + "count=" + count + ", " + "empty=" + empty + ", " + "label=" + label + "]";
         }
 
 

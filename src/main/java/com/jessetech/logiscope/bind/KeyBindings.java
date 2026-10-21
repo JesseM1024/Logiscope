@@ -210,8 +210,10 @@ public final class KeyBindings {
 
         Screen screen = event.getGui();
 
-        // 正在打字就别抢键 // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）
-        if (TextInputGuard.isTypingNow(screen)) {
+        // 正在打字就别抢键
+        // 判定逻辑单独放在 TextInputGuard（三层守卫，含 JEI 搜索框探针）；
+        // 功能键不受"有文本框聚焦"的影响，见 blocksHotkey 的注释（AE2 8.x 终端会自动聚焦搜索框）。
+        if (TextInputGuard.blocksHotkey(screen, event.getKeyCode())) {
             return;
         }
 

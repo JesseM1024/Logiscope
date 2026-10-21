@@ -7,7 +7,7 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+- **代码 / 离线**：`build` 全过；TestChart **493 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
   `verify-jar.py` 全过；lang 中英各 **185** 键一致。产物 `logiscope-0.1.3-1.16.5-alpha.jar`。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
@@ -23,11 +23,12 @@
 
 ## [1.16.5] 线：现状与移植记录
 
-**现状（2026-10-21）**：UI 类新功能已与 main **对齐到第十九轮⑤ 的界面部分**
-（选格页筛选框 / 忽略空槽 / 回放页打开存档文件夹 / 删除目标按自身删）。
-版本 `0.1.3-1.16.5-alpha`（**仍带 alpha**：本线尚未实机验收），产物
+**现状（2026-10-21）**：功能已与 main **对齐到第十九轮⑤**
+（选格页筛选框 / 忽略空槽 / 回放页打开存档文件夹 / 删除目标按自身删），
+并在本线**独自实现了 AE2 8.x 的物品 / 流体监测**（轮次 2 —— 另三条线的 AE 实现照抄不过来，
+8.x 是另一套 API）。版本 `0.1.3-1.16.5-alpha`（**仍带 alpha**：本轮 AE 部分尚未实机验收），产物
 `build/libs/logiscope-0.1.3-1.16.5-alpha.jar`（141 处 `func_` = 已重混淆，非 dev 包）。
-离线 489 条断言 / lang 185 键全过。
+离线 493 条断言 / lang 185 键全过。
 
 > ⚠️ 下面这段「[1.20.1] 线」是从 `1.20.1-neo` 派生时继承的历史，**不是**本分支的记录。
 
@@ -42,23 +43,41 @@
 | 语言键 | 新增 6 键（中英各 **185**） |
 | dev-check | t41 / t42 搬入；断言 461 → **489** |
 
-### [1.16.5] 已知限制：AE2 8.x 与 11/15/19 是两套 API（本轮**未**移植 AE 部分）
+### [1.16.5] 轮次 2：AE2 8.x 物品 / 流体监测（2026-10-21）
 
-本线的 AE2 是 **8.4.7**（1.16.5 最后一代）。它**没有** `AEKey` / `GenericStack` /
-`MEStorage` / `KeyCounter` —— 那套 `AEStack` 体系是 AE2 10（1.18）才有的。因此：
+**两个 bug，一个根因带两个表现**（用户实测反馈：*"打开 AE 终端按 F9 无法呼出菜单"*）：
 
-- "解包通用包裹堆栈 → `ae:` + SNBT 身份"**在本线不可能实现**（没有那个物品、没有键序列化）；
-- 更严重的是：本分支现有的 `AeNetworkReader` 是照抄 19.x 写的（`GridHelper.getNodeHost` /
-  `MEStorage` / `KeyCounter`），**在 8.4.7 上一条都解析不了** ⇒ AE 目标恒 no_data。
-  这是移植时就带进来的问题，不是本轮引入的。
-- 8.x 的正确读值链（已 javap 4.7.6 核实，**待实现**）：
-  `TileEntity instanceof IGridHost` → `getGridNode(AEPartLocation)`（遍历 6 个面）→
-  `IGridNode.isActive()` → `IGrid.getCache(IStorageGrid.class)` →
-  `IStorageMonitorable.getInventory(IStorageChannel<IAEItemStack>)` →
-  `IMEInventory.getAvailableItems(IItemList)`（**没有按单键查的接口**，要全量扫）→
-  `IAEStack.getStackSize()`。
-- 结论：AE 监视在本线**暂时不可用**，UI 其余功能不受影响。下一轮再动它（工作量 ≈ 重写一个
-  `AeNetworkReader` + 终端显示格的 `asItemStackRepresentation` 身份问题）。
+| # | 现象 | 根因 | 修法 |
+|---|---|---|---|
+| ① | AE 终端里按 F9 毫无反应（别的容器界面正常） | AE2 8.x 的终端**一打开就把焦点交给搜索框**：`MEMonitorableScreen#init` 里 `isAutoFocus = terminalSearchMode ∈ {AUTOSEARCH*}`，出厂配置就是 `AUTOSEARCH`（`config/appliedenergistics2-client.toml` 实测值），紧接着 `setListener(searchField)`。`TextInputGuard` 第 1 层把"有文本框聚焦"当成"玩家在打字" ⇒ 快捷键被守卫静默吞掉 | `TextInputGuard#blocksHotkey`：**功能键（F1–F25）不受文本框焦点影响**。判据与模组无关 —— 功能键不产生字符，不可能是打字的一部分 |
+| ② | AE 目标恒 `no_data`（即便能进选格页） | 本分支的 `AeNetworkReader` 是照抄 19.x 写的（`GridHelper.getNodeHost` / `MEStorage` / `KeyCounter`），**在 8.4.7 上一条都解析不了** | 按 8.x 重写整条链（见下表） |
+
+**8.x 的读值链**（全部 javap `appliedenergistics2-8.4.7.jar` 核实）：
+`TileEntity instanceof IGridHost` → `getGridNode(AEPartLocation)`（INTERNAL 优先 + 扫 6 面；
+电缆上的终端部件由 `CableBusTileEntity` 代理，满方块设备认 INTERNAL）→ `IGridNode.isActive()`
+→ `IGrid#getCache(IStorageGrid.class)` → `IStorageMonitorable#getInventory(通道)` →
+`IMEInventory#getAvailableItems(通道.createList())` → 遍历比对 registry id → `IAEStack#getStackSize()`。
+通道来自 `appeng.core.Api.instance().storage().getStorageChannel(Class)`（物品 / 流体两条）。
+
+| 件 | 做法 |
+|---|---|
+| `collect/AeNetworkReader` | 整类重写；`isAeStorageMenu` 同时认 `appeng.container.me.common.MEMonitorableContainer`（8.x）与 `appeng.menu.me.common.MEStorageMenu`（15/19.x）。**类加载改成 `initialize=false`** —— 单参 `Class.forName("appeng.core.Api")` 会在解析反射链时就把 AE 的 `Api.<clinit>` 跑起来，离线探针当场炸在 `LocatableEventAnnounce.<init>()` |
+| `bind/AeKeys`（新） | 8.x 的键层：`RepoSlot#getStoredAmount/getEntry` + `GridInventoryEntry#getStack` → 是流体就编 `ae:{#t:"ae2:f",id:"minecraft:water"}`（**与 15/19.x 同形状**，解在 `AeKeyText#idOf`），是物品就裸 registry id |
+| `collect/ContainerAccess` | `SlotView.count` 改 **long**（AE 单键可到 2^31-1）+ 新增 `label`/`displayName()`；`snapshot()/toView()` 在 AE 菜单下走 `viewOfAe` |
+| `analysis/AeKeyText` | 新增 `idOf()`（保留命名空间的原文，读值链反查注册表要用）；`label()` 复用它 |
+| `ui/ChartRenderer` / `bind/DataTarget` | 图例与目标行按 `AeKeyText.label` 显示 —— 否则流体印成 `{#t:"ae2:f",id:...}` |
+| `dev-check/ProbeAeApi`（新） | **验真实实现**（反射调私有 `chain()` / `AeKeys.init()`），不是复制签名表 ⇒ 探针通过等价于"实机那条链能建立"。输出 `AE_API_OK` |
+| dev-check | t42 增 4 条（`idOf`）；断言 489 → **493** |
+
+**已知限制（本线）**：
+
+- **附属模组的键类型**（化学品 / 电力等）暂不支持 —— 身份串解不出来就记 `no_data`，不猜 0。
+  用户明确要求本轮只做"物品 + AE 本体流体"。
+- 物品身份是**裸 registry id**（不带 NBT，与另外三条线一致）⇒ 同种物品的所有 NBT 变体**汇总**成一行。
+- 流体只能从**流体终端**里点选（AE 本体就是这样），物品终端里看不到流体。
+- 选格页列出的仍是"终端当前可见的那一屏"（`Repo` 按滚动位置取条目），
+  换物品要滚动终端 —— 这是"按显示的来"这条纪律的必然结果。
+
 
 ## [1.20.1] 线：现状与移植记录
 
