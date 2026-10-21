@@ -26,6 +26,7 @@
  * 显示问题（源文件本身是好的），不影响断言结果。想要正常显示就在 cmd/PowerShell
  * 里跑，或先 chcp 65001。
  */
+import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
@@ -104,6 +105,7 @@ public class TestChart {
         t39RiseFallEvents();
         t40ForcedNumeric();
         t41PickerFilter();
+        t42AeKeyText();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1547,6 +1549,31 @@ public class TestChart {
         // 空行（(empty)）也按显示文字参与匹配
         yes("筛选 空格名也能筛（空）", PickerFilter.matches("空", 4, "minecraft:air", "（空）"));
         no("筛选 有内容的行不带 （空）", PickerFilter.matches("空", 4, "minecraft:iron_ingot", "iron_ingot"));
+    }
+
+    // 42) AE 键的字符串身份（第十九轮②）：AE 的 SNBT 与老式物品 id 要能共存
+    private static void t42AeKeyText() {
+        String fluid = "ae:{#t:\"ae2:f\",id:\"minecraft:water\"}";
+        String item = "ae:{#t:\"ae2:i\",id:\"minecraft:iron_ingot\",components:{\"minecraft:damage\":5}}";
+
+        // 老格式（0.1.2 之前的 AE 目标）不变
+        no("AE 键 普通物品不算 ae 键", AeKeyText.isAe("minecraft:iron_ingot"));
+        eq("AE 键 普通物品显示短名", "iron_ingot", AeKeyText.label("minecraft:iron_ingot"));
+
+        // 新格式：身份是整段 SNBT，显示名取里头的 id
+        yes("AE 键 流体是 ae 键", AeKeyText.isAe(fluid));
+        eq("AE 键 流体显示名", "water", AeKeyText.label(fluid));
+        eq("AE 键 流体类型", "ae2:f", AeKeyText.typeOf(fluid));
+
+        // 带数据组件的物品键：同样只取 id（组件不参与显示）
+        yes("AE 键 组件物品是 ae 键", AeKeyText.isAe(item));
+        eq("AE 键 组件物品显示名", "iron_ingot", AeKeyText.label(item));
+        eq("AE 键 组件物品类型", "ae2:i", AeKeyText.typeOf(item));
+
+        // 解析不出来时不编名字：露原文（前导 ~ 是"这是原文"的标记）
+        yes("AE 键 坏文本不抛异常", AeKeyText.label("ae:{broken").startsWith("~"));
+        eq("AE 键 空串", "", AeKeyText.label(""));
+        eq("AE 键 null 安全", "", AeKeyText.label(null));
     }
 
     private static void eq(String what, Object expect, Object actual) {

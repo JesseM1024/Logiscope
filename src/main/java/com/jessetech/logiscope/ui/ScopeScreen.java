@@ -4741,7 +4741,8 @@ public final class ScopeScreen extends Screen {
                 if (row >= 0 && row < R.tgtRows() && idx < dts.size()
                         && isIn(mx, my, L.x() + L.w() - 4 - DEL_W,
                                 R.tgtTop() + (row + 1) * ROW_H - 1, DEL_W, ROW_H)) {
-                    src2.removeDataTarget(dts.get(idx).valuePath());
+                    // 按目标自身删（不是按 valuePath）：AE 目标共用 "ae:network" 这个标记路径
+                    src2.removeDataTarget(dts.get(idx));
                 }
             }
             return true;

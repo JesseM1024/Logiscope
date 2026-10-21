@@ -1508,10 +1508,22 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   单元仓；wtlib 无线终端也是这个家族 —— 字节码核实过继承链）。
   PatternAccessTerm **不是**这个家族（它显示的是 pattern 供给，语义不同，自动排除）。
   AE2 未安装 → 返回 false，一切照旧。
-- **C27-2 目标身份 = 物品 registry id**：`DataTarget.aeNetwork(itemId, …)`，
+- **C27-2 目标身份 = 键的字符串身份**（第十九轮② 扩到全类型）：`DataTarget.aeNetwork(keyId, …)`，
   `valuePath` 固定为标记 `"ae:network"`（**不是路径**）。去重按 `literalName` ——
   所有 AE 目标的 valuePath 相同，**绝不能拿 valuePath 去重**（`DataTarget.isDuplicate`
   的 AE 分支 + t38 断言钉住）。
+  身份的两种形态（`analysis/AeKeyText`，t42 断言钉住）：
+
+  | 目标 | `literalName` | 例子 |
+  |---|---|---|
+  | 物品（老格式，保持兼容） | 裸 registry id | `minecraft:iron_ingot` |
+  | 流体 / 化学品 / 电力… | `ae:` + `AEKey#toTagGeneric` 的 SNBT | `ae:{#t:"ae2:f",id:"minecraft:water"}` |
+
+  **为什么非物品键不能沿用物品 id**：它们在客户端被包成 `ae2:wrapped_generic_stack`
+  这一个物品 —— 所有流体 / 化学品都塌成同一个 id，目标互判重复、读值只能读到
+  "这个包装物品有 0 个"（第十九轮② 之前的实机现象：界面显示"通用物品堆栈 x1"、
+  监测报 0）。SNBT 里带 `#t`（键类型，`ae2:i` 物品 / `ae2:f` 流体 / 附属自己的类型）
+  与 `id`，因此**任何附属模组的键类型都能原样往返**，本模组不需要认识它们。
 - **C27-3 选格交互**：AE 模式下只有**网络列表的显示格**（`RepoSlot`，按 slot 类名判定）
   可以选；背包 / 合成格的物品不是"网络中的物品"，点击忽略。cell_mode（可视化选格）
   在 AE 模式禁用（两套语义不能混）。「完成」= **覆写**全部 AE 目标（与槽位锚点同一
@@ -1522,18 +1534,40 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   `isExposedOnSide` 过滤，节点被部件遮住的面返回 null；也不能用
   `getActionableNode()` —— CableBusBlockEntity 不实现 IActionHost，字节码核实过）→
   `isActive()` → `getGrid().getStorageService().getInventory().getAvailableStacks()`
-  （KeyCounter）→ `AEItemKey.of(stack)` → `counter.get(key)`。
+  （KeyCounter）→ `counter.get(AEKey)`。
+  键对象：物品走 `AEItemKey.of(stack)`（老路）；`ae:` 键串走
+  `AEKey#fromTagGeneric(registryAccess, TagParser.parseTag(snbt))`。
+  反射链**只解析一次**（静态 Method 缓存），KeyCounter **同一 tick 同一张网络只算一次**
+  （弱引用缓存，避免静态字段钉住一个世界的对象图）。
 - **C27-5 三种语义**（延续"读不到 / 空格子 / 没在记录"的纪律）：
   - 返回 **null** = 设备读不到（不是 AE 节点 / 网络断电 `isActive()==false` /
-    AE2 未安装 / 物品已不在注册表）→ 上层记 **no_data**；
-  - 返回 **0** = 网络在线但没有这物品（craftable 条目也不在 availableStacks）→ 真值；
-  - 返回 **n** = 网络中该物品的可用数量（long → Val 精确承载）。
+    AE2 未安装 / 物品已不在注册表 / **键串解不出来**）→ 上层记 **no_data**；
+  - 返回 **0** = 网络在线但没有这种东西（craftable 条目也不在 availableStacks）→ 真值；
+  - 返回 **n** = 网络中这种东西的可用数量（long → Val 精确承载）。
 - **C27-6 失败策略**：AE2 缺失只记一次日志后恒 no_data（不刷屏）；单次反射异常记一次
-  日志、本次 no_data、下次采样重试。采样名 = 物品 registry id → 两个终端监测同一物品
+  日志、本次 no_data、下次采样重试。采样名 = 键身份 → 两个终端监测同一种东西
   会**合并求和**（与槽位锚点同一聚合语义）。
 - **C27-7 已知边界**：`"ae:network"` 是保留的 valuePath —— 用户在数据页手输这个路径
   会被当成 AE 目标分流（文档明示，勿在别的模组上测试该路径）。六面全被遮挡的设备
   读不到（no_data）。
+- **C27-8 终端列表的"名字与数量"**（第十九轮②）：AE 终端的显示格不是容器内容 ——
+  `ItemStack.getCount()` 恒为 1（图标），真实数量在
+  `RepoSlot#getStoredAmount()`；非物品键的显示栈是 `ae2:wrapped_generic_stack`，
+  真名与身份在它的 `GenericStack` 数据组件里。所以 `ContainerAccess#viewOfAe` 对
+  AE 菜单家族走另一条组装路径：数量 = `getStoredAmount()`（long），
+  名字 = `AEKey#getDisplayName()`，身份 = `AeKeyText` 格式。
+  **空/非空判据是"条目在不在"（`RepoSlot#hasItem()`），不是"数量是不是 0"** ——
+  可合成但没存货的条目存量就是 0，那也是一种真实存在的东西（监测它 = 现在 0 个）。
+  AE 列表里所有显示格的 `#序号` 都是 0（它们共享同一个空容器）—— 在 AE 终端里
+  按 `#N` 筛选没有意义，请按名字筛（选格页筛选框，C17-5）。
+- **C27-9 "直接取某张网络里有多少"的 API**：有，而且是 AE 自己用的那条 ——
+  `IGridNode#getGrid()` → `IGrid#getStorageService()` → 两种读法：
+  `IStorageService#getCachedInventory()`（**每 tick 最多刷新一次的 KeyCounter**，
+  代价最低，AE 终端显示列表就用它；代价是最多差 1 tick）与
+  `getInventory().getAvailableStacks()`（现算，遍历全部存储，代价高但精确）。
+  本项目取**后者 + 同 tick 缓存**：采样点本来就在服务端 tick 上，"值和时间戳同源"
+  比省一次遍历重要（CP4/CP15 同一条纪律）。`counter.get(AEKey)` 是 O(1) 取一张键的量。
+  （历史上 AE2 还有过 `IMEInventoryHandler` / `IAEStack` 那套，19.x 已换成 `MEStorage` + `AEKey`。）
 
 ---
 

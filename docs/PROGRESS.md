@@ -7,7 +7,7 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **478 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
   `verify-jar.py` 全过；lang 中英各 **179** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见「第十八轮⑥」；0.1.0 同线；发布约定见
@@ -208,6 +208,47 @@ VERIFY / GOALS / README）。
 
 离线：TestChart **478 条**（新增 t41 共 17 条，覆盖 `#N` 精确 / 多词取与 / 大小写 / 空查询 /
 `#007` / 空行的 `（空）`）。实机见 `VERIFY.md` G 组。
+
+## 第十九轮②：AE 非物品键的名称 / 数量 / 读值（2026-10-21）
+
+**实机反馈（用户原话归纳）**：AE 网络里的流体在选格页被读成"通用物品堆栈 x1"，
+监测时报 0；物品列表后面也全是 `x1`（但物品**追踪**本身是对的）。
+
+**三个根因，各修一处**：
+
+| 现象 | 根因 | 修法 |
+|---|---|---|
+| 流体显示成"通用物品堆栈"（`wrapped_generic_stack`） | AE 把**所有非物品键**在客户端包成同一个物品（`ae2:wrapped_generic_stack` + `GenericStack` 数据组件），而 `ContainerAccess` 只读了 `Item` 的 registry id —— 流体 / 化学品全部塌成同一个 id | `bind/AeKeys#unwrap` 用 `GenericStack.isWrapped/unwrapItemStack` 解包，身份改写成 `ae:` + `AEKey#toTagGeneric` 的 SNBT（带键类型 `#t`，任何附属模组都能往返）；显示名用 `AEKey#getDisplayName`（游戏内真名，如"水"） |
+| 列表里全是 `x1` | AE 终端格子的 `ItemStack.getCount()` 恒为 1（那只是个图标），真实存量在 `RepoSlot#getStoredAmount()` | `ContainerAccess#viewOfAe` 对 AE 菜单家族单独组装：数量 = `getStoredAmount()`（long） |
+| 监测报 0 | 目标身份是上述那个包装物品的 id，网络里当然没有"这种物品" | `AeNetworkReader` 按身份分两路取键：物品走 `AEItemKey.of`（老路不变），`ae:` 串走 `AEKey#fromTagGeneric`；`counter.get(key)` 对流体 / 化学品同样成立 |
+
+**顺带修的三件**：
+
+| 件 | 内容 |
+|---|---|
+| 空/非空判据 | AE 列表里改成"**条目在不在**"（`RepoSlot#hasItem()`），不再是"数量是不是 0" —— 可合成但没存货的条目存量就是 0，监测它是"现在 0 个"这个真值，不该被当成空格子 |
+| 读值性能 | 反射链改为**只解析一次**（以前每次读值都 `Class.forName` + `getMethod` 一遍）；`getAvailableStacks()` 按 **(MEStorage, gameTime)** 同 tick 复用（弱引用，避免静态字段钉住一个世界的对象图） |
+| 显示口径 | 图例 / 数据目标列表 / 选格页统一走 `AeKeyText.label`：`ae:` 串显示键自己的 id 短名（`water`），普通物品仍是短名（`iron_ingot`，与 0.1.2 之前一致） |
+| 删目标误伤 | `ProbeInstance#removeDataTarget` 从"按 valuePath 删"改成"**按目标自身删**"。所有 AE 目标的 `valuePath` 都是标记 `"ae:network"`，按路径删会在点一行 × 时把**全部 AE 目标**一起删掉（槽位锚点早就踩过同一个坑，注释里写着却只绕开了替换那条路） |
+
+**为什么不把物品键也换成 SNBT 身份**：0.1.2 之前建的 AE 目标是裸 registry id，
+换格式会让它们在选格页上"勾不中"。物品键保持裸 id 是**兼容**，不是省事 ——
+代价是"同 id 不同数据组件"的物品仍然合并（写进已知限制）。
+
+**"AE 有没有直接取网络量的方法"**：有。`IGrid#getStorageService()` 之后两种读法 ——
+`IStorageService#getCachedInventory()`（每 tick 最多刷新一次，AE 终端自己列表就用它，
+最省）与 `getInventory().getAvailableStacks()`（现算，遍历全部存储）。
+本项目取后者并**同 tick 缓存**：采样点就在服务端 tick 上，宁可多走一遍也不要
+"值比时间戳晚一格"（与 CP4/CP15 同一条纪律）。
+
+**离线实证**：新增 `dev-check/ProbeAeApi.java` —— 把代码里用到的 **20 条反射签名**
+（类 / 方法 / 参数 / 返回类型 / 静态性）在 AE2 19.2.17 + NeoForge 21.1.209 上逐个
+`getMethod` 一遍，输出 `AE_API_OK`。它**不进** `offline-check.bat`（依赖 run/mods 里的
+第三方 jar），跑法写在文件头。往返（`toTagGeneric` → SNBT → `fromTagGeneric`）
+需要 AE2 的键类型注册表，离线起不来（NeoForge 引导要求 FML 环境）→ **实机待验**。
+
+离线：TestChart **489 条**（新增 t42 共 11 条：AE 键身份 / 显示名 / 类型 / 坏文本兜底）。
+实机见 `VERIFY.md` H 组。
 
 ## 未完成 / 待优化项
 
