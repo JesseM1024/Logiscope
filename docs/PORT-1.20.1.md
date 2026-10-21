@@ -109,6 +109,18 @@ jar 内只有 `net/minecraft` + `net/minecraftforge`，无任何 `net/neoforged`
 | `collect/AeNetworkReader` | AE2 1.21.1 grid / node API | AE2 1.20.1 对应 API（反射，零编译期依赖）。**读值链两代一致**（`GridHelper#getNodeHost` / `IGridNode#isActive` / `IStorageService#getInventory` / `MEStorage#getAvailableStacks` / `KeyCounter#get`），差别只在取键（下一行） |
 | `bind/AeKeys`（AE 键序列化） | `AEKey#toTagGeneric(HolderLookup.Provider)` / `fromTagGeneric(Provider, CompoundTag)`（AE2 **19.x**） | `toTagGeneric()` **无参** / `fromTagGeneric(CompoundTag)` **单参**（AE2 **15.x**，已对 15.3.6 javap 核实）；1.20.1 也没有 `HolderLookup` 这个类型 ⇒ 本分支的 encode/decode 不传注册表 |
 | `bind/AeKeys`（终端显示格空/非空） | 反射 `Slot#hasItem()`（1.21 生产用 Mojang 名，能反射到） | **不能按名反射 MC 方法**：1.20.1 生产是 SRG（`hasItem` = `m_6657_`），dev 能过、生产扑空。改反射 AE 自己的 `RepoSlot#getEntry()`（dev / 生产同名，语义 = 条目在不在） |
+
+> **★ 反射边界（2026-10-21 实机踩坑，1.20.1 独有）**
+> 判据不是"这个调用编不编得过"，而是**这个类是谁的**：
+> · **AE 的类 / 方法** → 反射（dev 与生产同名，安全）；
+> · **原版（MC）的类 / 方法** → **直接调**（编译器 → 重混淆器会写成 SRG 名，
+>   如 `TagParser#parseTag` 编出来是 `m_129359_`；`Component#getString` 恰好没被改名）。
+> 踩坑记录：`AeKeys.init()` 里反射了 `parseTag` 与 `getString`，dev 全绿、装进实例后
+> `NoSuchMethodException` → 整个 AE 键链停摆（流体显示 `wrapped_generic_stack`、勾一行选全部）。
+> 实例日志的特征行：`[LogiScope] AE2 key API not present, AE keys stay as plain item ids`。
+> 验证方式：构建后 `javap -p -c` 产物里的 `AeKeys.class`，看调用点是不是 SRG 名、
+> 反射字符串里有没有 MC 方法名。`dev-check/ProbeAeApi.java` 也要用
+> **生产 SRG 类路径**跑（named 类路径会给出假阳性）。
 | `collect/AeNetworkReader`（解析 id） | `ResourceLocation.parse(str)` | `new ResourceLocation(str)`（`parse` 是 1.21 新增） |
 | `analysis/Snbt` / `archive/*` | DataComponent 系 | `getTag()` NBT（引用面已 grep 核实） |
 | 其余 | `mouseScrolled(…, scrollX, scrollY)` / `saveWithoutMetadata(registryAccess)` / `ResourceLocation.parse` | 单滚动参数 / `saveWithoutMetadata()` / `new ResourceLocation(...)` |

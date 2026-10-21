@@ -14,8 +14,12 @@
  *   fromTagGeneric(CompoundTag)    —— 15.x 单参；19.x 要 Provider + Tag
  *   其余（GenericStack / RepoSlot / 读值链）两代一致。
  *
- * 运行（先把 AE2 的 jar 路径换成本机那份；本仓库不含第三方 jar）：
- *   java -cp "build/dev-check;<1.20.1 compileClasspath>;<AE2 15.x jar>" ProbeAeApi
+ * 运行（**用生产侧的 SRG 类路径**，这才是真的；见 docs/PORT-1.20.1.md §4.3）：
+ *   java -cp "build/dev-check;<client-1.20.1-...-srg.jar>;<AE2 15.x jar>;<libraries/*>" ProbeAeApi
+ * 用 dev 的 named 类路径跑会给出**假阳性** —— `TagParser#parseTag` 在 SRG 里叫
+ * `m_129359_`，named 环境能解析、生产环境解析不了（2026-10-21 就是这么栽的）。
+ * 所以本文件**只列代码里真实反射的签名**（全是 AE 自己的方法）；MC 的方法一律直接调，
+ * 不在这里检查 —— 真有人加了 MC 方法的反射，用 SRG 类路径跑就会 FAIL，这正是想要的。
  *
  * 注意：这个程序**不在** offline-check.bat 里（依赖 run/mods 或实例里的第三方 jar）。
  */
@@ -25,6 +29,7 @@ import java.lang.reflect.Modifier;
 public class ProbeAeApi {
 
     private static int failed;
+    private static int skipped;
 
     public static void main(String[] args) {
         // ---- AeKeys.init() 用到的 ----
@@ -32,14 +37,10 @@ public class ProbeAeApi {
         Class<?> compound = cls("net.minecraft.nbt.CompoundTag");
         Class<?> itemStack = cls("net.minecraft.world.item.ItemStack");
         Class<?> generic = cls("appeng.api.stacks.GenericStack");
-        Class<?> component = cls("net.minecraft.network.chat.Component");
-        Class<?> tagParser = cls("net.minecraft.nbt.TagParser");
 
         method(aeKey, "toTagGeneric", compound);
         method(aeKey, "fromTagGeneric", aeKey, compound);
         m(aeKey, "getDisplayName").ifPresent(ProbeAeApi::noArg);
-        m(component, "getString").ifPresent(ProbeAeApi::noArg);
-        method(tagParser, "parseTag", compound, String.class);
 
         method(generic, "isWrapped", boolean.class, itemStack);
         method(generic, "unwrapItemStack", generic, itemStack);
@@ -75,7 +76,7 @@ public class ProbeAeApi {
 
         System.out.println();
         if (failed == 0) {
-            System.out.println("AE_API_OK");
+            System.out.println(skipped == 0 ? "AE_API_OK" : "AE_API_OK (" + skipped + " 条因离线夹具无法校验)");
         } else {
             System.out.println(failed + " 条签名对不上");
             System.exit(1);
@@ -121,9 +122,16 @@ public class ProbeAeApi {
             System.out.println("ok   " + owner.getSimpleName() + "#" + name
                     + " -> " + returnType.getSimpleName()
                     + (Modifier.isStatic(mm.getModifiers()) ? " (static)" : ""));
+        } catch (VerifyError | IncompatibleClassChangeError e) {
+            // 夹具限制，不是签名错：这里跑的是**未打 Forge 运行时补丁**的 SRG jar，
+            // 少数 AE 类（如 AEItemKey，用到 patched ItemStack）校验过不去。
+            // 签名真错了会抛 NoSuchMethodException（下面的分支）。
+            skipped++;
+            System.out.println("SKIP " + owner.getSimpleName() + "#" + name
+                    + "  (离线夹具无法校验: " + e.getClass().getSimpleName() + ")");
         } catch (Throwable t) {
             failed++;
-            System.out.println("FAIL 签名不存在: " + owner.getSimpleName() + "#" + name + "(" + params.length + " 参)");
+            System.out.println("FAIL 签名不存在: " + owner.getSimpleName() + "#" + name + "(" + params.length + " 参)  " + t);
         }
     }
 

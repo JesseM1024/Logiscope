@@ -174,8 +174,34 @@ AE 目标）；非标量条目右键明确提示，不填。**已回流 main（`
 | `ui/ChartRenderer` | 只改 `label()`；**保留**本分支的 `ticksPerSecond() = 20`（1.20.1 无 `tickRateManager`） |
 | lang | 新增 5 键（中英各 **184**）：`picker.filter_hint` / `ignore_empty` / `no_match` / `all_empty` / `filtered` |
 
-**离线实证**：`dev-check/ProbeAeApi.java` 按 15.x 签名重写，对 AE2 **15.3.6** 逐个 `getMethod`，
-19 条签名全过、输出 `AE_API_OK`（含 `RepoSlot#getEntry`）。不进门禁（依赖实例里的第三方 jar）。
+**离线实证**：`dev-check/ProbeAeApi.java` 按 15.x 签名重写，对 AE2 **15.3.6** 逐个 `getMethod`。
+★ 必须用**生产侧 SRG 类路径**跑（`client-1.20.1-…-srg.jar` + AE2 + `libraries/`）——
+用 dev 的 named 类路径跑会给出假阳性（见「轮次 6 修订」）。
+
+### [1.20.1] 轮次 6 修订：AE 键解析在生产环境失效（2026-10-21 实机反馈）
+
+**现象**（用户截图）：选格页里所有非物品键都显示成 `wrapped_generic_stack x<真实数量>`，
+**且点一行会把所有包裹堆栈一起选中**。物品行正常。
+
+**定位**：实例 `latest.log` 只有一句
+`[LogiScope] AE2 key API not present, AE keys stay as plain item ids`
+⇒ `AeKeys.init()` 整条链失败，`unwrap/encode/decode` 全部返回 null，
+于是每行退回"物品 id"，而所有包裹堆栈共享同一个 `ae2:wrapped_generic_stack`
+⇒ 身份塌成一个 ⇒ 点一行勾全部。数量是对的（`repoStoredAmount` 不走 init）。
+
+**根因**：`init()` 里有两条**反射 MC 方法**的调用 ——
+`TagParser#parseTag` 与 `Component#getString`。1.20.1 生产运行时是 **SRG 命名**，
+`parseTag` 在 jar 里叫 `m_129359_`（已对 `client-1.20.1-…-srg.jar` javap 核实）⇒
+`getMethod("parseTag")` 抛 `NoSuchMethodException` ⇒ 整条 init 失败。
+dev 环境是 named 映射，所以**本地跑不出来**。
+
+**修法**：MC 的方法**直接调**（编译器 / 重混淆器会写成生产名），反射只打 **AE 自己的方法**。
+产物已 `javap` 核实：调用点变成 `TagParser.m_129359_`，而反射字符串只剩
+`getStoredAmount / getEntry / toTagGeneric / fromTagGeneric / getDisplayName / isWrapped /
+unwrapItemStack / what`。
+
+**教训（写进 PORT §4.3）**：反射的边界是"这个类是 AE 的还是原版的"，不是"能不能编过"。
+探针也改成跑 SRG 类路径（`AEItemKey` 因缺 Forge 运行时补丁无法离线校验，标记为 SKIP）。
 
 **版本**：`mod_version` → `0.1.3-1.20.1-alpha`；产物 `build/libs/logiscope-0.1.3-1.20.1-alpha.jar`
 （248 KB）；`offline-check.bat` 的断言数 / 产物名同步。**实机待验**：`VERIFY.md` G / H 组
