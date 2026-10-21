@@ -52,6 +52,7 @@
   "logiscope.btn.clear_cells": "清空选择",
   "logiscope.btn.done": "完成",
   "logiscope.btn.open_folder": "打开存储文件夹",
+  "logiscope.btn.open_archive_folder": "打开存档文件夹",
   "logiscope.btn.to_list": "主界面",
   "logiscope.btn.pick_cells": "回选格",
   "logiscope.btn.pause": "暂停",

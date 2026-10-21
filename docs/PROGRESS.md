@@ -8,7 +8,7 @@
 ## 一句话现状
 
 - **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **184** 键一致。
+  `verify-jar.py` 全过；lang 中英各 **185** 键一致。
   （以上数字为 main 与 1.20.1 两条线**同步后**的共同值，见「[1.20.1] 轮次 6」。）
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
@@ -36,7 +36,7 @@ F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误�
 | 项 | 值 |
 |---|---|
 | 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.3-1.20.1.jar`（reobf，**已去 alpha**） |
-| 离线 | TestChart **489 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **184** 键 |
+| 离线 | TestChart **489 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **185** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
 | 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.3-1.20.1`（旧 jar 移入 `mods/.old/`） |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
@@ -335,6 +335,18 @@ Esc 才是清空。
 两条线的 jar 仍不会混装）；产物 `build/libs/logiscope-0.1.3-1.20.1.jar`。
 `offline-check.bat` / GOALS / VERIFY / README / PORT 的产物名同步；
 `PROGRESS` 里「轮次 6」的 `-alpha` 字样**保留为历史记录**，不回改。
+
+### [1.20.1] 轮次 8：回放页「打开存档文件夹」（自 main 回流，2026-10-21）
+
+**来源**：main `53aaaf4`。零 API 差异，原样搬：
+
+| 件 | 内容 |
+|---|---|
+| `archive/Archives#dirOf(dirName)` | 存档目录 = `rootDir()/dirName`（目录布局仍只在 `Archives` 里定义） |
+| `ui/ScopeScreen` REPLAY 按钮行 | 「重命名」与「回列表」之间加「打开存档文件夹」，没有回放时置灰；`openArchiveFolder()` 直接落到 `recording.json` / `recording.csv` 那一层 |
+| lang | 新增 1 键（中英各 **185**）：`btn.open_archive_folder` |
+
+根页的「打开文件夹」（落点 = 根目录）保持不动。实机见 `VERIFY.md` I 组。
 
 ## 未完成 / 待优化项
 

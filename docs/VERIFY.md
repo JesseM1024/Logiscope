@@ -191,7 +191,7 @@ python verify-jar.py build/libs/logiscope-0.1.3-1.20.1.jar
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build --offline`（代理进程在跑时可直接联网构建；代理关闭时用 `--offline`，本机缓存完整） | `BUILD SUCCESSFUL`。联网构建需校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
-| E2 | `TestChart` | **489 条**断言全过；lang 中英各 **184** 键一致 |
+| E2 | `TestChart` | **489 条**断言全过；lang 中英各 **185** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
 | E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.20.1`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
@@ -245,6 +245,15 @@ python verify-jar.py build/libs/logiscope-0.1.3-1.20.1.jar
 | H9 | 一个 AE 探针挂 5 个目标，`/tick rate 200` 跑 10 秒 | 读数逐 tick 变化、无明显卡顿 |
 | ★H10 | 挂两个 AE 目标（水 + 岩浆）→ 数据页点其中一行的 × | **只删那一行**（回归：以前按 `ae:network` 路径删会把全部 AE 目标一起删） |
 | H11 | 老目标（0.1.2 之前建的 AE 物品目标） | 继续能读（裸 registry id 那条路没动），选格页里仍显示为已勾选 |
+
+## I. 回放页「打开存档文件夹」（第十九轮⑤，自 main 移植）
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★I1 | 根页点一个存档 → 进回放页 → 点「打开存档文件夹」 | 文件管理器**直接打开那一次的目录**（不是 `logiscope/` 根），里面能看到 `recording.json` / `recording.csv` |
+| I2 | 「存档并停止」后点同一个按钮 | 同样落到刚导出的那个目录（目录名 = 存档名） |
+| I3 | 中英文环境 | 「打开存档文件夹」/「Open archive folder」都在按钮行里、不被挤掉；没有回放时按钮置灰 |
+| I4 | 根页的「打开文件夹」 | 行为不变（仍打开 `logiscope/` 根目录） |
 
 ---
 

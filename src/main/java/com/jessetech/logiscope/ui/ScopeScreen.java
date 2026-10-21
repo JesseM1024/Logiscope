@@ -46,6 +46,7 @@ import net.minecraftforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -1064,6 +1065,10 @@ public final class ScopeScreen extends Screen {
             }
             case REPLAY -> {
                 out.add(new Item("rename", tr("logiscope.btn.rename"), replayArchive != null));
+                // 直接打开这次回放自己的目录（csv / json 就在里面）——
+                // 根目录下全是日期文件夹，从那儿再找一次太费劲
+                out.add(new Item("open_archive_folder", tr("logiscope.btn.open_archive_folder"),
+                        replayArchive != null && !replayDir.isBlank()));
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1782,6 +1787,27 @@ public final class ScopeScreen extends Screen {
         if (archFilterFocus && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
             int cx = tx + Math.min(this.font.width(text), avail);
             g.fill(cx, ty, cx + 1, ty + 9, 0xFFE0E0EC);
+        }
+    }
+
+    /**
+     * 用系统文件管理器打开**当前这次回放的**存档目录。
+     *
+     * 与 {@link #openStorageFolder()} 的差别只有落点：那个是根目录（几十个日期文件夹），
+     * 这个是 {@code logiscope/<存档名>/}，`recording.csv` / `recording.json` 就在这一层，
+     * 选文件、发给别人、用 Excel 打开都不用再点一次。
+     */
+    private void openArchiveFolder() {
+        if (replayDir == null || replayDir.isBlank()) {
+            return;
+        }
+        try {
+            Path dir = Archives.dirOf(replayDir);
+            Files.createDirectories(dir);
+            Util.getPlatform().openFile(dir.toFile());
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.warn("open archive folder failed", e);
+            say(tr("logiscope.flash.open_folder_fail"));
         }
     }
 
@@ -3542,6 +3568,7 @@ public final class ScopeScreen extends Screen {
         switch (id) {
             case "create" -> createProbe();
             case "open_folder" -> openStorageFolder();
+            case "open_archive_folder" -> openArchiveFolder();
             case "cell_mode" -> {
                 cellMode = !cellMode;
                 cellDragButton = -1;
