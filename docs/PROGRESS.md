@@ -35,10 +35,10 @@ F9 判据维持第二代（收紧曾被实机否决、已回滚；机械手误�
 
 | 项 | 值 |
 |---|---|
-| 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.3-1.20.1-alpha.jar`（reobf） |
+| 构建 | `gradlew.bat build --offline` 通过；产物 `build/libs/logiscope-0.1.3-1.20.1.jar`（reobf，**已去 alpha**） |
 | 离线 | TestChart **489 条**全过、BenchRender（台阶 99.3%・混合 63.8%）、verify-jar 全过、lang 中英 **184** 键 |
 | dev 实例 | `1_20_1_neo/`（与主线 `run/` 隔离）；mods = MEK `10.4.16.80`；AE2 `15.3.3` / Create `6.0.8` 在 `mods-disabled/` |
-| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.3-1.20.1-alpha`（旧 jar 移入 `mods/.old/`） |
+| 外部实例（主） | `1.20.1-NeoForge`（HMCL / NeoForge 47.1.105）：AE2 `15.3.6` + MEK `10.4.16.80` + 精妙存储 `1.5.5.2182` / Core `1.5.10.2402` + Create `6.0.8` + pipez `1.2.5`；已装入 `0.1.3-1.20.1`（旧 jar 移入 `mods/.old/`） |
 | 外部实例（备用） | GregTech Leisure（Forge 47.3.7）：AE2 `15.2.13` + 精妙存储 + GTCEu；装 `0.1.0-1.20.1`，常量池审计 0 缺失 |
 | 未做 | 实机验收（重点 A 组采样保真 + C-4 右键「按数值读取」填入值格） |
 
@@ -319,6 +319,22 @@ Esc 才是清空。
 
 离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
 （lang 176 键一致）。实机复测见 `VERIFY.md` 第十八轮④（N1–N9）。
+
+## [1.20.1] 轮次 7：版本号 0.1.3-1.20.1（去 alpha）+ 实机确认（2026-10-21）
+
+**依据**：用户实机复测通过（AE 终端选格页截图：`Experience` / `Lava` / `Water` /
+`Liquid Hydrogen Chloride` 都显示**真名 + 真值**，两行各自勾选 → 身份不再塌成
+`wrapped_generic_stack`；`ignore empty` 与筛选框同时生效）。
+
+**日志核对**（`1.20.1-NeoForge/logs/latest.log` + `debug.log`）：
+`ERROR/FATAL = 0`、`WARN = 0`；`LogiScope` 只有 3 行（构造 / 一条 JEI 守卫的 debug），
+**没有** `AE2 key API not present`（说明 `AeKeys.init()` 这次真的过了）。
+唯一的 `Exception` 字样是 Netty 对 JDK 17 模块的探测噪声，与本模组无关。
+
+**版本**：`mod_version` `0.1.3-1.20.1-alpha` → **`0.1.3-1.20.1`**（去 alpha，保留 MC 后缀 ——
+两条线的 jar 仍不会混装）；产物 `build/libs/logiscope-0.1.3-1.20.1.jar`。
+`offline-check.bat` / GOALS / VERIFY / README / PORT 的产物名同步；
+`PROGRESS` 里「轮次 6」的 `-alpha` 字样**保留为历史记录**，不回改。
 
 ## 未完成 / 待优化项
 
