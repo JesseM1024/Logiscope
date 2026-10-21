@@ -43,6 +43,16 @@ public final class Archives {
         return Minecraft.getInstance().gameDir.toPath().resolve("logiscope");
     }
 
+    /**
+     * 某一个存档自己的目录（recording.json / recording.csv 就在这一层）。
+     *
+     * 根目录下是几十个 yyyy-MM-dd_HH-mm-ss 的文件夹，从那里找某一次记录得一个个点进去看。
+     * 回放页的「打开存档文件夹」直接落到这一层。
+     */
+    public static Path dirOf(String dirName) {
+        return rootDir().resolve(dirName);
+    }
+
     // ------------------------------------------------------------------
     // 导出
     // ------------------------------------------------------------------

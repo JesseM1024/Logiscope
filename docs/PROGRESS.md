@@ -7,8 +7,8 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **179** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **185** 键一致。产物 `logiscope-0.1.3-1.16.5-alpha.jar`。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
   [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
@@ -20,6 +20,45 @@
 > [`PORT-1.20.1.md`](PORT-1.20.1.md)（本文与 ARCHITECTURE 都只描述 1.21.1 主线）。
 
 ---
+
+## [1.16.5] 线：现状与移植记录
+
+**现状（2026-10-21）**：UI 类新功能已与 main **对齐到第十九轮⑤ 的界面部分**
+（选格页筛选框 / 忽略空槽 / 回放页打开存档文件夹 / 删除目标按自身删）。
+版本 `0.1.3-1.16.5-alpha`（**仍带 alpha**：本线尚未实机验收），产物
+`build/libs/logiscope-0.1.3-1.16.5-alpha.jar`（141 处 `func_` = 已重混淆，非 dev 包）。
+离线 489 条断言 / lang 185 键全过。
+
+> ⚠️ 下面这段「[1.20.1] 线」是从 `1.20.1-neo` 派生时继承的历史，**不是**本分支的记录。
+
+### [1.16.5] 轮次 1：UI 新功能移植（2026-10-21）
+
+| 件 | 1.16.5 侧的做法 |
+|---|---|
+| `analysis/PickerFilter` / `AeKeyText` | 纯逻辑，原样搬；**`String#isBlank()` 是 Java 11**，改 `trim().isEmpty()` |
+| `ui/ScopeScreen` | `Layout` 是**普通类**（不是 record）⇒ 加字段 + 改构造签名 + 加 getter；`switch` 用经典写法（`case X: { ... break; }`）；`font.width(...)` → **`font.getStringWidth(...)`**；`Util.getPlatform()` → **`Util.getOSType()`**；绘制参数是 `Draw` |
+| `archive/Archives#dirOf` | 原样（`gameDir` 而非 `gameDirectory`） |
+| `collect/ProbeInstance` | `removeDataTarget(DataTarget)`（原来按 valuePath 删会把 AE 目标全删） |
+| 语言键 | 新增 6 键（中英各 **185**） |
+| dev-check | t41 / t42 搬入；断言 461 → **489** |
+
+### [1.16.5] 已知限制：AE2 8.x 与 11/15/19 是两套 API（本轮**未**移植 AE 部分）
+
+本线的 AE2 是 **8.4.7**（1.16.5 最后一代）。它**没有** `AEKey` / `GenericStack` /
+`MEStorage` / `KeyCounter` —— 那套 `AEStack` 体系是 AE2 10（1.18）才有的。因此：
+
+- "解包通用包裹堆栈 → `ae:` + SNBT 身份"**在本线不可能实现**（没有那个物品、没有键序列化）；
+- 更严重的是：本分支现有的 `AeNetworkReader` 是照抄 19.x 写的（`GridHelper.getNodeHost` /
+  `MEStorage` / `KeyCounter`），**在 8.4.7 上一条都解析不了** ⇒ AE 目标恒 no_data。
+  这是移植时就带进来的问题，不是本轮引入的。
+- 8.x 的正确读值链（已 javap 4.7.6 核实，**待实现**）：
+  `TileEntity instanceof IGridHost` → `getGridNode(AEPartLocation)`（遍历 6 个面）→
+  `IGridNode.isActive()` → `IGrid.getCache(IStorageGrid.class)` →
+  `IStorageMonitorable.getInventory(IStorageChannel<IAEItemStack>)` →
+  `IMEInventory.getAvailableItems(IItemList)`（**没有按单键查的接口**，要全量扫）→
+  `IAEStack.getStackSize()`。
+- 结论：AE 监视在本线**暂时不可用**，UI 其余功能不受影响。下一轮再动它（工作量 ≈ 重写一个
+  `AeNetworkReader` + 终端显示格的 `asItemStackRepresentation` 身份问题）。
 
 ## [1.20.1] 线：现状与移植记录
 
