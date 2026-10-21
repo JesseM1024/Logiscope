@@ -178,6 +178,8 @@ public final class ScopeScreen extends Screen {
     private static final int DEL_W = 13;
 
     private static final String SERIES_PREFIX = "series:";
+    /** 选格页「忽略空槽」按钮（占筛选行右端，不进 Layout.buttons —— 见 pickerIgnoreRect） */
+    private static final String PICKER_IGNORE_EMPTY = "picker_ignore_empty";
     /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
     private static final int COLOR_ANALYZE = 0xFFE070D8;
     /** NBT 原文悬浮高亮：黄（实测反馈淡紫在深底上难认；黄与深底对比最强） */
@@ -466,6 +468,13 @@ public final class ScopeScreen extends Screen {
     private String pickerFilter = "";
     /** 选格页筛选框是否有键盘焦点（语义同 {@link #archFilterFocus}） */
     private boolean pickerFilterFocus;
+    /**
+     * 选格页「忽略空槽」开关（第十九轮③）：开了就不显示空槽。
+     *
+     * 静态字段 —— 这是**看列表的偏好**（同 `hiddenItems`），跨"关面板再打开"保持；
+     * 进程启动时是 false（需求：默认不开）。逻辑开关，与筛选框**叠加**（先剔空槽再按文字筛）。
+     */
+    private static boolean pickerIgnoreEmpty;
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -944,7 +953,9 @@ public final class ScopeScreen extends Screen {
         // 没有可筛的清单时不占位：那一行还给提示文字（"先把设备界面打开"）
         if (page == Page.PICKER && source != Source.NONE && !pickerList().isEmpty()) {
             filterTop = listTop;
-            filterH = ROW_H - 1;
+            // 用按钮高度（CHIP_H）而不是行高：这一行右边是个按钮，
+            // 按 12px 画才能和面板里其他按钮长得一样（10px 时文字会压到边框上）
+            filterH = CHIP_H;
             listTop += filterH + 2;
         }
         int listRows = Math.max(1, (contentBottom - listTop) / ROW_H - 1);
@@ -1214,6 +1225,9 @@ public final class ScopeScreen extends Screen {
         }
         if ("cell_mode".equals(id)) {
             return cellMode ? 0xFF3FE0A0 : 0;
+        }
+        if (PICKER_IGNORE_EMPTY.equals(id)) {
+            return pickerIgnoreEmpty ? 0xFF3FE0A0 : 0;   // 开着时绿字，与 cell_mode 同一语汇
         }
         if ("nbt_mode".equals(id)) {
             // ⑦：NBT tracking ON 时按钮文字转黄色
@@ -1882,14 +1896,19 @@ public final class ScopeScreen extends Screen {
      */
     private List<ContainerAccess.SlotView> pickerVisible() {
         List<ContainerAccess.SlotView> all = pickerList();
-        if (pickerFilter.isBlank() || all.isEmpty()) {
+        boolean byText = !pickerFilter.isBlank();
+        if (all.isEmpty() || (!byText && !pickerIgnoreEmpty)) {
             return all;
         }
         String emptyLabel = tr("logiscope.slot.empty");
         List<ContainerAccess.SlotView> out = new ArrayList<>();
         for (ContainerAccess.SlotView v : all) {
-            // 参与匹配的就是这一行**显示出来的**那几段：序号 / 物品 id / 短名（AE 行是显示名）
-            boolean hit = PickerFilter.matches(pickerFilter, v.containerSlotIndex(),
+            // ①「忽略空槽」：先剔掉空行（与文字筛选是**与**关系）
+            if (pickerIgnoreEmpty && v.empty()) {
+                continue;
+            }
+            // ② 参与匹配的就是这一行**显示出来的**那几段：序号 / 物品 id / 短名（AE 行是显示名）
+            boolean hit = !byText || PickerFilter.matches(pickerFilter, v.containerSlotIndex(),
                     v.itemId(), v.shortName(), v.displayName(), v.empty() ? emptyLabel : null);
             if (hit) {
                 out.add(v);
@@ -1935,11 +1954,14 @@ public final class ScopeScreen extends Screen {
         }
 
         renderPickerFilter(g, L, mouseX, mouseY);
+        renderPickerIgnore(g, L, mouseX, mouseY);
 
         List<ContainerAccess.SlotView> list = pickerVisible();
         if (list.isEmpty()) {
-            // 筛到一条都不剩：保留筛选框（不然用户没法改条件），只提示这一行
-            g.drawString(this.font, tr("logiscope.picker.no_match"), x + PAD, L.listTop(), 0xAAA6A0, false);
+            // 一条都不剩：保留筛选框 / 开关（不然用户没法改条件），只提示这一行。
+            // 两种原因给两句不同的话 —— 不然"忽略空槽"开着时会让人以为筛选框写错了。
+            String key = pickerFilter.isBlank() ? "logiscope.picker.all_empty" : "logiscope.picker.no_match";
+            g.drawString(this.font, tr(key), x + PAD, L.listTop(), 0xAAA6A0, false);
             return;
         }
 
@@ -1981,9 +2003,29 @@ public final class ScopeScreen extends Screen {
         g.drawString(this.font, footer, x + PAD, listTop + maxRows * ROW_H + 1, 0xFF707070, false);
     }
 
-    /** 筛选框矩形 [x, y, w, h]：占列表正上方那一行（由 {@link #layout()} 让出来） */
+    /**
+     * 「忽略空槽」按钮矩形 [x, y, w, h]：钉在筛选行的**右端**（需求："在搜索框后面加一个按钮"）。
+     * 宽度按当前语言的实际字宽算，窄面板下也至少给搜索框留 60px。
+     */
+    private int[] pickerIgnoreRect(Layout L) {
+        int want = this.font.width(tr("logiscope.picker.ignore_empty")) + 10;
+        int w = Math.min(want, Math.max(36, L.w() - 2 * PAD - 60));
+        return new int[]{L.x() + L.w() - PAD - w, L.filterTop(), w, L.filterH()};
+    }
+
+    private boolean inPickerIgnore(Layout L, int mx, int my) {
+        if (page != Page.PICKER || L.filterH() <= 0) {
+            return false;
+        }
+        int[] r = pickerIgnoreRect(L);
+        return isIn(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
+    /** 筛选框矩形 [x, y, w, h]：占列表正上方那一行（由 {@link #layout()} 让出来），右端让给按钮 */
     private int[] pickerFilterRect(Layout L) {
-        return new int[]{L.x() + PAD, L.filterTop(), L.w() - 2 * PAD, L.filterH()};
+        int[] btn = pickerIgnoreRect(L);
+        int w = Math.max(40, btn[0] - 4 - (L.x() + PAD));
+        return new int[]{L.x() + PAD, L.filterTop(), w, L.filterH()};
     }
 
     /** 点是否落在选格页筛选框上（渲染与命中判定共用同一个矩形） */
@@ -1993,6 +2035,17 @@ public final class ScopeScreen extends Screen {
         }
         int[] r = pickerFilterRect(L);
         return isIn(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
+    /**
+     * 「忽略空槽」开关按钮：借用按钮的观感（`renderChip`），开着时文字转绿（同 cell_mode 的语义色）。
+     * 它**不在** `Layout.buttons` 里 —— 位置钉在筛选行右端，跟搜索框同一条水平线。
+     */
+    private void renderPickerIgnore(GuiGraphics g, Layout L, int mouseX, int mouseY) {
+        int[] r = pickerIgnoreRect(L);
+        Chip c = new Chip(PICKER_IGNORE_EMPTY, tr("logiscope.picker.ignore_empty"),
+                r[0], r[1], r[2], r[3], true, 0);
+        renderChip(g, c, mouseX, mouseY, c.hit(mouseX, mouseY), accentFor(PICKER_IGNORE_EMPTY));
     }
 
     /** 选格页筛选框：空时显示占位符，聚焦时闪光标（与存档筛选框同一套观感） */
@@ -2830,6 +2883,12 @@ public final class ScopeScreen extends Screen {
             if (source == Source.NONE) {
                 // 这一页此时只画了一句提示（见 renderSlotPicker），没有可点的行 ——
                 // 别让点击落到"看不见的清单"上（worldSlots 可能还留着上一次的残留）
+                return true;
+            }
+            // 「忽略空槽」开关：点一下就切，顺手把列表滚回顶部（可见行集合变了）
+            if (inPickerIgnore(L, mx, my)) {
+                pickerIgnoreEmpty = !pickerIgnoreEmpty;
+                scrollRow = 0;
                 return true;
             }
             // 筛选框：点在框上 → 聚焦（吃掉这次点击）

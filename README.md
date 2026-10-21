@@ -53,7 +53,7 @@ gradlew.bat createLaunchScripts
 | Gradle | 9.2.1（wrapper 自带） |
 | Minecraft | 1.21.1 |
 | NeoForge | 21.1.209 |
-| 模组版本 | `0.1.2-1.21.1`（main 主线） |
+| 模组版本 | `0.1.3-1.21.1`（main 主线） |
 
 > **版本分支约定**：`main` = 1.21.1 主线；`1.20.1-neo` 分支 = MC 1.20.1 + NeoForge 47.1.x 移植线
 > （构建插件换成 `net.neoforged.moddev.legacyforge`，Java 17，产物 jar 名 `logiscope-0.1.0-1.20.1`）。

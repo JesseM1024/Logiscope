@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.2-1.21.1）
+# LogiScope · 实机验证清单（当前版本 0.1.3-1.21.1）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①–⑤、
 > 十九轮①–② 的
@@ -163,7 +163,7 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;dev-check/lib/guava-32.1.2-jre.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.2-1.21.1.jar
+python verify-jar.py build/libs/logiscope-0.1.3-1.21.1.jar
 ```
 
 | # | 检查 | 期望 |
@@ -172,7 +172,7 @@ python verify-jar.py build/libs/logiscope-0.1.2-1.21.1.jar
 | E2 | `TestChart` | **489 条**断言全过；lang 中英各 **182** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.2-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
 
 ## F. 回归抽查
 
@@ -202,6 +202,10 @@ python verify-jar.py build/libs/logiscope-0.1.2-1.21.1.jar
 | G7 | 切到图表页再回来 | 筛选框内容保留（会话内），焦点已收起 |
 | G8 | 空筛选状态 + 容器只有 1 页 | 页脚不再多出 `命中 / 全部` 那一段（没有筛选时不显示） |
 | G9 | AE 终端（选格页的 AE 模式） | 筛选框同样可用；`wrapped_generic_stack` 这类按**显示名**也能筛到（见 H 组） |
+| ★G10 | 箱子里放几样东西、其余空 → 点筛选框右边的「忽略空槽」 | 只剩有物品的行；按钮文字转绿（再点一次复原）；页脚出现 `命中 / 全部` |
+| ★G11 | 开着「忽略空槽」再敲筛选词 | 两个条件**叠加**（既要非空、又要文字命中）；Esc 只清文字，空槽仍被隐藏 |
+| G12 | 全是空格子的容器 + 开着「忽略空槽」 | 提示"这个容器里没有非空格子·关掉「忽略空槽」看看"（**不是**"没有匹配的格子"） |
+| G13 | 英文环境下看这一行 | 搜索框被压缩但不变形，「ignore empty」完整显示；窄面板（拖到最窄）下也不重叠 |
 
 ## H. AE 非物品键（第十九轮②）
 
