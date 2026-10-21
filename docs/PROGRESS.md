@@ -8,7 +8,7 @@
 ## 一句话现状
 
 - **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **184** 键一致。
+  `verify-jar.py` 全过；lang 中英各 **185** 键一致。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.3 待发布**
   —— 版本号已提至 `0.1.3-1.21.1`（0.1.2 未单独发布，变更并入 0.1.3），
   变更见「第十八轮⑥」+「第十九轮①–③」；0.1.0 同线；发布约定见
@@ -287,6 +287,24 @@ VERIFY / GOALS / README）。
 
 **规则**（写进 ARCHITECTURE C27-10）：判据是这个类**是谁的** —— AE 的反射，原版的直接调。
 `dev-check/ProbeAeApi` 同步只列 AE 的签名；`VerifyError`（离线夹具缺 Forge 运行时补丁）记 SKIP 不算失败。
+
+## 第十九轮⑤：回放页「打开存档文件夹」（2026-10-21）
+
+**需求**（用户原话）："在查看存档的数据时，也加一个打开文件夹的按钮……打开后全是日期标注的
+文件夹名称，不好搜索。在查看存档的数据页面打开文件夹时，就直接打开到 csv、json 那里"。
+
+| 件 | 内容 |
+|---|---|
+| `archive/Archives#dirOf(dirName)` | 存档目录 = `rootDir()/dirName`。目录布局只在 `Archives` 里定义一次，界面不拼路径 |
+| `ui/ScopeScreen` REPLAY 按钮行 | 在「重命名」与「回列表」之间加「打开存档文件夹」；`replayArchive == null` 或 `replayDir` 为空时置灰（没有回放就没有目录可开） |
+| `openArchiveFolder()` | `Files.createDirectories(dirOf(replayDir))` 后 `Util.getPlatform().openFile(...)`；失败只 flash，不打断 |
+| lang | 新增 1 键（中英各 **185**）：`btn.open_archive_folder` |
+
+根页的「打开文件夹」（落点 = 根目录）**保留不动** —— 那是"我要看所有存档"的入口，
+回放页这个是"我要看这一份"。两者不是替代关系。
+
+离线：build 通过；TestChart 489 条全过（本改动是 UI 行为，没有可离线断言的逻辑）。
+实机见 `VERIFY.md` I 组。
 
 ## 未完成 / 待优化项
 

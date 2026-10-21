@@ -52,6 +52,7 @@
   "logiscope.btn.clear_cells": "Clear picks",
   "logiscope.btn.done": "Done",
   "logiscope.btn.open_folder": "Open folder",
+  "logiscope.btn.open_archive_folder": "Open archive folder",
   "logiscope.btn.to_list": "Main screen",
   "logiscope.btn.pick_cells": "Back to slot",
   "logiscope.btn.pause": "Pause",

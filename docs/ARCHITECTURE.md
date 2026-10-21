@@ -1219,6 +1219,11 @@ level.getBlockState(pos).useWithoutItem(level, player, hit).consumesAction()
   ② IO 只统计**严格在段内**的流量（段首采样 tick 的流量是从区间外带进来的）。
   UI 侧：结果按「区间×曲线×对象×运算」四元组缓存（`refreshAnalyze`），
   结果框画在绘图区右上角（`ChartRenderer#plotRect` 同源几何），与左上角的框选统计并存。
+- **C19-8 回放页的「打开存档文件夹」**（第十九轮⑤）：C19-7 的筛选框解决"在长列表里找"，
+  这一条解决"找到之后还要在文件管理器里再找一次"。根页的「打开文件夹」落点是根目录
+  （几十个 `yyyy-MM-dd_HH-mm-ss`），回放页这个用 `Archives#dirOf(replayDir)` **直接落到
+  这一次存档自己的目录** —— `recording.json` / `recording.csv` 就在这一层。
+  路径解析归 `Archives`（目录布局的唯一定义处），界面只负责 `openFile`。
 - **C19-7 根页存档筛选**：标题行左侧为输入框（空时显示原「存档」标题作占位符），打字即筛
   （匹配名称 / 文件夹名，大小写不敏感）。**渲染、点击命中、滚动三处共用同一个
   `filteredArchives()`** —— "显示的列表"与"点的列表"分家会造成"点 A 行打开 B 存档"。
