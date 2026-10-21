@@ -523,7 +523,7 @@ build\probe-ae.bat   :: 本地临时脚本，不进仓库
 | `main` | 1.21.1 / NeoForge 21.1.x | MDG `net.neoforged.moddev` | 21 | `logiscope-0.1.3-1.21.1.jar` |
 | `1.20.1-neo` | 1.20.1 / NeoForge 47.1.x（同一 jar 也跑 Forge 47.x） | MDG legacy | 17 | `logiscope-0.1.3-1.20.1.jar` |
 | `1.18.2-forge` | 1.18.2 / Forge 40.x | MDG legacy | 17 | `logiscope-0.1.3-1.18.2.jar` |
-| **`1.16.5-forge`** | **1.16.5 / Forge 36.x** | **ForgeGradle 5** | **8** | **`logiscope-0.1.3-1.16.5-alpha.jar`** |
+| **`1.16.5-forge`** | **1.16.5 / Forge 36.x** | **ForgeGradle 5** | **8** | **`logiscope-0.1.3-1.16.5.jar`** |
 
 三条低版本线（1.18.2 / 1.16.5 / 1.12.2）都**只有 Forge**，不需要加载器兼容设计；
 `1.12.2` 那代还有 Cleanroom 这个"第二运行时"，但它与 Forge 同包名同 SRG，属另一类问题

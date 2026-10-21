@@ -44,7 +44,7 @@ gradlew.bat genIntellijRuns
 > dev 版了。**判据：可用包 ≈ 245 KB、jar 内 84 处 `func_*`；dev 包 ≈ 242 KB、只有源码手写的
 > `func_217292_a` 一处。**
 >
-> 安装步骤：删掉实例 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.3-1.16.5-alpha.jar` 过去。
+> 安装步骤：删掉实例 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.3-1.16.5.jar` 过去。
 > 纯客户端模组，服务端不装也不会报错。
 
 > ⚠️ **Windows 上请用 `gradlew.bat`，不要用 Git Bash 的 `./gradlew`**
