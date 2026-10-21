@@ -31,6 +31,7 @@ import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
+import com.jessetech.logiscope.analysis.PickerFilter;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -102,6 +103,7 @@ public class TestChart {
         t38AeTargets();
         t39RiseFallEvents();
         t40ForcedNumeric();
+        t41PickerFilter();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1514,6 +1516,37 @@ public class TestChart {
             failed++;
             System.out.println("  FAIL " + what + " 期望 " + expect + " 实际 " + actual);
         }
+    }
+
+    // 41) 选格页筛选框的匹配规则（第十九轮①）
+    private static void t41PickerFilter() {
+        // 空查询 / 纯空白 = 不过滤（少一次误操作）
+        yes("筛选 空串全过", PickerFilter.matches("", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 纯空白全过", PickerFilter.matches("   ", 3, "minecraft:iron_ingot"));
+        yes("筛选 null 全过", PickerFilter.matches(null, 3));
+
+        // 名称子串、大小写不敏感、id 与短名都匹配
+        yes("筛选 短名子串", PickerFilter.matches("iron", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 大写也能中", PickerFilter.matches("IRON", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 命名空间也能中", PickerFilter.matches("minecraft", 3, "minecraft:iron_ingot"));
+        no("筛选 不相关不中", PickerFilter.matches("gold", 3, "minecraft:iron_ingot"));
+
+        // 序号：精确匹配，不是子串
+        yes("筛选 #3 命中 3 号", PickerFilter.matches("#3", 3, "minecraft:iron_ingot"));
+        no("筛选 #1 不命中 10 号", PickerFilter.matches("#1", 10, "minecraft:iron_ingot"));
+        no("筛选 #1 不命中 21 号", PickerFilter.matches("#1", 21, "minecraft:iron_ingot"));
+        yes("筛选 #007 也算 7 号", PickerFilter.matches("#007", 7, "minecraft:iron_ingot"));
+
+        // 多词 = 与（需求原文的例子：#1 iron_ingot）
+        yes("筛选 #1+名称 都中", PickerFilter.matches("#1 iron_ingot", 1, "minecraft:iron_ingot", "iron_ingot"));
+        no("筛选 #1+名称 序号不对", PickerFilter.matches("#1 iron_ingot", 2, "minecraft:iron_ingot"));
+        no("筛选 #1+名称 名称不对", PickerFilter.matches("#1 iron_ingot", 1, "minecraft:gold_ingot"));
+
+        // 裸 # 没有数字 → 退回普通子串（当用户就想搜带 # 的文本）
+        yes("筛选 裸 # 退回子串", PickerFilter.matches("#", 12, "minecraft:iron_ingot"));
+        // 空行（(empty)）也按显示文字参与匹配
+        yes("筛选 空格名也能筛（空）", PickerFilter.matches("空", 4, "minecraft:air", "（空）"));
+        no("筛选 有内容的行不带 （空）", PickerFilter.matches("空", 4, "minecraft:iron_ingot", "iron_ingot"));
     }
 
     private static void eq(String what, Object expect, Object actual) {

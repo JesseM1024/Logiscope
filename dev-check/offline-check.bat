@@ -22,7 +22,7 @@ echo === [1/4] javac TestChart ===
 javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\TestChart.java
 if errorlevel 1 goto fail
 
-echo === [2/4] TestChart (expect 461 assertions, 0 failures) ===
+echo === [2/4] TestChart (expect 478 assertions, 0 failures) ===
 java -Dfile.encoding=UTF-8 -cp "build\dev-check;%CP%" TestChart
 if errorlevel 1 goto fail
 

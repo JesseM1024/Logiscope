@@ -158,5 +158,17 @@ public final class ContainerAccess {
             int i = itemId.indexOf(':');
             return i < 0 ? itemId : itemId.substring(i + 1);
         }
+
+        /**
+         * 列表上真正画出来的那个名字。
+         *
+         * 目前就等于 {@link #shortName()}（物品 id 的短名）。加这一层是为了让
+         * **筛选框、渲染、AE 解码**共用同一个"显示名"口径：等 AE 的非物品键
+         * （流体 / 化学品）接进来时，它们显示的是游戏内的真名而不是
+         * {@code wrapped_generic_stack}，那时只要改这里。
+         */
+        public String displayName() {
+            return shortName();
+        }
     }
 }
