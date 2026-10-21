@@ -2,6 +2,9 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeMod;
 import com.jessetech.logiscope.analysis.AeKeyText;
+import net.minecraft.nbt.CompoundTag;
+import net.minecraft.nbt.TagParser;
+import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
 
 import java.lang.reflect.Method;
@@ -13,12 +16,14 @@ import java.lang.reflect.Method;
  * 那个类负责"这台设备在哪个网络、网络活不活、从哪拿 KeyCounter"；
  * 这个类只管**键本身**（编码 / 解码 / 显示名 / 终端显示格的存量）。
  *
- * 【为什么全反射、连 MC 的类也不 import】
- *   · AE2 不是编译期依赖（本项目的纪律：零第三方 jar），只能反射；
- *   · 连 {@code ItemStack} / {@code CompoundTag} 也走反射，是为了让这个类在
- *     **没有游戏类路径的离线程序**里也能被加载（{@code dev-check/BenchRender}
- *     只带 {@code build/classes/java/main}）。字符串那一半逻辑在
- *     {@code analysis/AeKeyText}（更纯，离线断言覆盖）。
+ * 【反射的边界：只反射 AE，不反射 MC】（2026-10-21 定 —— 1.20.1 线实机踩坑后统一）
+ *   · AE2 不是编译期依赖，它的类只能反射；
+ *   · **原版（MC）的方法一律直接调**。按名字反射在原版方法上不可靠：
+ *     1.20.1 的生产运行时是 SRG 命名（`TagParser#parseTag` 叫 `m_129359_`），
+ *     dev 跑得起来、装进实例整条链就断。直接调则编译器 / 重混淆器写正确的生产名
+ *     （1.21.1 生产用 Mojang 名，所以这条线上两种写法等价 —— 但统一成直接调，
+ *     免得下一版线搬代码时又栽一次）。
+ *   · 纯文本那一半在 {@code analysis/AeKeyText}（无任何游戏依赖，离线断言覆盖）。
  *
  * 【失败策略】AE2 不在 → 全部返回 null/false（上层自然退化成"不是 AE 格子"）；
  * 单次反射异常 → 记一次日志后按"读不到"处理，绝不猜一个值出来。
@@ -33,8 +38,6 @@ public final class AeKeys {
     @Nullable
     private static Method fromTagGeneric;
     @Nullable
-    private static Method parseTag;
-    @Nullable
     private static Method isWrapped;
     @Nullable
     private static Method unwrapItemStack;
@@ -42,8 +45,6 @@ public final class AeKeys {
     private static Method genericWhat;
     @Nullable
     private static Method keyDisplayName;
-    @Nullable
-    private static Method componentGetString;
 
     /** 终端显示格的类（{@code appeng.client.gui.me.common.RepoSlot}），按名字沿父类链找 */
     @Nullable
@@ -96,7 +97,7 @@ public final class AeKeys {
             return null;
         }
         try {
-            Object tag = parseTag.invoke(null, id.substring(AeKeyText.PREFIX.length()));
+            CompoundTag tag = TagParser.parseTag(id.substring(AeKeyText.PREFIX.length()));
             if (tag == null) {
                 return null;
             }
@@ -185,7 +186,7 @@ public final class AeKeys {
         }
         try {
             Object component = keyDisplayName.invoke(aeKey);
-            return component == null ? null : (String) componentGetString.invoke(component);
+            return component instanceof Component c ? c.getString() : null;
         } catch (Throwable t) {
             return null;
         }
@@ -273,14 +274,11 @@ public final class AeKeys {
             Class<?> compound = Class.forName("net.minecraft.nbt.CompoundTag");
             Class<?> itemStack = Class.forName("net.minecraft.world.item.ItemStack");
             Class<?> generic = Class.forName("appeng.api.stacks.GenericStack");
-            Class<?> component = Class.forName("net.minecraft.network.chat.Component");
-            Class<?> tagParser = Class.forName("net.minecraft.nbt.TagParser");
 
             toTagGeneric = aeKey.getMethod("toTagGeneric", provider);
             fromTagGeneric = aeKey.getMethod("fromTagGeneric", provider, compound);
             keyDisplayName = aeKey.getMethod("getDisplayName");
-            componentGetString = component.getMethod("getString");
-            parseTag = tagParser.getMethod("parseTag", String.class);
+            // TagParser / Component 是原版类，直接调（见类注释）—— 不在这里反射
 
             isWrapped = generic.getMethod("isWrapped", itemStack);
             unwrapItemStack = generic.getMethod("unwrapItemStack", itemStack);

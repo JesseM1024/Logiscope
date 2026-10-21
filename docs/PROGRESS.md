@@ -273,6 +273,21 @@ VERIFY / GOALS / README）。
 离线：TestChart 489 条（本轮的开关是纯 UI 状态，没有可离线断言的逻辑）；lang 中英各 184。
 实机见 `VERIFY.md` G10–G13。
 
+## 第十九轮④：反射边界统一（只反射 AE，不反射 MC，2026-10-21）
+
+**由来**：1.20.1 线实机报"流体全显示成 `wrapped_generic_stack`、点一行选中全部"。
+根因是那边的 `AeKeys.init()` 里反射了原版方法 `TagParser#parseTag`（SRG 下叫 `m_129359_`）⇒
+整条链 `NoSuchMethodException`。1.21.1 生产用 Mojang 名，所以这条线一直是对的 —— 但**写法本身是脆的**。
+
+**改动**（只动 `bind/AeKeys`）：`TagParser.parseTag(...)` 与 `Component#getString()` 从反射
+改为**直接调**（import 原版类）；`init()` 只保留 AE 自己的方法（`toTagGeneric` /
+`fromTagGeneric` / `getDisplayName` / `isWrapped` / `unwrapItemStack` / `what` /
+`getStoredAmount` / `getEntry`）。行为完全一致（1.21.1 产物调用点仍是 `TagParser.parseTag`），
+只是不再依赖"运行时方法名恰好没变"。
+
+**规则**（写进 ARCHITECTURE C27-10）：判据是这个类**是谁的** —— AE 的反射，原版的直接调。
+`dev-check/ProbeAeApi` 同步只列 AE 的签名；`VerifyError`（离线夹具缺 Forge 运行时补丁）记 SKIP 不算失败。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |
