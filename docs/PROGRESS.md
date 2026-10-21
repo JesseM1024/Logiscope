@@ -95,6 +95,49 @@
 
 ---
 
+## [1.12.2] 线：现状与移植记录
+
+**现状（2026-10-21）**：**工具链跑通、骨架能出包、纯逻辑层全过门禁**；MC 相关模块尚未搬。
+分支 `1.12.2-forge` 从 `1.16.5-forge@846818d` 分出，版本 `0.1.0-1.12.2`，
+产物 `build/libs/logiscope-0.1.0-1.12.2.jar`。
+**本线明确不做 AE 兼容**（用户要求），AE 的类与断言留在 1.16.5 线。
+API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PORT-1.12.2.md) —— 动手前必读。
+
+### [1.12.2] 轮次 1：工具链与骨架（2026-10-21）
+
+**为什么这一轮值得单独记**：三条候选工具链有两条是死的，选型本身花了实测才坐实。
+
+| 候选 | 结果 |
+|---|---|
+| ModDevGradle | ❌ 官方 legacy 插件只覆盖 Forge 1.17–1.20.1 |
+| RetroFuturaGradle | ❌ 仓库不可达：`maven.gtnewhorizons.com` → HTTP **525**（直连 + 代理都试），`repo.gtnewhorizons.net` → **000**；Central / 阿里云 / Plugin Portal 全 404 |
+| **ForgeGradle 3 + Gradle 4.9** | ✅ 采用（= 官方 1.12.2 MDK 的组合；`maven.minecraftforge.net` 上 `ForgeGradle:3.+` 与 `forge-...-mdk.zip` 都可拉） |
+
+| 件 | 内容 |
+|---|---|
+| `build.gradle` | FG3 重写；Gradle 4.x 老语法（`task` / `def`，没有 `tasks.register`）；**显式 UTF-8**（源码 + `processResources`）；`jar.finalizedBy('reobfJar')` |
+| `gradle.properties` | `org.gradle.java.home` 锁 **jdk-1.8**（Gradle 4.x 不支持 11+，本机默认是 25）；`mod_version=0.1.0-1.12.2` |
+| wrapper | 换成 **Gradle 4.9**（jar 取自官方 MDK，老 wrapper 与 4.9 配套）；发行版走腾讯云镜像 |
+| 元数据 | 新增 `mcmod.info`（`${version}`/`${mcversion}` 由 `processResources` 展开）；`pack.mcmeta` 的 `pack_format` 15 → **3** |
+| 骨架 | `LogiScopeMod` 重写为 1.12.2 形态（`@Mod(clientSideOnly=true)` + `@Mod.EventHandler` + log4j2） |
+| 纯逻辑层 | `analysis/*`、`store/*`、`archive/ArchiveData`、`archive/ArchiveFormat` 原样搬入（零 MC import） |
+| 门禁 | `offline-check.bat` 改成 4 步：TestChart **476** 条 + BenchRender + `check-version.py`（`@Mod` 的版本是手写常量，必须与 `gradle.properties` 一致）；Gson 由 `copyGateDeps` 落到 `build/gatedeps/` |
+| 断言拆分 | `DataProbe` 那 4 条 → `dev-check/TestNbt.java`；AE 目标 13 条（t38）→ `dev-check/TestAe.java`。两者都**不在本线门禁**，断言原文与期望值一字未改 |
+| 未搬 | `bind/*`、`collect/*`、`ui/*`、`LogiScopeConfig`、`archive/Archives`（用 `git show 1.16.5-forge:<路径>` 取回） |
+
+**三个架构级断层**（详见 PORT §2.2）：
+1. **没有 GUI 图层栈**（`ForgeHooksClient` 里没有 `pushGuiLayer`，实测）⇒ 面板不能"压"在原容器界面上。
+   正解：自己改 `mc.currentScreen` 字段（不调 `displayGuiScreen`，否则会关掉容器），
+   渲染时先 `background.drawScreen(...)` 再画面板。
+2. **没有按键事件**：`GuiScreenEvent` 只有 7 个成员，`KeyboardInputEvent` **连按键号都不带**
+   （`javap` 实测只有 `(GuiScreen)` 构造器）⇒ 快捷键改成 `TickEvent` 里轮询 `Keyboard.isKeyDown` + 边沿检测。
+3. **没有 charTyped 事件** ⇒ `TextInputGuard` 第 3 层（Pre/Post 计数）做不了；
+   好在默认键位 F9 是功能键，本来就不该被文本框挡。
+
+**未完成**：实机验证（本机没有 1.12.2 实例）。
+
+---
+
 ## [1.20.1] 线：现状与移植记录
 
 **现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，

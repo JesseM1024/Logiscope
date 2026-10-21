@@ -1,0 +1,16 @@
+[
+{
+  "modid": "logiscope",
+  "name": "LogiScope",
+  "description": "A client-side logistics probing oscilloscope. Press the hotkey inside any modded device's container GUI to bring up the oscilloscope, hook a container slot or an NBT value up to the probe, and log how the item type and count inside it change tick by tick.",
+  "version": "${version}",
+  "mcversion": "${mcversion}",
+  "url": "",
+  "updateUrl": "",
+  "authorList": ["JesseTech"],
+  "credits": "",
+  "logoFile": "",
+  "screenshots": [],
+  "dependencies": []
+}
+]

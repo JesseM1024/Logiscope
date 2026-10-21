@@ -45,14 +45,9 @@ import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.archive.ArchiveData;
 import com.jessetech.logiscope.archive.ArchiveFormat;
-import com.jessetech.logiscope.bind.DataTarget;
-import com.jessetech.logiscope.collect.DataProbe;
 import com.jessetech.logiscope.store.MarkerList;
 import com.jessetech.logiscope.store.Sample;
 import com.jessetech.logiscope.store.SampleStore;
-import net.minecraft.nbt.IntNBT;
-import net.minecraft.nbt.ListNBT;
-import net.minecraft.nbt.StringNBT;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -101,7 +96,6 @@ public class TestChart {
         }
         t36NumberGuards();
         t37Val();
-        t38AeTargets();
         t39RiseFallEvents();
         t40ForcedNumeric();
         t41PickerFilter();
@@ -624,48 +618,6 @@ public class TestChart {
     }
 
     // 22) 缓冲容量热切换（配置改了不重启）
-    // 38) AE 网络目标（第十六轮⑧）：valuePath 是标记不是路径，去重按物品 id
-    private static void t38AeTargets() {
-        DataTarget ae = DataTarget.aeNetwork("minecraft:stone", "terminal", null, null);
-        eq("AE 判定", true, ae.isAeNetwork());
-        eq("AE 值路径是标记", "ae:network", ae.valuePath());
-        eq("AE 不是槽位锚点", false, ae.isSlotAnchor());
-        eq("AE 显示", "ae:network[minecraft:stone]", ae.displayValue());
-        eq("AE fallbackName = 物品 id", "minecraft:stone", ae.fallbackName());
-
-        // 去重：身份 = 物品 registry id（valuePath 全是 ae:network，绝不能拿它去重）
-        List<DataTarget> list = new ArrayList<>();
-        list.add(DataTarget.aeNetwork("minecraft:stone", "t", null, null));
-        eq("AE 同物品重复", true, DataTarget.isDuplicate(list,
-                DataTarget.aeNetwork("minecraft:stone", "t", null, null)));
-        eq("AE 异物品不重复", false, DataTarget.isDuplicate(list,
-                DataTarget.aeNetwork("minecraft:iron_ingot", "t", null, null)));
-
-        // 与另外两类目标互不干扰
-        eq("AE 与锚点不互判", false, DataTarget.isDuplicate(list,
-                DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 0, null)));
-        // 用户手输 "ae:network" 当普通路径（罕见）：不与 AE 目标互判重复，
-        // 但它会被读值分流当成 AE 目标 —— 已写进文档的保留路径
-        DataTarget manual = new DataTarget("ae:network", null, "x", "t", null, null);
-        eq("手输 ae:network 路径与 AE 目标不互判", false, DataTarget.isDuplicate(list, manual));
-
-        // 普通路径仍按 valuePath 去重（回归）
-        List<DataTarget> plain = new ArrayList<>();
-        plain.add(new DataTarget("energy", null, "e", "t", null, null));
-        eq("普通路径按 valuePath 去重", true, DataTarget.isDuplicate(plain,
-                new DataTarget("energy", null, "e", "t", null, null)));
-        eq("普通路径不同值不重复", false, DataTarget.isDuplicate(plain,
-                new DataTarget("energy2", null, "e", "t", null, null)));
-
-        // 与锚点去重（回归：同 slot 重复）
-        List<DataTarget> anchors = new ArrayList<>();
-        anchors.add(DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 0, null));
-        eq("锚点同 slot 重复", true, DataTarget.isDuplicate(anchors,
-                DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 0, null)));
-        eq("锚点异 slot 不重复", false, DataTarget.isDuplicate(anchors,
-                DataTarget.slotAnchor("items", "minecraft:stone", "t", null, null, 1, null)));
-    }
-
     // 39) 上升/下降事件（第十七轮①）："变更区间"的单向过滤版
     //     —— 只收增/减方向的事件；周期相应变成"相邻两次同向事件"的间隔
     private static void t39RiseFallEvents() {
@@ -765,8 +717,8 @@ public class TestChart {
      *
      * 需求：有些模组把数值存成**字符串** NBT；右键标记后读取时尝试解析，
      * 不可转换（任意文本 / NaN / 超 long 的纯整数）→ null（上层记 no-data）。
-     * 这里钉的是 {@link Val#parseNumericText}（纯逻辑）与 {@link DataProbe#asValForced}
-     * （标签层分发；离线 classpath 里本来就有 merged jar，可以用游戏类）。
+     * 这里钉的是 {@link Val#parseNumericText}（纯逻辑，零游戏依赖）。
+     * 标签层那一半（DataProbe#asValForced）在 dev-check/TestNbt.java。
      */
     private static void t40ForcedNumeric() {
         // —— 文本解析：整数必须精确（走 long） ——
@@ -794,12 +746,8 @@ public class TestChart {
         eq("'NaN' → null", null, Val.parseNumericText("NaN"));
         eq("'Infinity' → null", null, Val.parseNumericText("Infinity"));
 
-        // —— 标签层：强制模式 = 数值标签原样 + 字符串尝试解析；其余类型读不到 ——
-        eq("StringNBT(\"64\") 强制转换", 64L,
-                DataProbe.asValForced(StringNBT.valueOf("64")).longValue());
-        eq("StringNBT(\"abc\") → null", null, DataProbe.asValForced(StringNBT.valueOf("abc")));
-        eq("IntNBT 照常（本来就是数值）", 7L, DataProbe.asValForced(IntNBT.valueOf(7)).longValue());
-        eq("ListNBT → null（类型不可转换）", null, DataProbe.asValForced(new ListNBT()));
+        // 标签层那 4 条（DataProbe#asValForced）依赖 MC 的 NBT 类，1.12.2 线还没搬
+        // DataProbe —— 它们搬到了 dev-check/TestNbt.java，等这个类移植后并入主门禁。
     }
 
     private static void t22StoreResize() {

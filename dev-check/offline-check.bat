@@ -1,46 +1,44 @@
 @echo off
 rem ============================================================
-rem  LogiScope - offline checks (1.16.5 branch)
+rem  LogiScope - offline checks (1.12.2 branch)
 rem
-rem  Why a .bat instead of the one-liners in docs/VERIFY.md:
-rem  passing a multi-entry -cp (semicolon list) from Git Bash to
-rem  cmd gets mangled, javac then reports "package does not exist"
-rem  even though the classes are there. This file keeps the
-rem  classpath inside a native cmd context.
+rem  Difference from the other three lines: the pure-logic layer
+rem  (analysis / store / archive data) has ZERO Minecraft imports,
+rem  so TestChart and BenchRender compile and run against
+rem  build\classes\java\main alone - no mapped MC jar needed.
+rem  That keeps this gate fast and immune to mapping changes.
+rem
+rem  There is no copyMinecraftDeps task on this line (ForgeGradle 3
+rem  has no such hook), and the MC-facing modules are not ported yet.
 rem
 rem  Run:  cmd //c dev-check\offline-check.bat
-rem  Requires: build\classes\java\main already produced
-rem            (gradlew.bat build --offline, which also runs
-rem             copyMinecraftDeps -> build\mcdeps\*.jar)
-rem  ASCII only on purpose: Chinese text in .bat files can break
-rem  the console codepage.
+rem  Requires: build\classes\java\main (gradlew.bat build)
+rem  ASCII only on purpose (console codepage).
 rem ============================================================
 setlocal
 cd /d "%~dp0.."
-set CP=build\classes\java\main;dev-check\lib\*;build\mcdeps\*
+rem build\gatedeps holds gson.jar (ArchiveFormat parses JSON at runtime);
+rem it is produced by the copyGateDeps task, see build.gradle.
+set CP=build\classes\java\main;build\gatedeps\*
 
-echo === [1/5] javac TestChart ===
+echo === [1/4] javac TestChart ===
 javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\TestChart.java
 if errorlevel 1 goto fail
 
-echo === [2/5] TestChart (expect 493 assertions, 0 failures) ===
+echo === [2/4] TestChart (expect 476 assertions, 0 failures) ===
 java -Dfile.encoding=UTF-8 -cp "build\dev-check;%CP%" TestChart
 if errorlevel 1 goto fail
 
-echo === [3/5] javac + BenchRender ===
-javac -encoding UTF-8 -cp build\classes\java\main -d build\dev-check dev-check\BenchRender.java
+echo === [3/4] javac + BenchRender ===
+javac -encoding UTF-8 -cp "%CP%" -d build\dev-check dev-check\BenchRender.java
 if errorlevel 1 goto fail
-java -Dfile.encoding=UTF-8 -cp "build\dev-check;build\classes\java\main" BenchRender
-if errorlevel 1 goto fail
-
-echo === [4/5] verify-jar ===
-python verify-jar.py build\libs\logiscope-0.1.3-1.16.5.jar
+java -Dfile.encoding=UTF-8 -cp "build\dev-check;%CP%" BenchRender
 if errorlevel 1 goto fail
 
-rem Catches "compiles fine, dies in-game" deps (e.g. org/slf4j on 1.16.5:
-rem present in the dev classpath, absent from the production one).
-echo === [5/5] runtime reference check ===
-python dev-check\check-runtime-refs.py build\libs\logiscope-0.1.3-1.16.5.jar build\mcdeps
+rem The @Mod annotation cannot expand placeholders, so the version is
+rem hard-coded in LogiScopeMod.VERSION and must match gradle.properties.
+echo === [4/4] version consistency (gradle.properties vs LogiScopeMod.VERSION) ===
+python dev-check\check-version.py
 if errorlevel 1 goto fail
 
 echo ALL_OK

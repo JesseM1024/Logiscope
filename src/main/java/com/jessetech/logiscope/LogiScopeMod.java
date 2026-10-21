@@ -1,145 +1,73 @@
 package com.jessetech.logiscope;
 
-import com.jessetech.logiscope.bind.ContainerAnchor;
-import com.jessetech.logiscope.bind.DataCommand;
-import com.jessetech.logiscope.bind.KeyBindings;
-import com.jessetech.logiscope.bind.TextInputGuard;
-import com.jessetech.logiscope.collect.ProbeManager;
-import com.jessetech.logiscope.collect.ProbeSlots;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.client.event.ClientChatReceivedEvent;
-import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
-import net.minecraftforge.client.event.GuiScreenEvent;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.event.entity.player.PlayerInteractEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.ModLoadingContext;
 import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import net.minecraftforge.fml.loading.FMLEnvironment;
+import net.minecraftforge.fml.common.event.FMLInitializationEvent;
+import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 /**
- * LogiScope —— 纯客户端物流探测示波器。
+ * LogiScope —— 纯客户端物流探测示波器（MC 1.12.2 线）。
  *
- * 【客户端专用】Forge 1.20.1 的 @Mod 无 dist 参数（20.2+ 才引入），改为构造时检查
- * {@code FMLEnvironment.dist}：非客户端环境仅记一条日志后返回、不注册任何监听 ——
- * 服务端无需安装本模组，也不会因缺少客户端类而崩溃。
+ * <h2>这一代与另外三条线的差别（都写在 docs/PORT-1.12.2.md，动手前先读）</h2>
+ * <ul>
+ *   <li><b>没有 mods.toml</b>：元数据是 {@code src/main/resources/mcmod.info}，
+ *       模组声明靠 {@link Mod} 注解本身。</li>
+ *   <li><b>客户端专用靠注解</b>：{@code clientSideOnly = true}（1.13+ 才改成
+ *       运行时判 {@code FMLEnvironment.dist}）。专用的服务端会直接跳过本模组。</li>
+ *   <li><b>只有游戏总线</b>：这一代没有 {@code IEventBus} / 模组总线，
+ *       所有监听一律 {@code MinecraftForge.EVENT_BUS.addListener(...)} /
+ *       {@code @SubscribeEvent} 静态方法。</li>
+ *   <li><b>生命周期是事件方法</b>：{@code @Mod.EventHandler} 的
+ *       {@code preInit} / {@code init} / {@code postInit}，不是构造器。</li>
+ *   <li><b>没有 GUI 图层栈</b>（{@code pushGuiLayer} 是 1.13+ 才有的）——
+ *       面板只能自己当一层 {@code GuiScreen} 打开，见 CP8 的 1.12.2 妥协方案。</li>
+ * </ul>
  *
- * 事件总线分工：
- *   - modBus（模组总线）：只在初始化阶段触发的事件，如注册快捷键
- *   - MinecraftForge.EVENT_BUS（游戏总线）：运行期反复触发的事件，如按键、客户端 tick
+ * <h2>当前状态：骨架</h2>
+ * 本类目前只做"能被 FML 加载 + 打一行日志"。其余模块按 docs/PORT-1.12.2.md 的
+ * 顺序逐轮搬过来（纯逻辑层已在 {@code analysis} / {@code store} / {@code archive}）。
+ * <p>
+ * 待搬清单（对应 1.16.5 线的同名文件，可 {@code git show 1.16.5-forge:<路径>} 取回）：
+ * {@code LogiScopeConfig}（→ {@code Configuration} + {@code @Config}）、
+ * {@code bind/*}、{@code collect/*}、{@code ui/*}。
  */
-@Mod(LogiScopeMod.MODID)
+@Mod(
+        modid = LogiScopeMod.MODID,
+        name = LogiScopeMod.NAME,
+        version = LogiScopeMod.VERSION,
+        clientSideOnly = true,
+        acceptedMinecraftVersions = "[1.12.2]",
+        acceptableRemoteVersions = "*"
+)
 public final class LogiScopeMod {
 
     public static final String MODID = "logiscope";
+    public static final String NAME = "LogiScope";
+
     /**
-     * ★ 1.16.5 只能用 log4j2，**不能**用 slf4j。
-     *
-     * 实测崩溃：`NoClassDefFoundError: org/slf4j/LoggerFactory`（`<clinit>` 就炸，
-     * mod 在加载阶段被判 "has class loading errors"）。
-     * 原因：1.16.5 的运行时 classpath 里只有 `log4j-slf4j18-impl`（绑定层），
-     * **没有 slf4j-api**；而编译期它从别处漏进来了，于是"编得过、跑不了"。
-     * 1.18.2 / 1.20.1 线有 slf4j-api，所以同一个 import 在那两条线是好的。
-     *
-     * 1.16.5 的 MC / Forge 自己都用 log4j2（`Minecraft.LOGGER = LogManager.getLogger()`），
-     * 换成它即可；方法签名兼容（`warn(String, Object...)` / `debug(String, Throwable)` 都有）。
+     * 版本号。这一代没有 {@code mods.toml} 的占位符展开，注解要求**编译期常量**，
+     * 所以只能手写一份 —— 改 {@code gradle.properties} 的 {@code mod_version} 时
+     * 必须同步这里（offline-check 会核对两者一致）。
+     */
+    public static final String VERSION = "0.1.0-1.12.2";
+
+    /**
+     * 1.12.2 的运行时 classpath 里 log4j2 是标配（MC 自己也用它），
+     * 与 1.16.5 线同一个选择；**不要**引入 slf4j（那一条在 1.16.5 踩过
+     * {@code NoClassDefFoundError: org/slf4j/LoggerFactory}）。
      */
     public static final Logger LOGGER = LogManager.getLogger("LogiScope");
 
-    /**
-     * 全局唯一的探针管理器。所有层都通过它拿数据。
-     *
-     * 早期这里是"唯一的 Sampler"（只能有一个探头）。现在管理器里面持有
-     * **多个** {@code ProbeInstance}（正在运行的探针是一个列表），并且是每客户端 tick
-     * 驱动它们采样的唯一入口。
-     */
-    private static final ProbeManager PROBES = new ProbeManager();
-
-    public LogiScopeMod() {
-        IEventBus modBus = FMLJavaModLoadingContext.get().getModEventBus();
-
-        // 非客户端环境：跳过全部客户端注册（1.20.1 的 @Mod 无 dist 参数）
-        if (FMLEnvironment.dist != Dist.CLIENT) {
-            LOGGER.info("[LogiScope] not a client dist, skipping all client registrations");
-            return;
-        }
-
-        // 注册快捷键（必须在模组总线上）
-        KeyBindings.register(modBus);
-
-        // 资源上限配置（客户端类型），落在 config/logiscope-client.toml。
-        // 1.20.1 无自动配置界面（ConfigurationScreen 为 20.4+ 引入），亦不注册
-        // ConfigScreenHandler 扩展点：配置仅经 TOML 文件修改（已知限制，
-        // 见 docs/PORT-1.20.1.md）。
-        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, LogiScopeConfig.SPEC);
-
-        // 打开/收起示波器面板。GUI 打开时 vanilla 的 KeyBinding 不走全局输入，
-        // 必须拦 Screen 的按键事件，见 KeyBindings#onScreenKeyPressed
-        //
-        // 注意这里用了显式类型实参 <GuiScreenEvent.KeyboardKeyPressedEvent.Pre>：
-        // EventBus#addListener 有多个重载，直接传方法引用会让 javac 推断失败
-        // （报 "不兼容的类型: Event无法转换为Pre"）。写明类型即可。
-        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardKeyPressedEvent.Pre>addListener(KeyBindings::onScreenKeyPressed);
-
-        // 容器界面刚打开时，把"玩家右键的方块"记成持久锚点（维度 + 坐标）
-        MinecraftForge.EVENT_BUS.<GuiScreenEvent.InitGuiEvent.Post>addListener(KeyBindings::onScreenInit);
-
-        // 「玩家是不是正在打字」的最后一道通用守卫：
-        // 靠 CharacterTyped 的 Pre/Post 计数差判断上一个字符有没有被界面吃掉。
-        // 原理见 TextInputGuard 的类注释（含对 KeyboardHandler#charTyped 的核实结论）。
-        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardCharTypedEvent.Pre>addListener(TextInputGuard::onCharTypedPre);
-        MinecraftForge.EVENT_BUS.<GuiScreenEvent.KeyboardCharTypedEvent.Post>addListener(TextInputGuard::onCharTypedPost);
-
-        // 记录最近一次右键的方块。单人下集成服务端也会收到同一个事件，
-        // ContainerAnchor 内部用 isClientSide 过滤掉了。
-        MinecraftForge.EVENT_BUS.<PlayerInteractEvent.RightClickBlock>addListener(ContainerAnchor::onRightClickBlock);
-
-        // 每客户端 tick：锚点计时 + 全局时钟推进 + 所有探针实例跑状态机
-        // （单人下的**采样**不在这里，而在下面的服务端 tick —— 见 ProbeManager 类注释）
-        MinecraftForge.EVENT_BUS.<TickEvent.ClientTickEvent>addListener(ProbeManager::onClientTick);
-
-        // 每**服务端** tick：单人下"一个世界 tick 一条真值"的采样点。
-        // 集成服务端与客户端同进程（纯客户端模组在专用服务器上不会被加载），
-        // 事件在 tickChildren 之后发 —— 读到的就是这一 tick 结束时的状态。
-        MinecraftForge.EVENT_BUS.<TickEvent.ServerTickEvent>addListener(ProbeManager::onServerTick);
-
-        // 「Probe data」：抓 `data get block` 的系统回执（只认我们刚发出去的那一条），
-        // 并顺手吞掉它 —— 界面已经显示了，不必再刷聊天框
-        MinecraftForge.EVENT_BUS.<ClientChatReceivedEvent>addListener(DataCommand::onChatReceived);
-
-        // 命令回执的超时计时（1 秒没回就当失败，不然状态永远卡在"等待"）
-        MinecraftForge.EVENT_BUS.<TickEvent.ClientTickEvent>addListener(e -> DataCommand.tick());
-
-        // 进世界 = 清空全部探针 探针绑定"这个世界里的这台设备"，
-        // 跨世界留着只会变成"坐标同名但设备不是同一台"的僵尸（实测 A 存档的
-        // 探针出现在 B 存档）。顺手把 NBT 显示的残留文本也清掉。
-        //
-        // 还有两处"看着没事、其实只在同一个世界里成立"的静态缓存 ：
-        //   · ContainerAnchor.active/activeContainerId —— 容器 id 只在 0~99 循环，
-        //     新世界的第一个容器撞上同一个 id 时它会**直接复用旧世界的锚点**
-        //     （于是"当前开着的容器"被判成别的世界的方块）；
-        //   · ProbeSlots 的 queriedPos/dim —— 新世界坐标相同时会复用旧世界的槽位清单。
-        //   两个 reset 方法早就写好了，只是一直没人调。
-        MinecraftForge.EVENT_BUS.<ClientPlayerNetworkEvent.LoggedInEvent>addListener(e -> {
-            LogiScopeMod.probes().clearAll();
-            DataCommand.reset();
-            ContainerAnchor.clearActive();
-            ProbeSlots.reset();
-        });
-
-        // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyBinding 的路径，
-        // 这样关掉容器界面之后还能按快捷键把面板叫出来
-        MinecraftForge.EVENT_BUS.<TickEvent.ClientTickEvent>addListener(KeyBindings::onClientTick);
-
-        LOGGER.info("[LogiScope] client-only mod constructed");
+    @Mod.EventHandler
+    public void preInit(FMLPreInitializationEvent event) {
+        LOGGER.info("[LogiScope] {} {} preInit (MC 1.12.2 / Forge 14.23.5.2859)", NAME, VERSION);
     }
 
-    public static ProbeManager probes() {
-        return PROBES;
+    @Mod.EventHandler
+    public void init(FMLInitializationEvent event) {
+        // 这里将来要接：快捷键注册（ClientRegistry.registerKeyBinding）、
+        // 游戏总线上的 GuiScreenEvent / TickEvent / ClientChatReceivedEvent 监听。
+        LOGGER.info("[LogiScope] init done (skeleton — 功能模块尚未搬完，见 docs/PORT-1.12.2.md)");
     }
 }

@@ -44,31 +44,34 @@ gradlew.bat genIntellijRuns
 > dev 版了。**判据：可用包 ≈ 245 KB、jar 内 84 处 `func_*`；dev 包 ≈ 242 KB、只有源码手写的
 > `func_217292_a` 一处。**
 >
-> 安装步骤：删掉实例 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.3-1.16.5.jar` 过去。
+> 安装步骤：删掉实例 `mods/` 里的同名旧 jar → 拷 `build\libs\logiscope-0.1.0-1.12.2.jar` 过去。
 > 纯客户端模组，服务端不装也不会报错。
 
 > ⚠️ **Windows 上请用 `gradlew.bat`，不要用 Git Bash 的 `./gradlew`**
 > （cygpath 路径不匹配，会报 `ClassNotFoundException: GradleWrapperMain`）。
 > Git Bash 下的替代写法见下方「构建备忘」。
 
-**环境要求**（本分支 = 1.16.5 线）
+**环境要求**（本分支 = 1.12.2 线）
 
 | 项 | 值 |
 |---|---|
-| JDK | 17 跑 Gradle 守护进程；**编译目标是 Java 8**（`java.toolchain` 锁定，见下） |
-| Gradle | 7.6.4（wrapper 自带，ForgeGradle 5.1 不支持 Gradle 8+） |
-| Minecraft | 1.16.5 |
-| Forge | 1.16.5-36.2.42（构建插件用 **ForgeGradle 5.1**，MDG 不支持 1.16.5） |
-| 映射 | MCP snapshot `20210309-1.16.5`（这一代还没有 Mojang official 映射） |
-| 适配区间 | `loaderVersion=[36,)`、`forge=[36,)`、`minecraft=[1.16.5]` —— 36.0.x / 36.1.x 的老整合包也能装，见 [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md) §二 |
-| 模组版本 | `0.1.2-1.16.5-alpha`（本分支） |
+| JDK | **8**（Gradle 4.9 只能在 Java 8 上跑；`gradle.properties` 的 `org.gradle.java.home` 已锁到 `jdk-1.8`） |
+| Gradle | 4.9（wrapper 自带，ForgeGradle 3 只认 Gradle 4.x） |
+| Minecraft | 1.12.2 |
+| Forge | 14.23.5.2859（构建插件用 **ForgeGradle 3**；MDG 不支持 1.12.2，RetroFuturaGradle 的仓库在本机不可达） |
+| 映射 | MCP snapshot `20171003-1.12`（这一代没有 Mojang official 映射） |
+| 适配区间 | `acceptedMinecraftVersions = "[1.12.2]"`（写在 `@Mod` 注解里） |
+| 模组版本 | `0.1.0-1.12.2`（本分支 —— 代码面才起步，见 [`docs/PORT-1.12.2.md`](docs/PORT-1.12.2.md)） |
 
 > **版本分支约定**：`main` = 1.21.1 主线（JDK 21 / 插件 `net.neoforged.moddev`）；
 > `1.20.1-neo` = MC 1.20.1 + NeoForge 47.1.x（JDK 17 / legacy 插件，jar 名 `logiscope-0.1.2-1.20.1-alpha`）；
 > `1.18.2-forge` = MC 1.18.2 + Forge 40.x（JDK 17 / legacy 插件，jar 名 `logiscope-0.1.2-1.18.2-alpha`）；
-> 本分支 `1.16.5-forge` = MC 1.16.5 + Forge 36.x（**JDK 8 语法** / ForgeGradle 5，jar 名 `logiscope-0.1.2-1.16.5-alpha`）。
+> `1.16.5-forge` = MC 1.16.5 + Forge 36.x（JDK 8 语法 / ForgeGradle 5，jar 名 `logiscope-0.1.3-1.16.5`）；
+> 本分支 `1.12.2-forge` = MC 1.12.2 + Forge 14.23.5.2859（**JDK 8** / **Gradle 4.9** / ForgeGradle 3，
+> jar 名 `logiscope-0.1.0-1.12.2`，尚未移植完）。
 > 移植方案与逐项 API 差异记录在 [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md)、
-> [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) 与 [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md)。
+> [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md)、[`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md)
+> 与 [`docs/PORT-1.12.2.md`](docs/PORT-1.12.2.md)。
 > 通用 bugfix 默认进 main，再 cherry-pick 到各版本线。
 >
 > **1.16.5 不需要加载器兼容设计**：这一代还没有 NeoForge（NeoForge 首个版本是 1.20.1），
@@ -94,6 +97,7 @@ gradlew.bat genIntellijRuns
 | [`docs/PORT-1.20.1.md`](docs/PORT-1.20.1.md) | **1.20.1 移植方案**：构建插件差异、必撞 API 清单 | 在 `1.20.1-neo` 分支上动手前 |
 | [`docs/PORT-1.18.2.md`](docs/PORT-1.18.2.md) | **1.18.2 移植方案**：legacy MDG、`Draw` 适配层、17 条 API 差异 | 在 `1.18.2-forge` 分支上动手前 |
 | [`docs/PORT-1.16.5.md`](docs/PORT-1.16.5.md) | **1.16.5 移植方案**：ForgeGradle 5、Java 8 降级清单、`Draw` 重建、API 差异 | 在 `1.16.5-forge` 分支上动手前 |
+| [`docs/PORT-1.12.2.md`](docs/PORT-1.12.2.md) | **1.12.2 移植方案**：ForgeGradle 3 + Gradle 4.9、三个架构级断层（无 GUI 图层栈 / 无按键事件 / 无 charTyped）、分阶段计划 | 在 `1.12.2-forge` 分支上动手前 |
 
 **最短路径**：`ARCHITECTURE.md` → `PROGRESS.md` → 动手；改完 → `VERIFY.md`；提交前 → `BACKUP.md`。
 

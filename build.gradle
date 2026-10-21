@@ -1,134 +1,131 @@
 // ===========================================================================
-//  LogiScope · MC 1.16.5 + Forge 36.2.x
+//  LogiScope · MC 1.12.2 + Forge 14.23.5.2859
 //
-//  为什么不是 MDG：ModDevGradle 的 legacy 插件官方支持范围是 Forge 1.17–1.20.1，
-//  1.16.5 不在内。这一代只能用 ForgeGradle 5（配套 Gradle 7.6，见 wrapper 配置）。
+//  这一代的工具链与另外三条线**完全不同**，别照抄：
+//    · MDG 没有 1.12.2 通道（legacy 插件官方范围 Forge 1.17–1.20.1）；
+//    · RetroFuturaGradle（社区标准）的发布仓库 `maven.gtnewhorizons.com` 在本机
+//      不可达（TLS 525 / DNS 失败），所以用不了它；
+//    · 剩下就是**官方 MDK 那一套**：ForgeGradle 3 + Gradle 4.9 + JDK 8。
+//      `forge-1.12.2-14.23.5.2859-mdk.zip` 里的 build.gradle 原文就是这么写的，
+//      逐行核实记录见 docs/PORT-1.12.2.md §一。
+//
+//  ⚠️ Gradle 4.9 只能在 Java 8 上跑 —— `org.gradle.java.home` 已锁到 jdk-1.8
+//  （见 gradle.properties）。不要改成 17/21：Gradle 4.x 在 9+ 上直接起不来。
+//  ⚠️ 这一代的 Gradle 没有 `tasks.register` / `configureEach` / `java.toolchain`，
+//  也没有 `var`，只能写 4.x 的 `def` + `task xxx` 老语法。
 // ===========================================================================
 buildscript {
     repositories {
-        maven { url = 'https://maven.minecraftforge.net' }
+        maven { url = 'https://maven.minecraftforge.net/' }
         mavenCentral()
     }
     dependencies {
-        classpath group: 'net.minecraftforge.gradle', name: 'ForgeGradle', version: '5.1.+', changing: true
+        classpath 'net.minecraftforge.gradle:ForgeGradle:3.+'
     }
 }
 
 apply plugin: 'net.minecraftforge.gradle'
-apply plugin: 'java-library'
+apply plugin: 'java'
 apply plugin: 'idea'
 
 version = mod_version
 group = mod_group_id
+archivesBaseName = mod_id
 
-base {
-    archivesName = mod_id
-}
+sourceCompatibility = targetCompatibility = compileJava.sourceCompatibility = compileJava.targetCompatibility = '1.8'
 
-// 1.16.5 是 Java 8 世代：这一行同时是"语法上限"，record / switch 箭头 /
-// isBlank / 模式匹配 在编译期就会被拦下来（移植时必须降到 Java 8 子集）。
-java {
-    toolchain {
-        languageVersion = JavaLanguageVersion.of(8)
-    }
-}
-
-sourceSets.main.resources {
-    srcDir('src/generated/resources')
-    exclude('**/*.bbmodel')
-    exclude('src/generated/**/.cache')
-}
-
-repositories {
-    mavenCentral()
-    maven { url = 'https://maven.minecraftforge.net' }
-}
+// 中文 Windows 的默认编码是 GBK，源码 / 语言文件里全是中文 ——
+// 不显式指定就会静默转坏（而且报错完全不提编码）。
+compileJava.options.encoding = 'UTF-8'
 
 minecraft {
-    // 1.16.5 的官方推荐映射（MCP snapshot）。这一代还没有 Mojang official 映射。
-    mappings channel: 'snapshot', version: '20210309-1.16.5'
+    // 1.12.2 没有 Mojang official 映射（official 从 1.14.4 才有），dev 名就是 MCP。
+    mappings channel: 'snapshot', version: '20171003-1.12'
 
-    // 纯客户端模组：只声明 client 运行配置。
     runs {
         client {
-            workingDirectory project.file('1_16_5_forge')
-            property 'forge.logging.markers', 'REGISTRIES'
+            // 与其它三条线的运行目录分开，避免存档 / 日志互相覆盖
+            workingDirectory project.file('1_12_2_forge')
+            property 'forge.logging.markers', 'SCAN,REGISTRIES'
             property 'forge.logging.console.level', 'debug'
-
-            mods {
-                logiscope {
-                    source sourceSets.main
-                }
-            }
+        }
+        server {
+            workingDirectory project.file('1_12_2_forge')
         }
     }
 }
 
+configurations {
+    // 只给 dev-check 用的运行期依赖（不打进 jar）
+    gateDeps
+}
+
 dependencies {
-    minecraft "net.minecraftforge:forge:${forge_version}"
-    // 只用于 @Nullable 注解（CLASS 保留，不进产物）。FG5 不像 MDG 会自动带进来。
+    minecraft 'net.minecraftforge:forge:1.12.2-14.23.5.2859'
+    // 只用于 @Nullable 注解（CLASS 保留，不进产物）
     compileOnly 'org.jetbrains:annotations:23.0.0'
+    // analysis / archive 层用 Gson（MC 1.12.2 自带 2.8.0，运行时由游戏提供）。
+    // 这里显式声明 compileOnly 是为了不靠"从 minecraft 配置里漏进来"这种巧合。
+    compileOnly 'com.google.code.gson:gson:2.8.0'
+    // 离线门禁要**真的把 Gson 放到 classpath 上**（ArchiveFormat 运行时用它解析 JSON）
+    gateDeps 'com.google.code.gson:gson:2.8.0'
 }
 
 // ---------------------------------------------------------------------------
-// 生成模组元数据
+//  离线门禁的 classpath
 //
-// ★ filteringCharset = 'UTF-8' 是必须的 ★
-// ProcessResources 做占位符替换时默认用平台编码，中文 Windows 是 GBK，
-// 会把 UTF-8 模板里的中文转坏，产出非法 UTF-8 → FML 报
-// "File ... is not a valid mod file"（MalformedInputException）。
+//  本线的纯逻辑层（analysis / store / archive data）零 MC import，但 ArchiveFormat
+//  用 Gson 解析 JSON —— 所以要一份**固定路径**的 gson.jar。Forge 的 mapped jar 路径
+//  里带映射版本号（..._mapped_snapshot_20171003-1.12），在 .bat 里硬编码会随映射失效，
+//  所以复制成 build/gatedeps/（与 1.16.5 线的 copyMinecraftDeps 同一思路）。
 // ---------------------------------------------------------------------------
-var generateModMetadata = tasks.register('generateModMetadata', ProcessResources) {
+task copyGateDeps(type: Copy) {
+    from configurations.gateDeps
+    into "$buildDir/gatedeps"
+}
+
+build.dependsOn copyGateDeps
+
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.minecraftforge.net/' }
+}
+
+// ---------------------------------------------------------------------------
+// mcmod.info 的 ${version} 展开
+//
+// ★ filteringCharset = 'UTF-8' 是必须的（与另外三条线的 mods.toml 同一个坑）：
+//   占位符替换默认用平台编码，中文 Windows 是 GBK，会把 UTF-8 的中文描述转坏，
+//   于是 FML 读到非法 UTF-8 → 模组列表里那一行变成乱码。
+// ---------------------------------------------------------------------------
+processResources {
+    inputs.property 'version', project.version
+    inputs.property 'mcversion', project.minecraft_version
     filteringCharset = 'UTF-8'
-
-    var replaceProperties = [
-            minecraft_version      : minecraft_version,
-            minecraft_version_range: minecraft_version_range,
-            forge_version          : forge_version,
-            forge_version_range    : forge_version_range,
-            loader_version_range   : loader_version_range,
-            mod_id                 : mod_id,
-            mod_name               : mod_name,
-            mod_license            : mod_license,
-            mod_version            : mod_version,
-    ]
-    inputs.properties replaceProperties
-    expand replaceProperties
-    from 'src/main/templates'
-    into 'build/generated/sources/modMetadata'
-}
-sourceSets.main.resources.srcDir generateModMetadata
-
-tasks.withType(JavaCompile).configureEach {
-    options.encoding = 'UTF-8'
-}
-
-// ---------------------------------------------------------------------------
-// 离线门禁的 classpath
-//
-// dev-check/offline-check.bat 需要「带映射名的 Minecraft+Forge 类路径」来编译
-// TestChart / BenchRender。FG5 把这份 mapped jar 放在
-// ~/.gradle/caches/forge_gradle/minecraft_user_repo/... 下，路径里带映射版本号，
-// .bat 里硬编码会随 mappings 变动而失效 → 这里复制成固定的 build/merged/。
-// ---------------------------------------------------------------------------
-// 注意：minecraft 配置里不止一个文件（mapped jar / launcher jar / client-extra /
-// accesstransformers / eventbus / coremods），只有 mapped 那个是 joined 的 MC+Forge
-// 类路径；不筛一下会撞 duplicate entry。
-var copyMinecraftDeps = tasks.register('copyMinecraftDeps', Copy) {
-    // includeEmptyDirs = false：mcp_snapshot 的 zip 不是 jar，按扩展名筛掉
-    from(configurations.minecraft) {
-        include '**/*.jar'
+    from(sourceSets.main.resources.srcDirs) {
+        include 'mcmod.info'
+        expand 'version': project.version, 'mcversion': project.minecraft_version
     }
-    into layout.buildDirectory.dir('mcdeps')
+    from(sourceSets.main.resources.srcDirs) {
+        exclude 'mcmod.info'
+    }
 }
 
-tasks.named('build') {
-    dependsOn copyMinecraftDeps
+jar {
+    manifest {
+        attributes([
+                "Specification-Title"     : mod_id,
+                "Specification-Vendor"    : mod_group_id,
+                "Specification-Version"   : "1",
+                "Implementation-Title"    : mod_id,
+                "Implementation-Version"  : "${version}",
+                "Implementation-Vendor"   : mod_group_id,
+                "Implementation-Timestamp": new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
+        ])
+    }
 }
 
-// 让 runClient 的子进程输出直接接到 Gradle 控制台（否则崩溃只剩"退出码非零"）。
-tasks.matching { it.name in ['runClient'] }.configureEach {
-    standardOutput = System.out
-    errorOutput = System.err
-}
-
+// FG3 里 `jar` 只打包（MCP 名），`reobfJar` 才重混淆成生产用的 SRG 名。
+// 1.16.5 线的教训：在 IDE 里点一下 `jar` 会把 build/libs 里可用的包换成 dev 版
+// （同名覆盖），所以把 reobf 挂在 jar 后面，出包一律 `gradlew build`。
+jar.finalizedBy('reobfJar')
