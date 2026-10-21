@@ -55,7 +55,7 @@ public record ProbeTarget(
      * @param itemId             挂上探头那一刻的内容，用于界面显示 + 服务端下标指纹验证
      * @param count              同上
      */
-    public record SlotRef(int menuSlotIndex, int containerSlotIndex, String itemId, int count) {
+    public record SlotRef(int menuSlotIndex, int containerSlotIndex, String itemId, long count) {
 
         public boolean empty() {
             return count <= 0;

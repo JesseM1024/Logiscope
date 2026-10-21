@@ -7,19 +7,47 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **461 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **179** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **185** 键一致。产物 `logiscope-0.1.3-1.18.2-alpha.jar`。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.2 待发布**
   —— 版本号已提至 `0.1.2-1.21.1`，变更见 `main` 的「第十八轮⑥」；0.1.0 同线；发布约定见
   [PROGRESS-HISTORY](PROGRESS-HISTORY.md) 第十七轮①。
 - **实机**：第十六轮④ 及更早的轮次全部通过（里程碑 `g0-skeleton` / `g2-waveform`）；
   **十六轮⑤⑥⑦⑧⑨、十七轮①、十八轮①–⑤ 待复测** —— 清单在 [`VERIFY.md`](VERIFY.md)。
 
-> 以上是 **1.21.1 主线（main）** 的现状。**1.20.1 分支（`1.20.1-neo`）** 的现状与移植记录见
-> 紧随其后的「[1.20.1] 线」一节；两条线的 API 差异与限制统一记在
-> [`PORT-1.20.1.md`](PORT-1.20.1.md)（本文与 ARCHITECTURE 都只描述 1.21.1 主线）。
+> 以上是 **1.21.1 主线（main）** 的现状。本分支 **`1.18.2-forge`**（MC 1.18.2 + Forge 40.3.12）
+> 的现状见紧随其后的「[1.18.2] 线」一节。
+> ⚠️ 再往下那一段「[1.20.1] 线」是**从 `1.20.1-neo` 分支派生时继承下来的历史**（AE2 dev 崩溃、
+> 双加载器审计等），保留作参考，但**不是**本分支的记录。
 
 ---
+
+## [1.18.2] 线：现状与移植记录
+
+**现状（2026-10-21）**：功能已与 main **对齐到第十九轮⑤**（选格页筛选框 / 忽略空槽 /
+AE 非物品键 / 回放页打开存档文件夹）。版本 `0.1.3-1.18.2-alpha`，产物
+`build/libs/logiscope-0.1.3-1.18.2-alpha.jar`；离线 489 条断言 / lang 185 键全过。
+**实机待验**（清单见本分支 [`VERIFY.md`](VERIFY.md) G / H / I 组）。
+
+### [1.18.2] 轮次 1：同步 main 第十九轮①–⑤（2026-10-21）
+
+来源：main `ae1c95e` / `8ebb2f4` / `12e1a67` / `b62587c` / `a4a049d` / `53aaaf4`，
+外加 1.20.1 线的 SRG 教训 `4e60b9c`。两分支历史无关 ⇒ 手工搬运。
+
+| 件 | 1.18.2 侧的适配 |
+|---|---|
+| `analysis/PickerFilter` / `AeKeyText` | 纯逻辑，原样搬 |
+| `bind/AeKeys` | 与 1.20.1 线**完全一致**（AE2 **11.x** 的键序列化也是无参 `toTagGeneric()` / `fromTagGeneric(CompoundTag)`，已对 11.7.6 javap 核实）；反射只打 AE，原版方法直接调（`TagParser`/`Component`） |
+| `bind/AeKeys#repoHasEntry` | 反射 `RepoSlot#getEntry()`（AE 自己的方法）—— 1.18.2 生产同样是 SRG，`Slot#hasItem` 会扑空 |
+| `collect/AeNetworkReader` | ★ **`GridHelper#getNodeHost` 在 AE2 11.x 收 `LevelAccessor`**（12+ 才改成 `Level`）—— 本分支旧代码按 `Level` 反射，在 11.7.6 上必然 `NoSuchMethodException`（AE 目标恒 no_data），本轮一并修正；物品注册表查询走 `ForgeRegistries.ITEMS.getValue`（1.18.2 无 `BuiltInRegistries`） |
+| `collect/ContainerAccess` | 同上；`itemIdOf` 用 `ForgeRegistries.ITEMS` |
+| `ui/ScopeScreen` | 逐处搬（`Layout` 加 `filterTop/filterH`、`pickerVisible`、筛选框 / 忽略空槽、键鼠分支、回放页按钮）。**新方法的绘制参数是 `Draw`**（本分支的 `GuiGraphics` 替身），调用签名一致 |
+| `ui/ChartRenderer` / `archive/Archives` / `bind/*` | 同 main（label 走 `AeKeyText`、`dirOf`、`removeDataTarget` 按目标删、`SlotRef.count` 改 long） |
+| lang | 新增 6 键（中英各 **185**） |
+| dev-check | t41（筛选 17 条）/ t42（AE 键 11 条）搬入；断言 461 → **489**；`ProbeAeApi` 按 11.x 签名重写 |
+
+**离线实证**：`dev-check/ProbeAeApi.java` 对 AE2 **11.7.6** 的 17 条反射签名全过（`AE_API_OK`，0 skip）。
+产物 `javap` 核实：反射字符串只剩 AE 的方法，调用点是 `TagParser.m_129359_`（SRG 正确）。
 
 ## [1.20.1] 线：现状与移植记录
 

@@ -10,6 +10,7 @@ import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.Val;
 import com.jessetech.logiscope.analysis.SeriesPoint;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
+import com.jessetech.logiscope.analysis.PickerFilter;
 import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.Snbt;
 import com.jessetech.logiscope.archive.ArchiveData;
@@ -44,6 +45,7 @@ import net.minecraftforge.client.ForgeHooksClient;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -176,6 +178,8 @@ public final class ScopeScreen extends Screen {
     private static final int DEL_W = 13;
 
     private static final String SERIES_PREFIX = "series:";
+    /** 选格页「忽略空槽」按钮（占筛选行右端，不进 Layout.buttons） */
+    private static final String PICKER_IGNORE_EMPTY = "picker_ignore_empty";
     /** 「分析」选中曲线 / 波形标记的品红系（同一语汇：都是"用户钉在这里的东西"） */
     private static final int COLOR_ANALYZE = 0xFFE070D8;
     /** NBT 原文悬浮高亮：黄（实测反馈淡紫在深底上难认；黄与深底对比最强） */
@@ -456,6 +460,15 @@ public final class ScopeScreen extends Screen {
     private String archFilter = "";
     /** 筛选框是否有键盘焦点（聚焦时按键进框；Esc 清空并收起，Enter 保留并收起） */
     private boolean archFilterFocus;
+    /** 选格页筛选框的文字（规则见 {@link PickerFilter}） */
+    private String pickerFilter = "";
+    /** 选格页筛选框是否有键盘焦点（语义同 {@link #archFilterFocus}） */
+    private boolean pickerFilterFocus;
+    /**
+     * 选格页「忽略空槽」开关：静态字段（看列表的偏好，跨开关面板保持；进程启动默认 false）。
+     * 与筛选框**叠加**：先剔空槽再按文字筛。
+     */
+    private static boolean pickerIgnoreEmpty;
 
     private final ChartRenderer chart = new ChartRenderer();
 
@@ -880,6 +893,7 @@ public final class ScopeScreen extends Screen {
             int x, int y, int w, int h,
             int infoTop, int infoRows,
             int listTop, int listRows,
+            int filterTop, int filterH,
             int archTop, int archRows,
             int chartTop, int chartH,
             List<Chip> toolbar, List<Chip> legend, List<Chip> buttons) {
@@ -925,6 +939,15 @@ public final class ScopeScreen extends Screen {
 
         // ---- 根页 / 选格页：列表 ----
         int listTop = infoTop + infoRows * ROW_H + 4;
+        // 选格页：列表顶上让出一条筛选框；没有可筛的清单时不占位
+        int filterTop = 0;
+        int filterH = 0;
+        if (page == Page.PICKER && source != Source.NONE && !pickerList().isEmpty()) {
+            filterTop = listTop;
+            // 用按钮高度（CHIP_H）：这一行右边是个按钮，10px 时文字会压到边框上
+            filterH = CHIP_H;
+            listTop += filterH + 2;
+        }
         int listRows = Math.max(1, (contentBottom - listTop) / ROW_H - 1);
 
         // ---- 根页下半：存档列表（标题行 + N 行，N ≈ 总行数的 1/3）----
@@ -939,8 +962,8 @@ public final class ScopeScreen extends Screen {
         }
 
         return new Layout(panelX, panelY, panelW, panelH,
-                infoTop, infoRows, listTop, listRows, archTop, archRows, chartTop, chartH,
-                toolbar, legend, buttons);
+                infoTop, infoRows, listTop, listRows, filterTop, filterH, archTop, archRows,
+                chartTop, chartH, toolbar, legend, buttons);
     }
 
     private int infoRows() {
@@ -1028,6 +1051,9 @@ public final class ScopeScreen extends Screen {
             }
             case REPLAY -> {
                 out.add(new Item("rename", tr("logiscope.btn.rename"), replayArchive != null));
+                // 直接打开这次回放自己的目录（csv / json 就在里面）
+                out.add(new Item("open_archive_folder", tr("logiscope.btn.open_archive_folder"),
+                        replayArchive != null && !replayDir.isBlank()));
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1192,6 +1218,9 @@ public final class ScopeScreen extends Screen {
         }
         if ("cell_mode".equals(id)) {
             return cellMode ? 0xFF3FE0A0 : 0;
+        }
+        if (PICKER_IGNORE_EMPTY.equals(id)) {
+            return pickerIgnoreEmpty ? 0xFF3FE0A0 : 0;
         }
         if ("nbt_mode".equals(id)) {
             // ⑦：NBT tracking ON 时按钮文字转黄色
@@ -1749,6 +1778,24 @@ public final class ScopeScreen extends Screen {
         }
     }
 
+    /**
+     * 用系统文件管理器打开**当前这次回放的**存档目录
+     * （{@code logiscope/<存档名>/}，`recording.csv` / `recording.json` 就在这一层）。
+     */
+    private void openArchiveFolder() {
+        if (replayDir == null || replayDir.isBlank()) {
+            return;
+        }
+        try {
+            Path dir = Archives.dirOf(replayDir);
+            Files.createDirectories(dir);
+            Util.getPlatform().openFile(dir.toFile());
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.warn("open archive folder failed", e);
+            say(tr("logiscope.flash.open_folder_fail"));
+        }
+    }
+
     /** 用系统文件管理器打开存档目录 {@code .minecraft/logiscope/} */
     private void openStorageFolder() {
         try {
@@ -1855,6 +1902,31 @@ public final class ScopeScreen extends Screen {
         return source == Source.MENU ? menuSlots : worldSlots;
     }
 
+    /**
+     * **筛选后要显示的槽位清单**：渲染 / 点击命中 / 翻页三处共用它
+     * （"看到的行 = 点的行"，与存档筛选框同一条纪律）。
+     */
+    private List<ContainerAccess.SlotView> pickerVisible() {
+        List<ContainerAccess.SlotView> all = pickerList();
+        boolean byText = !pickerFilter.isBlank();
+        if (all.isEmpty() || (!byText && !pickerIgnoreEmpty)) {
+            return all;
+        }
+        String emptyLabel = tr("logiscope.slot.empty");
+        List<ContainerAccess.SlotView> out = new ArrayList<>();
+        for (ContainerAccess.SlotView v : all) {
+            if (pickerIgnoreEmpty && v.empty()) {
+                continue;   // ① 忽略空槽
+            }
+            boolean hit = !byText || PickerFilter.matches(pickerFilter, v.containerSlotIndex(),
+                    v.itemId(), v.shortName(), v.displayName(), v.empty() ? emptyLabel : null);
+            if (hit) {
+                out.add(v);
+            }
+        }
+        return out;
+    }
+
     private boolean isSelected(ContainerAccess.SlotView v) {
         if (aeMode) {
             return !v.empty() && selectedAeIds.contains(v.itemId());
@@ -1885,9 +1957,19 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        List<ContainerAccess.SlotView> list = pickerList();
-        if (list.isEmpty()) {
+        List<ContainerAccess.SlotView> all = pickerList();
+        if (all.isEmpty()) {
             g.drawString(this.font, tr("logiscope.hint.no_container"), x + PAD, L.listTop(), 0xAAA6A0, false);
+            return;
+        }
+
+        renderPickerFilter(g, L, mouseX, mouseY);
+        renderPickerIgnore(g, L, mouseX, mouseY);
+
+        List<ContainerAccess.SlotView> list = pickerVisible();
+        if (list.isEmpty()) {
+            String key = pickerFilter.isBlank() ? "logiscope.picker.all_empty" : "logiscope.picker.no_match";
+            g.drawString(this.font, tr(key), x + PAD, L.listTop(), 0xAAA6A0, false);
             return;
         }
 
@@ -1913,12 +1995,15 @@ public final class ScopeScreen extends Screen {
             g.drawString(this.font, selected ? "[x]" : "[ ]", x + 8, ry,
                     selected ? 0xFF3FE0A0 : 0xFF6A6A78, false);
             String label = "#" + v.containerSlotIndex()
-                    + "  " + (v.empty() ? tr("logiscope.slot.empty") : v.shortName() + " x" + v.count());
+                    + "  " + (v.empty() ? tr("logiscope.slot.empty") : v.displayName() + " x" + v.count());
             g.drawString(this.font, label, x + 30, ry,
                     v.empty() ? (selected ? 0xFFA8C8B8 : 0xFF707070) : 0xFFE0E0E0, false);
         }
 
         String footer = (scrollRow + maxRows) + " / " + total + "  " + tr("logiscope.hint.scroll");
+        if (total != all.size()) {
+            footer = footer + "  ·  " + total + " / " + all.size() + " " + tr("logiscope.picker.filtered");
+        }
         if (cellMode) {
             footer = footer + "  ·  " + tr("logiscope.hint.cell_mode_short");
         }
@@ -1928,6 +2013,69 @@ public final class ScopeScreen extends Screen {
     // ------------------------------------------------------------------
     // 图例 / 工具栏 / 按钮
     // ------------------------------------------------------------------
+
+    /**
+     * 「忽略空槽」按钮矩形：钉在筛选行右端（"搜索框后面"）。
+     */
+    private int[] pickerIgnoreRect(Layout L) {
+        int want = this.font.width(tr("logiscope.picker.ignore_empty")) + 10;
+        int w = Math.min(want, Math.max(36, L.w() - 2 * PAD - 60));
+        return new int[]{L.x() + L.w() - PAD - w, L.filterTop(), w, L.filterH()};
+    }
+
+    private boolean inPickerIgnore(Layout L, int mx, int my) {
+        if (page != Page.PICKER || L.filterH() <= 0) {
+            return false;
+        }
+        int[] r = pickerIgnoreRect(L);
+        return isIn(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
+    /** 筛选框矩形：占筛选行除去按钮的剩余宽度 */
+    private int[] pickerFilterRect(Layout L) {
+        int[] btn = pickerIgnoreRect(L);
+        int w = Math.max(40, btn[0] - 4 - (L.x() + PAD));
+        return new int[]{L.x() + PAD, L.filterTop(), w, L.filterH()};
+    }
+
+    private boolean inPickerFilter(Layout L, int mx, int my) {
+        if (page != Page.PICKER || L.filterH() <= 0) {
+            return false;
+        }
+        int[] r = pickerFilterRect(L);
+        return isIn(mx, my, r[0], r[1], r[2], r[3]);
+    }
+
+    /** 「忽略空槽」开关按钮：复用按钮观感，开着时文字转绿 */
+    private void renderPickerIgnore(Draw g, Layout L, int mouseX, int mouseY) {
+        int[] r = pickerIgnoreRect(L);
+        Chip c = new Chip(PICKER_IGNORE_EMPTY, tr("logiscope.picker.ignore_empty"),
+                r[0], r[1], r[2], r[3], true, 0);
+        renderChip(g, c, mouseX, mouseY, c.hit(mouseX, mouseY), accentFor(PICKER_IGNORE_EMPTY));
+    }
+
+    /** 选格页筛选框：空时显示占位符，聚焦时闪光标 */
+    private void renderPickerFilter(Draw g, Layout L, int mouseX, int mouseY) {
+        int[] r = pickerFilterRect(L);
+        int x = r[0];
+        int y = r[1];
+        int w = r[2];
+        int h = r[3];
+        boolean over = isIn(mouseX, mouseY, x, y, w, h);
+        g.fill(x, y, x + w, y + h, 0xC0101018);
+        ring(g, x, y, w, h, pickerFilterFocus ? COLOR_ANALYZE
+                : over ? 0xFF6A6A7A : 0xFF3A3A46);
+        boolean empty = pickerFilter.isEmpty();
+        String text = empty ? tr("logiscope.picker.filter_hint") : pickerFilter;
+        int tx = x + 4;
+        int avail = w - 6;
+        String draw = this.font.width(text) <= avail ? text : cut(text, avail);
+        g.drawString(this.font, draw, tx, y + 1, empty ? 0xFF8A8AA0 : 0xFFE0E0EC, false);
+        if (pickerFilterFocus && (LogiScopeMod.probes().currentTick() / 10) % 2 == 0) {
+            int cx = tx + Math.min(this.font.width(text), avail);
+            g.fill(cx, y + 1, cx + 1, y + 9, 0xFFE0E0EC);
+        }
+    }
 
     private void renderToolbar(Draw g, List<Chip> chips, int mouseX, int mouseY) {
         for (Chip c : chips) {
@@ -2585,6 +2733,10 @@ public final class ScopeScreen extends Screen {
         if (archFilterFocus && !inArchFilter(L, mx, my)) {
             archFilterFocus = false;
         }
+        // 选格页筛选框同理
+        if (pickerFilterFocus && !inPickerFilter(L, mx, my)) {
+            pickerFilterFocus = false;
+        }
 
         // 1) 右下角缩放把手（优先于标题栏，不然永远点不到）
         if (isIn(mx, my, L.x() + L.w() - RESIZE_GRIP, L.y() + L.h() - RESIZE_GRIP, RESIZE_GRIP, RESIZE_GRIP)) {
@@ -2730,7 +2882,20 @@ public final class ScopeScreen extends Screen {
                 }
             }
         } else if (page == Page.PICKER) {
-            List<ContainerAccess.SlotView> list = pickerList();
+            if (source == Source.NONE) {
+                // 这一页此时只画了一句提示，没有可点的行
+                return true;
+            }
+            if (inPickerIgnore(L, mx, my)) {
+                pickerIgnoreEmpty = !pickerIgnoreEmpty;
+                scrollRow = 0;
+                return true;
+            }
+            if (inPickerFilter(L, mx, my)) {
+                pickerFilterFocus = true;
+                return true;
+            }
+            List<ContainerAccess.SlotView> list = pickerVisible();
             for (int i = 0; i < L.listRows(); i++) {
                 int idx = scrollRow + i;
                 if (idx >= list.size()) {
@@ -3373,6 +3538,7 @@ public final class ScopeScreen extends Screen {
         switch (id) {
             case "create" -> createProbe();
             case "open_folder" -> openStorageFolder();
+            case "open_archive_folder" -> openArchiveFolder();
             case "cell_mode" -> {
                 cellMode = !cellMode;
                 cellDragButton = -1;
@@ -3776,6 +3942,13 @@ public final class ScopeScreen extends Screen {
             }
             return true;
         }
+        if (pickerFilterFocus && !Character.isISOControl(codePoint)) {
+            if (pickerFilter.length() < 48) {
+                pickerFilter += codePoint;
+                scrollRow = 0;
+            }
+            return true;
+        }
         if (page == Page.DATA && dataFocus != 0 && !Character.isISOControl(codePoint)) {
             if (dataFocus == 1) {
                 if (dataPath.length() < 120) {
@@ -3801,8 +3974,10 @@ public final class ScopeScreen extends Screen {
             renameFocus = false;
         }
         if (archFilterFocus && page != Page.ROOT) {
-            // 与重命名框同理：焦点别留在已经离开的页面上（否则键盘全被吃掉）
             archFilterFocus = false;
+        }
+        if (pickerFilterFocus && page != Page.PICKER) {
+            pickerFilterFocus = false;
         }
         if (renameFocus) {
             switch (keyCode) {
@@ -3865,6 +4040,34 @@ public final class ScopeScreen extends Screen {
             }
             return true;   // 输入框激活时吃掉所有按键（与重命名框一致）
         }
+        if (pickerFilterFocus) {
+            switch (keyCode) {
+                case 259 -> {   // Backspace
+                    pickerFilter = chop(pickerFilter);
+                    scrollRow = 0;
+                    return true;
+                }
+                case 257, 335 -> {   // Enter → 保留筛选、收起焦点
+                    pickerFilterFocus = false;
+                    return true;
+                }
+                case 256 -> {   // Esc → 清空筛选并收起
+                    pickerFilterFocus = false;
+                    pickerFilter = "";
+                    scrollRow = 0;
+                    return true;
+                }
+                case 86 -> {   // Ctrl+V
+                    if (hasControlDown()) {
+                        pasteIntoPickerFilter();
+                        return true;
+                    }
+                }
+                default -> {
+                }
+            }
+            return true;
+        }
         if (page == Page.DATA && dataFocus != 0) {
             switch (keyCode) {
                 case 259 -> {   // Backspace
@@ -3913,6 +4116,21 @@ public final class ScopeScreen extends Screen {
             }
         } catch (Exception ignored) {
             // 剪贴板不可用时静默（不该因为粘贴失败把界面搞崩）
+        }
+    }
+
+    /** 粘贴进选格页筛选框（同上：去首尾空白、限长 48） */
+    private void pasteIntoPickerFilter() {
+        try {
+            String clip = Minecraft.getInstance().keyboardHandler.getClipboard();
+            if (clip == null) {
+                return;
+            }
+            clip = clip.trim();
+            pickerFilter = clip.length() > 48 ? clip.substring(0, 48) : clip;
+            scrollRow = 0;
+        } catch (Exception ignored) {
+            // 剪贴板不可用时静默
         }
     }
 
@@ -4587,7 +4805,7 @@ public final class ScopeScreen extends Screen {
                 if (row >= 0 && row < R.tgtRows() && idx < dts.size()
                         && isIn(mx, my, L.x() + L.w() - 4 - DEL_W,
                                 R.tgtTop() + (row + 1) * ROW_H - 1, DEL_W, ROW_H)) {
-                    src2.removeDataTarget(dts.get(idx).valuePath());
+                    src2.removeDataTarget(dts.get(idx));
                 }
             }
             return true;

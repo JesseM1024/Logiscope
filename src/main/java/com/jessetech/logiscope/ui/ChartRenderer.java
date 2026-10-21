@@ -1,5 +1,6 @@
 package com.jessetech.logiscope.ui;
 
+import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.RectRuns;
@@ -843,8 +844,8 @@ public final class ChartRenderer {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
         }
-        int i = itemId.indexOf(':');
-        return i < 0 ? itemId : itemId.substring(i + 1);
+        // AE 的非物品键（流体 / 化学品 / 电力）身份是一整段 SNBT —— 取里头那个 id 的短名
+        return AeKeyText.label(itemId);
     }
 
     /**

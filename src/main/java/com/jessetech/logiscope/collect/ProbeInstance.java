@@ -313,11 +313,18 @@ public final class ProbeInstance {
         }
     }
 
-    /** 删除一个数据追踪目标（DATA 页目标列表行尾的 ×）。@return 是否真的删了 */
-    public boolean removeDataTarget(String valuePath) {
+    /**
+     * 删除**一个**数据追踪目标（DATA 页目标列表行尾的 ×）。
+     *
+     * 按目标本身（record 相等）删，**不是**按 valuePath 删 —— 所有 AE 目标共用
+     * `"ae:network"` 这个标记路径，按路径删会把**全部 AE 目标**一起删掉。
+     *
+     * @return 是否真的删了（false = 这个目标已经不在列表里）
+     */
+    public boolean removeDataTarget(DataTarget target) {
         synchronized (sampleLock) {
             List<DataTarget> n = new ArrayList<>(dataTargets);
-            boolean gone = n.removeIf(d -> d.valuePath().equals(valuePath));
+            boolean gone = n.remove(target);
             if (gone) {
                 dataTargets = List.copyOf(n);
                 // 最后一个目标也没了、又没有槽位 → 回到待配置，不留一个空转的探针

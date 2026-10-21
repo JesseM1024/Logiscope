@@ -1,5 +1,7 @@
 package com.jessetech.logiscope.collect;
 
+import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.bind.AeKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.resources.ResourceLocation;
@@ -7,6 +9,7 @@ import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -97,12 +100,14 @@ public final class ContainerAccess {
         if (menu == null) {
             return out;
         }
+        // AE 终端才有"网络列表显示格"：先判一次菜单家族，别的容器一格反射都不做
+        boolean aeMenu = AeNetworkReader.isAeStorageMenu(menu);
         for (int i = 0; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
             if (!isSelectable(slot)) {
                 continue;
             }
-            out.add(make(i, slot.getContainerSlot(), slot.getItem()));
+            out.add(aeMenu ? viewOfAe(i, slot) : make(i, slot.getContainerSlot(), slot.getItem()));
         }
         return out;
     }
@@ -134,7 +139,47 @@ public final class ContainerAccess {
 
     private static SlotView toView(AbstractContainerMenu menu, int index) {
         Slot slot = menu.slots.get(index);
+        if (AeNetworkReader.isAeStorageMenu(menu)) {
+            return viewOfAe(index, slot);
+        }
         return make(index, slot.getContainerSlot(), slot.getItem());
+    }
+
+    /**
+     * **AE 终端显示格**的快照（第十九轮②）。
+     *
+     * 与普通槽位的两点差别：
+     *   1. 数量：AE 的格子里 `ItemStack.getCount()` 恒为 1（它只是个图标），
+     *      真实存量在 `RepoSlot#getStoredAmount()`；
+     *   2. 身份与名字：非物品键（流体 / 化学品 / 电力）在客户端被包成一个
+     *      「通用物品堆栈」物品，直接读物品 id 会让所有流体塌成
+     *      `ae2:wrapped_generic_stack`。这里解包成 AE 键身份（见 {@link AeKeys}）。
+     */
+    private static SlotView viewOfAe(int menuSlotIndex, Slot slot) {
+        Long amount = AeKeys.repoAmount(slot);
+        if (amount == null) {
+            return make(menuSlotIndex, slot.getContainerSlot(), slot.getItem());
+        }
+        AeKeys.Wrapped wrapped = AeKeys.unwrap(slot.getItem());
+        boolean hasEntry = AeKeys.repoHasEntry(slot);
+        if (wrapped == null) {
+            // 物品键：身份仍用 registry id（与 0.1.2 之前的目标同格式，老目标靠它才能继续勾上）
+            return new SlotView(menuSlotIndex, slot.getContainerSlot(),
+                    itemIdOf(slot.getItem()), amount, !hasEntry, null);
+        }
+        // 非物品键：身份是 AE 键串；名字用游戏内真名（拿不到就退回身份串里的 id）。
+        // 连身份都编不出来时**故意给一个解不开的串**（ae:?unknown）：采样会记 no_data。
+        // 绝退回 `ae2:wrapped_generic_stack` —— 那会读成"这个包装物品有 0 个"，
+        // 把"读不到"伪装成"确实是 0"（本项目的头号纪律）。
+        String id = wrapped.keyId() != null ? wrapped.keyId() : AeKeyText.PREFIX + "?unknown";
+        String label = wrapped.label() != null ? wrapped.label() : AeKeyText.label(id);
+        return new SlotView(menuSlotIndex, slot.getContainerSlot(), id, amount, !hasEntry, label);
+    }
+
+    /** 1.18.2 没有 BuiltInRegistries，物品 id 走 ForgeRegistries */
+    private static String itemIdOf(ItemStack stack) {
+        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
+        return id == null ? "unknown" : id.toString();
     }
 
     /**
@@ -143,25 +188,35 @@ public final class ContainerAccess {
      */
     public static SlotView make(int menuSlotIndex, int containerSlotIndex, ItemStack stack) {
         boolean empty = stack.isEmpty();
-        ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return new SlotView(
                 menuSlotIndex,
                 containerSlotIndex,
-                id == null ? "unknown" : id.toString(),
+                itemIdOf(stack),
                 empty ? 0 : stack.getCount(),
-                empty);
+                empty,
+                null);
     }
 
     /**
      * 槽位的一次只读快照。
      * 刻意不持有 ItemStack 引用 —— 存储层与游戏对象解耦，方便离线分析与导出。
      */
-    public record SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, int count, boolean empty) {
+    public record SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, long count,
+                           boolean empty, @Nullable String label) {
 
-        /** 给界面显示用的短名称，去掉命名空间前缀 */
+        /** 给界面显示用的短名称，去掉命名空间前缀；AE 键走 {@link AeKeyText#label} */
         public String shortName() {
-            int i = itemId.indexOf(':');
-            return i < 0 ? itemId : itemId.substring(i + 1);
+            return AeKeyText.label(itemId);
+        }
+
+        /**
+         * 列表上真正画出来的那个名字（**筛选框也用它**，保证"看到什么就能筛什么"）。
+         *
+         * AE 的非物品键（流体 / 化学品）显示游戏内真名（{@code label}，如"水"）；
+         * 其余一切显示 id 的短名 —— 与之前一致，免得老截图、老习惯全部对不上。
+         */
+        public String displayName() {
+            return label != null && !label.isBlank() ? label : shortName();
         }
     }
 }

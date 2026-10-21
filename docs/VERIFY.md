@@ -1,4 +1,4 @@
-# LogiScope · 实机验证清单（当前版本 0.1.2-1.20.1-alpha）
+# LogiScope · 实机验证清单（当前版本 0.1.3-1.18.2-alpha）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①②③④、
 > [1.20.1] 轮次 4（DATA 页右键「按数值读取」两步式 · F9 回滚）的
@@ -6,10 +6,12 @@
 > [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md)；原理索引在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 > ★ = 优先项；编号沿用原轮次分组，便于与 [PROGRESS.md](PROGRESS.md) 对照。
 
-> **本文件是 1.20.1 分支的清单**（命令、产物名、运行目录均按本分支改写）。
+> **本文件是 1.18.2 分支的清单**（命令、产物名按本分支；本分支 = MC 1.18.2 + Forge 40.3.12）。
 > `VERIFY-HISTORY.md` 的历轮结论来自 1.21.1 线，是"算法与交互已通过"的依据，
-> **不等于 1.20.1 线已跑过**。1.20.1 线此前仅做到"编译通过 + 产出 jar"，
-> 以下各项均为**本分支首次实机验收**（A 组采样保真为重点）。
+> **不等于 1.18.2 线已跑过**。
+> ⚠️ A–F 组是从 `1.20.1-neo` 派生时继承的文本（含 1.20.1 的实例说明），按 1.18.2 读时
+> 把"实例 / 产物名"换成 `1.18.2-Forge` + `logiscope-0.1.3-1.18.2-alpha` 即可；
+> **G / H / I 组是本轮（2026-10-21）新增，按 1.18.2 写的**。
 >
 > 分支差异（详见 [`PORT-1.20.1.md`](PORT-1.20.1.md) §七 / §八）：
 >
@@ -184,16 +186,16 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;build/moddev/artifacts/forge-1.20.1-47.1.106-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
+python verify-jar.py build/libs/logiscope-0.1.3-1.18.2-alpha.jar
 ```
 
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build --offline`（代理进程在跑时可直接联网构建；代理关闭时用 `--offline`，本机缓存完整） | `BUILD SUCCESSFUL`。联网构建需校验 forge userdev 元数据，而 `maven.neoforged.net` 直连不可达 |
-| E2 | `TestChart` | **461 条**断言全过；lang 中英各 **179** 键一致 |
+| E2 | `TestChart` | **489 条**断言全过；lang 中英各 **185** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.2-1.20.1-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.18.2-alpha`**。拷进实例测共存前**先删旧的 `logiscope-*.jar`**（版本号变了，旧的不会被顶掉；同 modId 并存会被 FML 拒绝） |
 
 ## F. 回归抽查
 
@@ -204,7 +206,41 @@ python verify-jar.py build/libs/logiscope-0.1.2-1.20.1-alpha.jar
 | R3 | MEK：NBT 追踪选格（点 2 格就只测 2 格）+ 反复开关 GUI 读数一致 | 与第十六轮④一致 |
 | R4 | 普通容器（箱子）选格 + 无 slot 列表的设备（机械手） | 行为不变 |
 | R5 | 切英文环境 | 无中文残留 |
-| R6 | 在 **Forge 47.3.7** 整合包（GregTech Leisure）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.2-1.20.1-alpha`，无红字）；F9 面板 / 选格 / 采样曲线与 NeoForge 侧一致（加载器兼容性回归，见 PORT §十） |
+| R6 | 在 **`1.18.2-Forge` 实例**（Forge 40.3.12 + AE2 11.7.6 + MEK 10.2.5 + Create 0.5.1）装入本 jar 并进世界 | 正常加载（模组列表版本 `0.1.3-1.18.2-alpha`）；F9 面板 / 选格 / 采样曲线与 main 一致 |
+
+## G. 选格页筛选框 + 忽略空槽（第十九轮①③）
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★G1 | 大箱子（≥ 27 格）→ 选格页 → 敲 `iron` | 只剩名称含 iron 的行；页脚出现 `命中 / 全部` |
+| ★G2 | 敲 `#1` | **只**剩 `#1` 那一行（`#10` 不出现） |
+| G3 | 敲 `#1 iron_ingot` | 序号 1 且名称命中才显示（与） |
+| G4 | 开着「忽略空槽」再敲筛选词 | 两条件叠加；Esc 只清文字，空槽仍隐藏 |
+| G5 | 容器全空 + 忽略空槽 | 提示"这个容器里没有非空格子·关掉「忽略空槽」看看" |
+| G6 | 英文环境 / 面板拖到最窄 | 「ignore empty」完整显示、不与搜索框重叠 |
+
+## H. AE 非物品键（第十九轮②，AE2 **11.7.6**）
+
+> 1.18.2 侧是 AE2 **11.x**：键序列化无参（`toTagGeneric()`），`getNodeHost` 收 `LevelAccessor`。
+> 读值链其余部分与 19.x 一致（已 javap + 探针核实）。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★H1 | AE 网络存流体（如水）→ 开终端 → 选格页 | 显示**真名**与**真实数量**（如 `水 x2100000`），不是 `wrapped_generic_stack x1` |
+| ★H2 | 勾该流体 → 「完成」→ 图表页 | 读数是 mB 真值；推/抽流体时曲线跟着变 |
+| H3 | 物品行（铁锭 2100 个） | 数量列是 `x2100`（不是 `x1`）；读数同样是真值 |
+| H4 | 同时勾「水」和「岩浆」 | 两条**独立**的线；点一行只勾一行 |
+| H5 | 勾一个"可合成但存量 0"的条目 | 可勾选；读数为 **0**（真值），不是 no_data |
+| H6 | 数据页目标列表 | 显示 `ae:network[水]`；点 × 只删那一行 |
+| H7 | 拆掉网络供电 | 该线变 `no_data`（不是 0） |
+| ★H8 | 启动日志 | **不应出现** `[LogiScope] AE2 key API not present` |
+
+## I. 回放页「打开存档文件夹」（第十九轮⑤）
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★I1 | 根页点一个存档 → 回放页 → 「打开存档文件夹」 | 文件管理器**直接打开那一次的目录**，能看到 `recording.json` / `recording.csv` |
+| I2 | 根页的「打开文件夹」 | 行为不变（仍打开 `logiscope/` 根目录） |
 
 ---
 

@@ -26,11 +26,13 @@
  * 显示问题（源文件本身是好的），不影响断言结果。想要正常显示就在 cmd/PowerShell
  * 里跑，或先 chcp 65001。
  */
+import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.Aggregator;
 import com.jessetech.logiscope.analysis.Analyzer;
 import com.jessetech.logiscope.analysis.ChartData;
 import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
+import com.jessetech.logiscope.analysis.PickerFilter;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -102,6 +104,8 @@ public class TestChart {
         t38AeTargets();
         t39RiseFallEvents();
         t40ForcedNumeric();
+        t41PickerFilter();
+        t42AeKeyText();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1514,6 +1518,63 @@ public class TestChart {
             failed++;
             System.out.println("  FAIL " + what + " 期望 " + expect + " 实际 " + actual);
         }
+    }
+
+    // 41) 选格页筛选框的匹配规则（第十九轮①）
+    private static void t41PickerFilter() {
+        // 空查询 / 纯空白 = 不过滤（少一次误操作）
+        yes("筛选 空串全过", PickerFilter.matches("", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 纯空白全过", PickerFilter.matches("   ", 3, "minecraft:iron_ingot"));
+        yes("筛选 null 全过", PickerFilter.matches(null, 3));
+
+        // 名称子串、大小写不敏感、id 与短名都匹配
+        yes("筛选 短名子串", PickerFilter.matches("iron", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 大写也能中", PickerFilter.matches("IRON", 3, "minecraft:iron_ingot", "iron_ingot"));
+        yes("筛选 命名空间也能中", PickerFilter.matches("minecraft", 3, "minecraft:iron_ingot"));
+        no("筛选 不相关不中", PickerFilter.matches("gold", 3, "minecraft:iron_ingot"));
+
+        // 序号：精确匹配，不是子串
+        yes("筛选 #3 命中 3 号", PickerFilter.matches("#3", 3, "minecraft:iron_ingot"));
+        no("筛选 #1 不命中 10 号", PickerFilter.matches("#1", 10, "minecraft:iron_ingot"));
+        no("筛选 #1 不命中 21 号", PickerFilter.matches("#1", 21, "minecraft:iron_ingot"));
+        yes("筛选 #007 也算 7 号", PickerFilter.matches("#007", 7, "minecraft:iron_ingot"));
+
+        // 多词 = 与（需求原文的例子：#1 iron_ingot）
+        yes("筛选 #1+名称 都中", PickerFilter.matches("#1 iron_ingot", 1, "minecraft:iron_ingot", "iron_ingot"));
+        no("筛选 #1+名称 序号不对", PickerFilter.matches("#1 iron_ingot", 2, "minecraft:iron_ingot"));
+        no("筛选 #1+名称 名称不对", PickerFilter.matches("#1 iron_ingot", 1, "minecraft:gold_ingot"));
+
+        // 裸 # 没有数字 → 退回普通子串（当用户就想搜带 # 的文本）
+        yes("筛选 裸 # 退回子串", PickerFilter.matches("#", 12, "minecraft:iron_ingot"));
+        // 空行（(empty)）也按显示文字参与匹配
+        yes("筛选 空格名也能筛（空）", PickerFilter.matches("空", 4, "minecraft:air", "（空）"));
+        no("筛选 有内容的行不带 （空）", PickerFilter.matches("空", 4, "minecraft:iron_ingot", "iron_ingot"));
+    }
+
+    // 42) AE 键的字符串身份（第十九轮②）：AE 的 SNBT 与老式物品 id 要能共存
+    // 42) AE 键的字符串身份（第十九轮②）：AE 的 SNBT 与老式物品 id 要能共存
+    private static void t42AeKeyText() {
+        String fluid = "ae:{#t:\"ae2:f\",id:\"minecraft:water\"}";
+        String item = "ae:{#t:\"ae2:i\",id:\"minecraft:iron_ingot\",components:{\"minecraft:damage\":5}}";
+
+        // 老格式（0.1.2 之前的 AE 目标）不变
+        no("AE 键 普通物品不算 ae 键", AeKeyText.isAe("minecraft:iron_ingot"));
+        eq("AE 键 普通物品显示短名", "iron_ingot", AeKeyText.label("minecraft:iron_ingot"));
+
+        // 新格式：身份是整段 SNBT，显示名取里头的 id
+        yes("AE 键 流体是 ae 键", AeKeyText.isAe(fluid));
+        eq("AE 键 流体显示名", "water", AeKeyText.label(fluid));
+        eq("AE 键 流体类型", "ae2:f", AeKeyText.typeOf(fluid));
+
+        // 带数据组件的物品键：同样只取 id（组件不参与显示）
+        yes("AE 键 组件物品是 ae 键", AeKeyText.isAe(item));
+        eq("AE 键 组件物品显示名", "iron_ingot", AeKeyText.label(item));
+        eq("AE 键 组件物品类型", "ae2:i", AeKeyText.typeOf(item));
+
+        // 解析不出来时不编名字：露原文（前导 ~ 是"这是原文"的标记）
+        yes("AE 键 坏文本不抛异常", AeKeyText.label("ae:{broken").startsWith("~"));
+        eq("AE 键 空串", "", AeKeyText.label(""));
+        eq("AE 键 null 安全", "", AeKeyText.label(null));
     }
 
     private static void eq(String what, Object expect, Object actual) {
