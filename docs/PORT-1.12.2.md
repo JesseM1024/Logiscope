@@ -299,6 +299,51 @@ handleOpenWindow
 
 ---
 
+## 三之四、轮次 4：AE 终端与"面板被覆盖"（2026-10-22）
+
+### 实测结果
+
+关闭容器后继续追踪、`Probe data` 都通过了（轮次 3 的三条修复有效）。新报三条：
+
+| # | 反馈 | 根因 |
+|---|---|---|
+| 1 | AE 终端里选格，**玩家背包没被筛掉** | AE 用 `PlayerInvWrapper` 包玩家背包 ⇒ `slot.inventory` 是 `SlotItemHandler` 的占位空 `InventoryBasic`，`isPlayerSlot` 判不出来 |
+| 1 | AE 物品**数量恒 1** | AE 终端格 `Slot#getStack()` 的 count 恒 1，真值在 `SlotME#getAEStack().getStackSize()` |
+| 2 | 流体终端**一条都读不到** | `SlotFluidME.getStack()` 返回空（流体不是物品）；rv6 **没有** `wrapped_generic_stack` 那类占位物品（那是 AE2 10 才有的） |
+| 3 | 选格页右侧整片物品压在面板上 | 面板画在 `drawScreen` 里，而 JEI 的物品列表挂在 **`DrawScreenEvent.Post`** 上 ⇒ JEI 晚于我们 |
+
+### 三条核实（`javap`，AE2 rv6-stable-7）
+
+```
+appeng.container.AEBaseContainer#bindPlayerInventory
+  → new PlayerInvWrapper(playerInventory) + SlotPlayerInv / SlotPlayerHotBar
+    （都不是 Slot(inventory=player.inventory) ⇒ 老判据必然漏）
+appeng.client.me.SlotME#getAEStack()           → IAEItemStack   （public）
+appeng.client.me.SlotFluidME#getAEFluidStack() → IAEFluidStack  （public）
+IAEStack#getStackSize() → long；IAEItemStack#createItemStack() → ItemStack
+IAEFluidStack#getFluidStack() → FluidStack
+提交顺序：ForgeHooksClient#drawScreen = Pre → screen.drawScreen → Post
+```
+
+### 改动
+
+| 件 | 改动 |
+|---|---|
+| `collect/AeSlots`（新） | 反射读 AE 槽位真值：物品走 `getAEStack().getStackSize()`，流体走 `getAEFluidStack().getFluidStack()`；流体身份用 **`ae:fluid:<流体注册名>`**，数量单位 mB。没装 AE 时全 null，零成本。取 Class 一律 `Class.forName(name,false,loader)` |
+| `collect/ContainerAccess` | `isPlayerSlot` 加第二条判据（`SlotItemHandler#getItemHandler()` 是 `PlayerInvWrapper` 或 `InvWrapper.getInv()==player.inventory`）；`snapshot/read/findByContainerIndex` 统一走新的 `viewOf()` → 先问 AE 再走 vanilla |
+| `ui/PanelPainter`（新） | 面板改到 `DrawScreenEvent.Post` 里画；**第一次开屏时才注册** ⇒ 派发顺序排在 JEI 等模组之后 ⇒ 面板永远在最上层。注册失败则退回即时绘制（`isReady()` 兜底），面板不会消失 |
+| `ui/ScopeScreen` | `drawScreen` 只负责"替父界面作画 + 准备数据"，`renderPanel` 负责画（由 PanelPainter 回调） |
+
+### 已知限制（新增）
+
+1. **AE 探针关掉终端后记 `no_data`**：ME 网络的内容不在那个方块的物品栏里，
+   而本线还没有"服务端读 AE 网络"的通道（那是 `AeNetworkReader` 级别的活，见 §五）。
+   ⇒ AE 探针目前是"界面开着才读数"。
+2. **流体序列的名字是注册名**（`fluid:water` 这种短名），不是本地化名 —— 身份要稳定。
+3. AE 物品的身份用 registry id（丢 meta/NBT 区分），与其它线一致。
+
+---
+
 ## 四、分阶段计划
 
 | 阶段 | 内容 | 难点 |
@@ -336,3 +381,9 @@ handleOpenWindow
 8. **NBT 槽位模式对双联箱子只覆盖一半**（新）：`DataProbe` 读的是**锚点那个方块实体**的 NBT，
    双联箱子的两半各有一份 27 格的 NBT。要测整只大箱子请用**普通槽位模式**
    （`WorldProbe#containerOf` 已经按 54 格处理），别用 NBT 槽位模式。
+9. **AE 只能"界面开着时读数"**（轮次 4）：槽位真值走客户端菜单（`SlotME#getAEStack` /
+   `SlotFluidME#getAEFluidStack`）。关掉终端后服务端读不到 —— ME 网络不在那个方块的物品栏里。
+   要补的是"服务端读 AE 网络"（rv6：`IGridHost#getGridNode(AEPartLocation)` → `IGrid#getCache` →
+   `IMEInventory#getAvailableItems`），另开一轮。
+10. **AE 流体的身份是 `ae:fluid:<流体注册名>`、数量单位 mB**；图例显示成 `fluid:water` 这类短名
+   （注册名是稳定的，本地化名不稳定 —— 身份优先）。

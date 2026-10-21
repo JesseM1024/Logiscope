@@ -59,8 +59,14 @@ public final class ContainerAccess {
      * 单格时代它只是"列表有点长"；多格监控 + 可视化选格开始之后，
      * 它变成"点到自己背包的格子也会被当成设备槽"，语义就错了。
      *
-     * 判定依据：vanilla 给玩家背包建的槽位是 {@code new Slot(player.getInventory(), i, x, y)}，
-     * 也就是 {@code slot.inventory} 恰好是玩家的 InventoryPlayer 实例（`Slot.container` 是 public 字段）。
+     * 判定依据有两条，缺一不可：
+     *   1. vanilla 给玩家背包建的槽位是 {@code new Slot(player.getInventory(), i, x, y)}，
+     *      也就是 {@code slot.inventory} 恰好是玩家的 InventoryPlayer（`Slot.container` 是 public 字段）。
+     *   2. ★ **模组经常把玩家背包包成 IItemHandler 再建槽**（AE2 rv6 的终端就是
+     *      `new PlayerInvWrapper(player.inventory)` + `SlotPlayerInv`/`SlotPlayerHotBar`），
+     *      这时 {@code slot.inventory} 是 `SlotItemHandler` 内部那个**占位空 InventoryBasic**，
+     *      第 1 条必然判不出来 —— 实测症状：打开 AE 终端，选格页把玩家背包 36 格全列了出来
+     *      （用户 2026-10-22 的反馈）。所以对 `SlotItemHandler` 再往下看一眼它包的是谁。
      */
     public static boolean isPlayerSlot(Slot slot) {
         Minecraft mc = Minecraft.getMinecraft();
@@ -68,7 +74,23 @@ public final class ContainerAccess {
             return false;
         }
         InventoryPlayer inv = mc.player.inventory;
-        return slot.inventory == inv;
+        if (slot.inventory == inv) {
+            return true;
+        }
+        if (slot instanceof net.minecraftforge.items.SlotItemHandler) {
+            net.minecraftforge.items.IItemHandler h =
+                    ((net.minecraftforge.items.SlotItemHandler) slot).getItemHandler();
+            // AE 用的是 PlayerInvWrapper（它继承 CombinedInvWrapper，不是 InvWrapper，
+            // 所以两样都要判）
+            if (h instanceof net.minecraftforge.items.wrapper.PlayerInvWrapper) {
+                return true;
+            }
+            if (h instanceof net.minecraftforge.items.wrapper.InvWrapper
+                    && ((net.minecraftforge.items.wrapper.InvWrapper) h).getInv() == inv) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -102,9 +124,21 @@ public final class ContainerAccess {
             if (!isSelectable(slot)) {
                 continue;
             }
-            out.add(make(i, slot.getSlotIndex(), slot.getStack()));
+            out.add(viewOf(i, slot));
         }
         return out;
+    }
+
+    /**
+     * 一个槽位的快照 —— **先问 AE，问不到再走 vanilla**。
+     *
+     * 为什么需要这一层：AE 终端的 `Slot#getStack()` 给出的数量恒为 1（物品）或直接是空（流体），
+     * 真值只在 `SlotME#getAEStack()` / `SlotFluidME#getAEFluidStack()` 里。
+     * 详见 {@link AeSlots}。没装 AE 时它恒为 null，这一层等于直通。
+     */
+    private static SlotView viewOf(int menuSlotIndex, Slot slot) {
+        SlotView ae = AeSlots.view(slot, menuSlotIndex);
+        return ae != null ? ae : make(menuSlotIndex, slot.getSlotIndex(), slot.getStack());
     }
 
     /** 读单个菜单槽位；越界或没有菜单时返回 null */
@@ -113,7 +147,7 @@ public final class ContainerAccess {
         if (menu == null || slotIndex < 0 || slotIndex >= menu.inventorySlots.size()) {
             return null;
         }
-        return toView(menu, slotIndex);
+        return viewOf(slotIndex, menu.inventorySlots.get(slotIndex));
     }
 
     /** 按容器内下标反查菜单槽；找不到返回 null */
@@ -127,14 +161,13 @@ public final class ContainerAccess {
             if (!isSelectable(slot) || slot.getSlotIndex() != containerSlotIndex) {
                 continue;
             }
-            return toView(menu, i);
+            return viewOf(i, slot);
         }
         return null;
     }
 
     private static SlotView toView(Container menu, int index) {
-        Slot slot = menu.inventorySlots.get(index);
-        return make(index, slot.getSlotIndex(), slot.getStack());
+        return viewOf(index, menu.inventorySlots.get(index));
     }
 
     /** 物品栈 → registry id（拿不到就 "unknown"，绝不编一个像样的假 id） */

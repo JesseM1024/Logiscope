@@ -547,6 +547,9 @@ public final class ScopeScreen extends GuiScreen {
         }
         GuiScreen bg = mc.currentScreen;
         ScopeScreen scope = new ScopeScreen(bg, page, probeId);
+        // 面板的绘制挂在 DrawScreenEvent.Post 上（见 PanelPainter）：第一次开屏时才注册，
+        // 于是派发顺序排在其他模组（JEI 等）之后 ⇒ 面板永远在最上层。
+        PanelPainter.ensureRegistered();
         mc.currentScreen = scope;
         net.minecraft.client.gui.ScaledResolution sr = new net.minecraft.client.gui.ScaledResolution(mc);
         scope.setWorldAndResolution(mc, sr.getScaledWidth(), sr.getScaledHeight());
@@ -560,6 +563,7 @@ public final class ScopeScreen extends GuiScreen {
     /** 没有容器界面可压时，当普通界面打开（例如关掉界面后只看波形） */
     public static void openStandalone(Minecraft mc, Page page, int probeId) {
         GuiScreen bg = mc.currentScreen;
+        PanelPainter.ensureRegistered();
         mc.displayGuiScreen(new ScopeScreen(null, page, probeId));
         // ★ 1.16.5：displayGuiScreen 对"旧屏"会调 onClose()，所以这里会顺手把旧界面关掉
         //   （箱子界面被关就是这么来的）。正常路径不该走到这里 —— 有容器界面时走 openOverlay。
@@ -1698,12 +1702,29 @@ public final class ScopeScreen extends GuiScreen {
         if (overlayMode && parent != null) {
             parent.drawScreen(mouseX, mouseY, partialTick);
         }
-        Draw g = new Draw();
         rebuildIfNeeded();
         refreshAnalyze();
-        // ★ 整段面板绘制都在"关深度 + 无光照 + 混合正常"的干净状态里做。
-        //   原因见 Draw#beginPanel：1.12.2 的物品固定画在 z=100，深度开着时它们会
-        //   直接穿透面板（实机症状："物品被绘制于界面上方"）。
+        // ★ 面板**不在这里画**：Forge 在本方法返回后会派发 GuiScreenEvent.DrawScreenEvent.Post，
+        //   而 JEI 之类的物品列表覆盖层就挂在那个事件上 —— 在 drawScreen 里画就会被它们盖住
+        //   （实机症状：选格页右侧整片物品压在面板之上）。所以面板统一交给
+        //   {@link PanelPainter}（它在本模组第一次开屏时才注册 ⇒ 派发顺序排在其他模组之后）。
+        //   本方法只负责"替父界面作画 + 准备这一帧的数据"。
+        if (!PanelPainter.isReady()) {
+            // 兜底：延后绘制没注册上时，宁可自己画（顺序差一点），也不能让面板消失
+            renderPanel(mouseX, mouseY, partialTick);
+        }
+    }
+
+    /**
+     * 真正画面板的那一段。**只能由 {@link PanelPainter} 在一帧的 DrawScreenEvent.Post 里调用一次**
+     * （父界面已在 {@link #drawScreen} 里画好；两者必须在同一帧内配对）。
+     *
+     * 为什么整段包在 {@link Draw#beginPanel()}/{@link Draw#endPanel()} 里：
+     * 1.12.2 的 `RenderItem` 固定把物品画在 z=100，而面板方块/文字在 z=0 ——
+     * 深度测试开着时物品会**穿透面板**。见 Draw#beginPanel 的注释。
+     */
+    void renderPanel(int mouseX, int mouseY, float partialTick) {
+        Draw g = new Draw();
         g.beginPanel();
         // 悬浮详情每帧重建（鼠标动一下就可能换目标）
         tipKey = 0;

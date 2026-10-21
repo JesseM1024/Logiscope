@@ -211,6 +211,25 @@ API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PO
 
 ---
 
+### [1.12.2] 轮次 4：AE 终端读值 + 面板压在所有覆盖层之上（2026-10-22）
+
+轮次 3 的三条在实机通过（关容器继续追踪 / `Probe data` 都好了）。新报三条，全部定位并修掉：
+
+| # | 反馈 | 根因（`javap` 核实） | 修法 |
+|---|---|---|---|
+| 1 | AE 终端选格页**没筛掉玩家背包** | `AEBaseContainer#bindPlayerInventory` 用 `PlayerInvWrapper` 包玩家背包再建 `SlotPlayerInv` ⇒ `slot.inventory` 是 `SlotItemHandler` 的占位空 `InventoryBasic`，老判据（`slot.inventory == player.inventory`）必然漏 | `isPlayerSlot` 加第二条判据：`SlotItemHandler#getItemHandler()` 是 `PlayerInvWrapper`（或 `InvWrapper.getInv() == player.inventory`） |
+| 1 | AE 物品**数量恒 1** | AE 终端格 `getStack()` 的 count 恒 1；真值在 `SlotME#getAEStack().getStackSize()` | 新增 `collect/AeSlots`（反射）：物品读 `IAEStack#getStackSize()`，显示/身份仍是 registry id |
+| 2 | 流体终端**一条都读不到** | `SlotFluidME.getStack()` 返回空（流体不是物品）；rv6 没有 `wrapped_generic_stack` 占位物品（AE2 10 才有） | `AeSlots` 读 `getAEFluidStack().getFluidStack()`，身份 `ae:fluid:<流体注册名>`，数量 mB |
+| 3 | 选格页右侧整片物品压住面板 | 面板画在 `drawScreen`；JEI 的物品列表挂在 `DrawScreenEvent.Post`（`ForgeHooksClient#drawScreen` = Pre → drawScreen → Post）⇒ JEI 晚于我们 | 新增 `ui/PanelPainter`：面板改在 Post 里画，且**第一次开屏时才注册** ⇒ 派发顺序排在 JEI 之后 ⇒ 面板在最上层；注册失败退回即时绘制 |
+
+**新增已知限制**：AE 探针关掉终端后记 `no_data` —— ME 网络不在那个方块的物品栏里，
+本线还没有服务端读 AE 网络的通道（`AeNetworkReader` 级别的活，另开一轮）。
+流体序列名用注册名（`fluid:water`），不是本地化名。
+
+**产物**：`logiscope-0.1.0-1.12.2.jar`（249 KB），门禁 `ALL_OK`，已换装（旧包 `.old/…-r2.jar`）。
+
+---
+
 ## [1.20.1] 线：现状与移植记录
 
 **现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，
