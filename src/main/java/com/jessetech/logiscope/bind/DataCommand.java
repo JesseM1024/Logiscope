@@ -123,7 +123,13 @@ public final class DataCommand {
         return tag.toString();
     }
 
-    /** 系统消息到达（仅多人命令路会走到这里）：收下回执并吞掉，不刷聊天框 */
+    /**
+     * 系统消息到达。
+     *
+     * ★ 1.12.2 **这条路径已经不会再被走到**：这一代没有 `/data`，多人分支改成如实报"读不到"
+     * （见 {@link #request}）。留着是为了"命令路在别的世代还能用"时不必重写解析 ——
+     * 但本线只编译 1.12.2，所以它实际上是死代码，别在排查时被它误导。
+     */
     @SubscribeEvent
     public static void onChatReceived(ClientChatReceivedEvent event) {
         // 1.20.1 无 System 子类型（20.4+ 才拆分）；事件自带 isSystem()，
