@@ -355,6 +355,48 @@ IAEFluidStack#getFluidStack() → FluidStack
 > 而"这个类没有 IItemHandler 字段"的结果是 **null** ⇒ 所有原版格子第一次判就是 NPE。
 > 换成 `HashMap`（客户端单线程用，不需要并发容器）。
 
+### 轮次 6：放弃"换屏幕"，改成真图层（2026-10-22）
+
+**为什么前两轮的修法治不了 AE 刷新**
+`PacketMEInventoryUpdate#clientPacketData`（javap rv6-stable-7）：
+
+```java
+Minecraft mc = Minecraft.getMinecraft();
+if (mc.currentScreen instanceof GuiCraftConfirm) ...
+else if (mc.currentScreen instanceof GuiCraftingCPU) ...
+else if (mc.currentScreen instanceof GuiMEMonitorable) ((GuiMEMonitorable) mc.currentScreen).postUpdate(list);
+```
+
+**AE 的网络更新包只投递给"当前界面"**。我们把 `mc.currentScreen` 换成自己的面板之后，
+包到客户端就找不到 `GuiMEMonitorable` → `postUpdate` 不执行 → repo 永不更新
+（终端画面冻结、探针读旧值）。而且 `repo.updateView()` 只挂在 `postUpdate` /
+`initGui` / 点击 / 按键上，**不在 `updateScreen` 里** ⇒ 上一版"转发 `parent.updateScreen()`"
+根本救不了。
+
+**改法：`mc.currentScreen` 保持是父界面，面板做成真图层**
+
+| 件 | 做法 |
+|---|---|
+| `ScopeScreen#openOverlay` | 不再改 `mc.currentScreen`；只 `setWorldAndResolution(mc, parent.width, parent.height)` 拿尺寸，然后把自己登记成 `ACTIVE` |
+| `PanelPainter` | `DrawScreenEvent.Post` + `priority = LOWEST`，挂在**父界面**的 Post 上画 |
+| `PanelInput`（新） | `MouseInputEvent.Pre` / `KeyboardInputEvent.Pre` 拦输入：落在面板上就 `setCanceled`（= 吃掉这一条），面板外放行给容器 |
+| tick | 面板不是当前界面 ⇒ `updateScreen` 由 `ClientTickEvent` 驱动；同时检查"父界面还在不在"，不在就把面板收掉 |
+
+**★ `GuiScreen#handleInput()` 的真实语义（javap，必须记住）**：
+```java
+while (Mouse.next()) {                                    // 队列由它推进
+    if (EVENT_BUS.post(new MouseInputEvent.Pre(this))) continue;   // 取消 = 跳过这一条
+    this.handleMouseInput();                              // 只处理当前这一条
+}
+while (Keyboard.next()) { ... KeyboardInputEvent.Pre ... }
+```
+事件是**逐条**发的（不是每 tick 一次），取消一条只是 `continue` 到下一 条 ——
+**所以处理函数里绝不能自己调 `Mouse.next()`/`Keyboard.next()`**（会白白吞掉下一条）。
+
+**顺带修好的**：面板外的点击/滚轮现在能真的转交给容器（旧写法下
+`GuiContainer#mouseClicked` 是 protected，转交不了）；JEI 面对的是一个**正常的容器界面**，
+它的物品列表不再被画到奇怪的位置（I1 的灰块随之消失）。
+
 ---
 
 ## 四、分阶段计划

@@ -247,6 +247,36 @@ API 差异、三个架构级断层与分阶段计划都在 [`PORT-1.12.2.md`](PO
 
 ---
 
+### [1.12.2] 轮次 6：面板改成真图层（不换 currentScreen）（2026-10-22）
+
+I2/I3 通过；I1（Pick cells 灰块）与 I4/I5（AE 终端在面板开着时不刷新）仍在。
+
+**I4/I5 的根因（这次是字节码级确证）**：`PacketMEInventoryUpdate#clientPacketData` 是
+`if (mc.currentScreen instanceof GuiMEMonitorable) ((GuiMEMonitorable) mc.currentScreen).postUpdate(list);`
+—— **AE 的网络更新包只投递给"当前界面"**。我们把 `currentScreen` 换成面板之后，包直接被丢掉；
+而 `repo.updateView()` 只挂在 `postUpdate`/`initGui`/点击/按键上，**不在 `updateScreen` 里**，
+所以上一版"转发 `parent.updateScreen()`"从原理上就不可能生效。
+
+**改法：`mc.currentScreen` 保持是父界面，面板做成真图层**
+
+| 件 | 做法 |
+|---|---|
+| `openOverlay` | 不再改 `currentScreen`，只 `setWorldAndResolution` 拿尺寸 + 登记 `ACTIVE` |
+| `PanelPainter` | `DrawScreenEvent.Post` + `LOWEST`，挂在**父界面**的 Post 上画（面板永远最上层） |
+| `PanelInput`（新） | `MouseInputEvent.Pre`/`KeyboardInputEvent.Pre` 分流：面板内 `setCanceled`，面板外放行 |
+| tick | 面板不是当前界面 ⇒ `updateScreen` 改由 `ClientTickEvent` 驱动；父界面没了就收面板 |
+
+**★ 新核实的 1.12.2 语义**：`GuiScreen#handleInput()` 是
+`while (Mouse.next()) { if (post(Pre)) continue; handleMouseInput(); }` ——
+事件**逐条**发，取消一条只 `continue` 到下一条 ⇒ **处理函数里不能自己调 `next()`**。
+
+**顺带**：面板外的点击/滚轮现在能真的转交给容器（旧限制作废）；JEI 面对正常的容器界面，
+I1 的灰块也一并消失。
+
+**产物**：254 KB，门禁 `ALL_OK`，已换装（旧包 `.old/…-r4.jar`）。
+
+---
+
 ## [1.20.1] 线：现状与移植记录
 
 **现状（2026-10-15）**：功能已与 main **对齐到第十八轮⑤** —— 第十七轮① + 第十八轮①–④ 经搬运到位，

@@ -528,16 +528,27 @@ public final class ScopeScreen extends GuiScreen {
     // ==================================================================
 
     /**
-     * 在当前容器界面上"压一层"打开。
+     * 在当前容器界面上"压一层"打开 —— **不换 `mc.currentScreen`**（★ 1.12.2 的真图层）。
      *
-     * ★ 1.12.2 **没有 GUI 图层栈**（{@code ForgeHooksClient} 里没有 pushGuiLayer），
-     * 而 {@code mc.displayGuiScreen(x)} 会先调**旧屏**的 {@code onGuiClosed()} ——
-     * {@code GuiContainer.onGuiClosed()} 会 {@code mc.player.closeScreen()}，
-     * 于是**服务端把容器关掉**，槽位数据随即消失。
+     * 【为什么不能换屏幕：AE 的网络更新包只发给"当前界面"】
+     * `PacketMEInventoryUpdate#clientPacketData` 的实际逻辑（javap rv6-stable-7）：
+     * <pre>
+     * Minecraft mc = Minecraft.getMinecraft();
+     * if (mc.currentScreen instanceof GuiCraftConfirm) ...
+     * else if (mc.currentScreen instanceof GuiMEMonitorable) ((GuiMEMonitorable) mc.currentScreen).postUpdate(list);
+     * </pre>
+     * 也就是说：**当前界面不是那个终端 GUI，包到了客户端就直接被丢掉** ——
+     * 终端显示冻结、探针读到的也永远是旧值（实测：漏斗往网络里灌，数字不动，
+     * 直到关掉面板。`parent.updateScreen()` 转发**救不了**，因为 `updateView()`
+     * 根本不在 `updateScreen` 里，而在 `postUpdate` 里）。
      *
-     * 所以这里直接改 {@code mc.currentScreen} 字段（public），并手动补上
-     * displayGuiScreen 平时替我们做的事：{@code setWorldAndResolution} + {@code initGui}
-     * + 释放鼠标。父界面**不通知关闭**，渲染时由我们替它画（见 {@link #drawScreen}）。
+     * 所以这一版把面板做成"真图层"：
+     *   · `mc.currentScreen` **保持是父界面** —— 容器的 tick、AE 的包、JEI 的布局全都正常；
+     *   · 面板在 `DrawScreenEvent.Post`（LOWEST）里画 → 永远在最上层；
+     *   · 输入靠 `GuiScreenEvent.MouseInputEvent/KeyboardInputEvent.Pre` 拦（见 {@link PanelInput}），
+     *     落在面板上的事件被吃掉，落在面板外的**照常交给容器**（这是顺带修好的老限制）。
+     *
+     * 1.12.2 没有 `pushGuiLayer`，这也是"压层"唯一不伤父界面的做法。
      */
     public static void openOverlay(Minecraft mc, Page page, int probeId) {
         if (mc.currentScreen == null) {
@@ -547,16 +558,13 @@ public final class ScopeScreen extends GuiScreen {
         }
         GuiScreen bg = mc.currentScreen;
         ScopeScreen scope = new ScopeScreen(bg, page, probeId);
-        // 面板的绘制挂在 DrawScreenEvent.Post 上（见 PanelPainter）：第一次开屏时才注册，
-        // 于是派发顺序排在其他模组（JEI 等）之后 ⇒ 面板永远在最上层。
         PanelPainter.ensureRegistered();
-        mc.currentScreen = scope;
-        net.minecraft.client.gui.ScaledResolution sr = new net.minecraft.client.gui.ScaledResolution(mc);
-        scope.setWorldAndResolution(mc, sr.getScaledWidth(), sr.getScaledHeight());
-        scope.initGui();
-        // 不手动释放鼠标的话界面上根本看不到光标，面板就没法点、没法拖
-        mc.mouseHelper.ungrabMouseCursor();
-        LogiScopeMod.LOGGER.debug("[LogiScope] 压浮层(1.12.2 手管 currentScreen) page={} parent={}",
+        PanelInput.ensureRegistered();
+        // 只为拿到 width/height/fontRenderer（顺带跑一次 initGui 里的面板归位）；
+        // 它**不会**改 mc.currentScreen。
+        scope.setWorldAndResolution(mc, bg.width, bg.height);
+        ACTIVE = scope;
+        LogiScopeMod.LOGGER.debug("[LogiScope] 压浮层(真图层：父界面仍是 currentScreen) page={} parent={}",
                 page, bg.getClass().getSimpleName());
     }
 
@@ -564,7 +572,9 @@ public final class ScopeScreen extends GuiScreen {
     public static void openStandalone(Minecraft mc, Page page, int probeId) {
         GuiScreen bg = mc.currentScreen;
         PanelPainter.ensureRegistered();
-        mc.displayGuiScreen(new ScopeScreen(null, page, probeId));
+        ScopeScreen scope = new ScopeScreen(null, page, probeId);
+        ACTIVE = scope;
+        mc.displayGuiScreen(scope);
         // ★ 1.16.5：displayGuiScreen 对"旧屏"会调 onClose()，所以这里会顺手把旧界面关掉
         //   （箱子界面被关就是这么来的）。正常路径不该走到这里 —— 有容器界面时走 openOverlay。
         LogiScopeMod.LOGGER.debug("[LogiScope] 独立打开 page={} 旧屏={}（旧屏将被 onClose 关闭）",
@@ -592,7 +602,7 @@ public final class ScopeScreen extends GuiScreen {
         pendingFlashKey = langKey;
     }
 
-    /** 关闭面板：浮层模式换回父界面（容器还开着），独立模式回到游戏 */
+    /** 关闭面板：浮层模式只是"摘掉这一层"（父界面一直是 currentScreen），独立模式回到游戏 */
     public void closeScope() {
         // 重入保护：关闭链上任何一环再发起关闭都会无限递归（实测 StackOverflow 闪退）
         if (closing) {
@@ -602,16 +612,88 @@ public final class ScopeScreen extends GuiScreen {
         Minecraft mc = Minecraft.getMinecraft();
         LogiScopeMod.LOGGER.debug("[LogiScope] 关闭面板 overlay={}", overlayMode);
         if (overlayMode && parent != null) {
-            // 直接把 currentScreen 换回父界面：不调 displayGuiScreen，
-            // 否则又会触发"关闭容器"那条链。
-            mc.currentScreen = parent;
-            net.minecraft.client.gui.ScaledResolution sr = new net.minecraft.client.gui.ScaledResolution(mc);
-            parent.setWorldAndResolution(mc, sr.getScaledWidth(), sr.getScaledHeight());
-            parent.initGui();
+            // ★ 真图层：**什么都不用还给父界面** —— 它本来就是 mc.currentScreen，
+            //   也从没被 onGuiClosed/closePlayerScreen 碰过。只要把这一层摘掉。
+            if (ACTIVE == this) {
+                ACTIVE = null;
+            }
         } else {
             // 独立模式：正常关屏（会重新抓鼠标）
+            if (ACTIVE == this) {
+                ACTIVE = null;
+            }
             mc.displayGuiScreen(null);
         }
+    }
+
+    // ------------------------------------------------------------------
+    // 真图层：面板实例表（同一时刻只可能有一个浮层面板）
+    // ------------------------------------------------------------------
+
+    /** 当前压着的面板；null = 没开。**输入与绘制都靠它定位**。 */
+    private static ScopeScreen ACTIVE;
+
+    /** 由 {@link PanelPainter} / {@link PanelInput} / {@link KeyBindings} 查 */
+    @org.jetbrains.annotations.Nullable
+    public static ScopeScreen activePanel() {
+        return ACTIVE;
+    }
+
+    /** 是不是"压在容器界面上"的浮层（false = 独立屏，那种情况我们就是 currentScreen） */
+    boolean isOverlay() {
+        return overlayMode;
+    }
+
+    /**
+     * 这一帧应该挂在**哪个界面**的 `DrawScreenEvent.Post` 上画：
+     * 浮层模式 = 父界面（它是 currentScreen）；独立模式 = 我们自己。
+     */
+    GuiScreen renderTarget() {
+        return overlayMode && parent != null ? parent : this;
+    }
+
+    /** 这个坐标是否落在面板矩形里（输入分流的判据） */
+    boolean panelContains(int mouseX, int mouseY) {
+        return overPanel(mouseX, mouseY, layout());
+    }
+
+    /**
+     * 面板是否正在"拖东西"（拖动 / 缩放 / 框选 / 滑条 / 拖选格子）。
+     * 是的话，面板外的鼠标移动与松手也必须归我们 —— 否则拖到面板外就断了。
+     */
+    boolean panelDragging() {
+        return dragging || resizing || selecting || dataSliderDrag || cellDragButton >= 0;
+    }
+
+    /** 面板是否正在吃键盘（有输入框聚焦） */
+    boolean panelWantsKeys() {
+        return renameFocus || archFilterFocus || pickerFilterFocus || dataFocus != 0;
+    }
+
+    // ---- 输入适配：把 Forge 的 GUI 输入事件翻译成既有的 handleXxx ----
+
+    boolean feedMouseDown(int mouseX, int mouseY, int button) {
+        return handleClick(mouseX, mouseY, button);
+    }
+
+    boolean feedMouseUp(int mouseX, int mouseY, int button) {
+        return handleRelease(mouseX, mouseY, button);
+    }
+
+    boolean feedMouseMove(int mouseX, int mouseY, int button) {
+        return handleDrag(mouseX, mouseY, button);
+    }
+
+    boolean feedScroll(int mouseX, int mouseY, int dir) {
+        return handleScroll(mouseX, mouseY, dir);
+    }
+
+    boolean feedChar(char ch) {
+        return handleCharTyped(ch);
+    }
+
+    boolean feedKey(int keyCode) {
+        return handleKeyPressed(keyCode);
     }
 
     /**
@@ -675,15 +757,10 @@ public final class ScopeScreen extends GuiScreen {
 
     @Override
     public void updateScreen() {
-        // ★ 被压住的父界面**必须继续 tick** —— 1.12.2 的实测坑（2026-10-22）：
-        //   AE 终端的物品/流体列表是在 `GuiMEMonitorable#updateScreen()` 里把网络推送
-        //   合进 repo 的。我们换掉了 `mc.currentScreen`，父界面就再也不 updateScreen ⇒
-        //   **终端画面冻结、探针读到的也是旧值**（症状：漏斗往网络里灌东西，数字不动，
-        //   直到关掉探针面板才刷新）。原版箱子不受影响，是因为容器内容由服务端
-        //   `detectAndSendChanges` 主动推下来，不依赖 GUI 自己轮询。
-        if (overlayMode && parent != null) {
-            parent.updateScreen();
-        }
+        // 浮层模式下我们不是 currentScreen ⇒ 这个方法是 **PanelInput 从客户端 tick 里调的**
+        // （vanilla 只会 tick 当前界面 = 父容器，而那种"替父界面 tick"从一开始就跑不通：
+        //  AE 的网络更新包走的是 `currentScreen instanceof GuiMEMonitorable` 的投递，
+        //  在 `updateScreen` 里怎么转发都补不回来。见 openOverlay 的注释。）
         refreshSnapshots();
         if (page == Page.DATA) {
             tickDataPage();
@@ -1704,20 +1781,19 @@ public final class ScopeScreen extends GuiScreen {
     // 渲染
     // ==================================================================
 
+    /**
+     * 只在**独立模式**下被调用（那时我们才是 `mc.currentScreen`）。
+     *
+     * 浮层模式下面板不是当前界面 —— 父容器才是，由 vanilla 负责渲染它，
+     * 我们只在 `DrawScreenEvent.Post` 里往上叠一层（见 {@link PanelPainter}）。
+     * 所以这里没有任何绘制代码：数据刷新与绘制都挪到 {@link #renderPanel} 里了。
+     */
     @Override
     public void drawScreen(int mouseX, int mouseY, float partialTick) {
-        // ★ 1.12.2 没有图层栈：**父界面（容器）由我们替它画**，否则面板背后是黑的。
-        // 画在面板之前，顺序与另外三条线的"图层次序"等价。
         if (overlayMode && parent != null) {
+            // 理论上走不到（浮层模式不会把本屏设成 currentScreen）；留着以防将来改回去
             parent.drawScreen(mouseX, mouseY, partialTick);
         }
-        rebuildIfNeeded();
-        refreshAnalyze();
-        // ★ 面板**不在这里画**：Forge 在本方法返回后会派发 GuiScreenEvent.DrawScreenEvent.Post，
-        //   而 JEI 之类的物品列表覆盖层就挂在那个事件上 —— 在 drawScreen 里画就会被它们盖住
-        //   （实机症状：选格页右侧整片物品压在面板之上）。所以面板统一交给
-        //   {@link PanelPainter}（它在本模组第一次开屏时才注册 ⇒ 派发顺序排在其他模组之后）。
-        //   本方法只负责"替父界面作画 + 准备这一帧的数据"。
         if (!PanelPainter.isReady()) {
             // 兜底：延后绘制没注册上时，宁可自己画（顺序差一点），也不能让面板消失
             renderPanel(mouseX, mouseY, partialTick);
@@ -1734,6 +1810,17 @@ public final class ScopeScreen extends GuiScreen {
      */
     void renderPanel(int mouseX, int mouseY, float partialTick) {
         Draw g = new Draw();
+        // 浮层模式：尺寸跟着父界面走（玩家改窗口大小时父界面会重新 init，我们不跟着就会被夹住）
+        GuiScreen target = renderTarget();
+        if (target != this && (this.width != target.width || this.height != target.height)) {
+            this.width = target.width;
+            this.height = target.height;
+        }
+        // ★ 帧级状态刷新放在这里（不是 drawScreen）：浮层模式下我们不是 currentScreen，
+        //   `drawScreen` **一次都不会被调用**（父界面才是被渲染的那个）。
+        //   Post 里的这一次调用是两种模式**唯一**共用的"每帧一次"的入口。
+        rebuildIfNeeded();
+        refreshAnalyze();
         g.beginPanel();
         // 悬浮详情每帧重建（鼠标动一下就可能换目标）
         tipKey = 0;

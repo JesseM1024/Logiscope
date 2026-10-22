@@ -201,10 +201,12 @@ public final class KeyBindings {
             return;
         }
 
-        // 面板已经开着 → 再按一次就是收起（开关语义）
-        if (screen instanceof ScopeScreen) {
+        // 面板已经开着 → 再按一次就是收起（开关语义）。
+        // ★ 浮层模式下**面板不是 currentScreen**（父容器才是），所以判据是 activePanel()。
+        ScopeScreen open = ScopeScreen.activePanel();
+        if (open != null) {
             lastHotkeyTick = now;
-            ((ScopeScreen) screen).closeScope();
+            open.closeScope();
             return;
         }
 

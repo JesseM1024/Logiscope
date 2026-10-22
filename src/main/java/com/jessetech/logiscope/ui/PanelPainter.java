@@ -69,13 +69,15 @@ public final class PanelPainter {
      */
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public static void onDrawScreenPost(GuiScreenEvent.DrawScreenEvent.Post event) {
-        GuiScreen gui = event.getGui();
-        if (!(gui instanceof ScopeScreen)) {
+        ScopeScreen panel = ScopeScreen.activePanel();
+        if (panel == null) {
             return;
         }
-        // 这一帧的父界面/数据已在 ScopeScreen#drawScreen 里准备好，这里只补画面板。
-        // 顺带把 GL 状态包起来（beginPanel/endPanel 在 renderPanel 内部）。
-        ((ScopeScreen) gui).renderPanel(event.getMouseX(), event.getMouseY(),
-                event.getRenderPartialTicks());
+        // 浮层模式挂在**父界面**的 Post 上（父界面才是 currentScreen），
+        // 独立模式挂在自己身上 —— 由 ScopeScreen#renderTarget 统一回答。
+        if (event.getGui() != panel.renderTarget()) {
+            return;
+        }
+        panel.renderPanel(event.getMouseX(), event.getMouseY(), event.getRenderPartialTicks());
     }
 }
