@@ -665,6 +665,17 @@ public final class ScopeScreen extends GuiScreen {
         return dragging || resizing || selecting || dataSliderDrag || cellDragButton >= 0;
     }
 
+    /**
+     * 面板外的点击要不要**也吃掉**。
+     *
+     * 默认为 false（放行给容器 —— 面板开着也能拿放物品）。
+     * 但**选格模式必须吃掉**：面板外就是容器格子，放行的话一次点击等于"拿起来/放下去"，
+     * 选格逻辑就彻底失效了（用户 2026-10-22 的反馈第 1 条）。
+     */
+    boolean panelBlocksOuterClicks() {
+        return cellMode;
+    }
+
     /** 面板是否正在吃键盘（有输入框聚焦） */
     boolean panelWantsKeys() {
         return renameFocus || archFilterFocus || pickerFilterFocus || dataFocus != 0;
@@ -697,11 +708,26 @@ public final class ScopeScreen extends GuiScreen {
     }
 
     /**
+     * ★ 可视化选格（在容器界面上直接框格子）在本线**暂时关闭**。
+     *
+     * 实机症状（1.12.2，多轮复现）：一开 Pick cells，面板就整片变成纯灰块；
+     * 已经排除了深度（`beginPanel` 关深度）、不透明底、事件优先级（`LOWEST`）、
+     * 假屏幕换层（现已改成真图层）这几条，仍会在**进入 cellMode 的那一帧**出现。
+     * 唯一只在 cellMode 里发生、且发生在面板自身填充**之前**的动作是
+     * `renderCellOverlay → repaintSlotItem → Draw#renderItem`（在面板还没画的时候先画了物品）。
+     *
+     * 用户决定：**先把这个功能关掉**（按钮置灰 + 悬浮说明），保留"按序号勾选"这条路 ——
+     * 功能不丢，只是不能直接在容器界面上点格子。
+     * 以后要重开：把这里改成 true 即可，同时记得把 {@link PanelInput} 里
+     * "cellMode 时不吃面板外点击"的那条保留（否则点面板外会拿放物品，选格就废了）。
+     */
+    private static final boolean VISUAL_CELL_PICK = false;
+
+    /**
      * ★ 1.12.2 只有一个关闭钩子：{@code onGuiClosed()}。
      *
      * 与 1.16.5 不同，这一代"被通知关闭"和"用户按 ESC"是**同一个**回调，
      * 所以这里绝不能调 {@link #closeScope()}（会变成关闭→回调→再关闭的无限递归）。
-     * ESC 由 {@code keyTyped} 自己接管（见那里的 handleKeyPressed）。
      */
     @Override
     public void onGuiClosed() {
@@ -1523,7 +1549,7 @@ public final class ScopeScreen extends GuiScreen {
                         pick != null && pick.target().hasPersistentId() && nbtSlotDetected));
                 out.add(new Item("cell_mode",
                         cellMode ? tr("logiscope.btn.cell_mode_on") : tr("logiscope.btn.cell_mode"),
-                        menu && !aeMode));
+                        menu && !aeMode && VISUAL_CELL_PICK));
                 out.add(new Item("clear_cells", tr("logiscope.btn.clear_cells"), selectionCount() > 0));
                 // 
                 ProbeInstance pp = pickerProbe();
@@ -5137,6 +5163,19 @@ public final class ScopeScreen extends GuiScreen {
      * 选格页第一行的 {@code 槽 …}（完整格子列表）。
      */
     private void updateHoverTips(Layout L, int mouseX, int mouseY) {
+        // --- 0) 置灰的「Pick cells」也要能问出原因 ---
+        // 只把它变灰而不解释，用户只会以为按钮坏了。这条不受 enabled 影响。
+        if (page == Page.PICKER) {
+            for (Chip c : L.buttons()) {
+                if (c.id().equals("cell_mode") && c.hit(mouseX, mouseY)) {
+                    List<String> lines = new ArrayList<>();
+                    lines.add(tr("logiscope.tip.cell_mode_broken_hint"));
+                    wantTip(6, tr("logiscope.tip.cell_mode_broken"), lines);
+                    return;
+                }
+            }
+        }
+
         // --- 1) 图例 +N：列出被收起的那些线 ---
         for (Chip c : L.legend()) {
             if (!c.id().equals("legend_more") || !c.hit(mouseX, mouseY)) {

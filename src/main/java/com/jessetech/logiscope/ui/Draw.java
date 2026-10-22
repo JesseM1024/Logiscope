@@ -90,6 +90,13 @@ public final class Draw {
         net.minecraft.client.renderer.GlStateManager.disableLighting();
         net.minecraft.client.renderer.GlStateManager.disableRescaleNormal();
         net.minecraft.client.renderer.GlStateManager.disableDepth();
+        // ★ 纹理状态的"缓存重同步"：
+        //   GlStateManager 在 Java 侧缓存 GL 状态。只要别的绘制者用**原始 GL** 改过
+        //   （模组的 TEISR 里直接调 GL11.glEnable 很常见），缓存就和真实状态脱钩 ——
+        //   此后 Gui#drawRect 里的 disableTexture2D() 会退化成空操作，方块被当成**贴图**画，
+        //   采样到上一个 texcoord 的单个 texel ⇒ 整片纯色（实机症状：面板变成一整块灰）。
+        //   先 enable 再 disable 能把两侧重新对齐（enable 只在"缓存=已启用"时才真正下发）。
+        syncTexture2D(false);
         net.minecraft.client.renderer.GlStateManager.enableBlend();
         net.minecraft.client.renderer.GlStateManager.tryBlendFuncSeparate(
                 net.minecraft.client.renderer.GlStateManager.SourceFactor.SRC_ALPHA,
@@ -97,6 +104,20 @@ public final class Draw {
                 net.minecraft.client.renderer.GlStateManager.SourceFactor.ONE,
                 net.minecraft.client.renderer.GlStateManager.DestFactor.ZERO);
         net.minecraft.client.renderer.GlStateManager.color(1.0F, 1.0F, 1.0F, 1.0F);
+    }
+
+    /**
+     * 把 `GL_TEXTURE_2D` 的**真实状态**与 `GlStateManager` 的缓存对齐到目标值。
+     * 见 {@link #beginPanel()} 的注释：两个方向都要"反着来一次"才能覆盖两种脱钩。
+     */
+    private static void syncTexture2D(boolean want) {
+        if (want) {
+            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
+            net.minecraft.client.renderer.GlStateManager.enableTexture2D();
+        } else {
+            net.minecraft.client.renderer.GlStateManager.enableTexture2D();
+            net.minecraft.client.renderer.GlStateManager.disableTexture2D();
+        }
     }
 
     /**

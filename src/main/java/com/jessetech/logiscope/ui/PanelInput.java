@@ -120,14 +120,15 @@ public final class PanelInput {
         if (button >= 0) {
             boolean down = Mouse.getEventButtonState();
             boolean inside = p.panelContains(mouseX, mouseY);
-            // 面板外、且面板没在拖东西 → 完全放行（容器照常能点）
-            if (!inside && !p.panelDragging()) {
+            // 面板外、面板没在拖东西、而且不是选格模式 → 完全放行（容器照常能点）；
+            // 选格模式下必须吃掉：面板外就是容器格子，放行等于"拿起来/放下去"，选格就废了。
+            if (!inside && !p.panelDragging() && !p.panelBlocksOuterClicks()) {
                 return;
             }
             boolean consumed = down
                     ? p.feedMouseDown(mouseX, mouseY, button)
                     : p.feedMouseUp(mouseX, mouseY, button);
-            if (!consumed && !inside) {
+            if (!consumed && !inside && !p.panelBlocksOuterClicks()) {
                 return;   // 没吃到，又在面板外 → 还是给容器
             }
             heldButton = down ? button : -1;
@@ -138,7 +139,7 @@ public final class PanelInput {
         // ---- 滚轮 ----
         int wheel = Mouse.getEventDWheel();
         if (wheel != 0) {
-            if (!p.panelContains(mouseX, mouseY)) {
+            if (!p.panelContains(mouseX, mouseY) && !p.panelBlocksOuterClicks()) {
                 return;   // 面板外滚轮交给容器（部分模组的界面用滚轮翻页）
             }
             p.feedScroll(mouseX, mouseY, wheel > 0 ? 1 : -1);

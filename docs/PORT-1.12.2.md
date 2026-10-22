@@ -397,6 +397,24 @@ while (Keyboard.next()) { ... KeyboardInputEvent.Pre ... }
 `GuiContainer#mouseClicked` 是 protected，转交不了）；JEI 面对的是一个**正常的容器界面**，
 它的物品列表不再被画到奇怪的位置（I1 的灰块随之消失）。
 
+### 轮次 7：可视化选格先关掉（2026-10-22）
+
+真图层落地后，AE 刷新已经正常（I4/I5 通过）。剩下的灰块只在**选格模式**下出现，
+而且是在"进入 cellMode 的那一帧"开始：`renderCellOverlay → repaintSlotItem → Draw#renderItem`
+是**唯一**只在 cellMode 里发生、且发生在面板自身填充**之前**的动作。
+
+已经排除过的（都写在这里，别再重复试）：
+关深度、面板底不透明、事件优先级 `LOWEST`、假屏幕换层、父界面 tick 转发。
+
+**决定（用户口径）**：先关掉这个功能，保留"按序号/名字勾选"那条路 —— 功能不丢。
+
+| 件 | 改动 |
+|---|---|
+| `ScopeScreen.VISUAL_CELL_PICK = false` | 「Pick cells」按钮置灰；以后要重开改成 `true` 一行即可 |
+| `updateHoverTips` | 置灰的按钮也能问出原因：`logiscope.tip.cell_mode_broken` + `…_hint`（中英都加了） |
+| `PanelInput` | **选格模式下不吃"放行"**：`panelBlocksOuterClicks()` 为真时，面板外的点击/滚轮也一律吃掉 —— 否则面板外就是容器格子，一点就"拿起来/放下去"，选格逻辑直接失效（用户反馈） |
+| `Draw.beginPanel` | 加一次 `GL_TEXTURE_2D` 的**缓存重同步**（先 enable 再 disable）：`GlStateManager` 的缓存在别的绘制者用原始 GL 改过状态后会与真实状态脱钩，此时 `drawRect` 的 `disableTexture2D()` 退化成空操作 ⇒ 方块被当贴图画、采样到单个 texel ⇒ 整片纯色。这条是为将来重开选格留的，本轮无法验证 |
+
 ---
 
 ## 四、分阶段计划
