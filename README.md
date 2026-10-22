@@ -1,5 +1,7 @@
 # LogiScope
 
+<img src="src/main/resources/logiscope.png" width="64" alt="LogiScope 模组图标">
+
 **纯客户端物流探测示波器** —— 给模组机器装一台示波器。
 
 按 `F9` 呼出面板：可以**创建多个探针**同时监测（面板里是一个"正在运行的探针"列表，
