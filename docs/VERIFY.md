@@ -1,6 +1,6 @@
 # LogiScope · 实机验证清单（1.12.2 线）
 
-> 版本 `0.1.0-1.12.2`，jar 已装进 `1.12.2-Forge` 实例（构建基线 Forge 14.23.5.2859 /
+> 版本 `0.1.3-1.12.2`，jar 已装进 `1.12.2-Forge` 实例（构建基线 Forge 14.23.5.2859 /
 > 实例是 2864，只差官方小版本，二进制兼容）。
 > **G 组、H1–H4 已通过；I2/I3 通过，I1/I4/I5 未过 → 本轮（轮次 6）把 I1–I5 再跑一遍**。
 > A–F 是完整性检查。★ = 优先项（坏了就没法用）。
@@ -12,7 +12,7 @@
 
 ```bat
 cd /d D:\dev\logiscope
-gradlew.bat build --offline               :: 出包 -> build\libs\logiscope-0.1.0-1.12.2.jar
+gradlew.bat build --offline               :: 出包 -> build\libs\logiscope-0.1.3-1.12.2.jar
 dev-check\offline-check.bat               :: ALL_OK（不需要开游戏）
 gradlew.bat runClient                     :: dev 运行目录 = 1_12_2_forge\
 ```
