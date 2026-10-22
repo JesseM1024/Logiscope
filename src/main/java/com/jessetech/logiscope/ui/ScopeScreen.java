@@ -5021,6 +5021,14 @@ public final class ScopeScreen extends Screen {
     }
 
     /** 画详情框（跟着鼠标，夹在面板内；行多时底部给"x / y 滚轮"提示） */
+    /**
+     * 悬浮详情框。
+     *
+     * ★ 两条硬约束（1.12.2 线实测反馈，已同步到本线）：
+     *   1. **整框限制在游戏窗口内** —— 过去只按"面板矩形"夹，面板贴着屏幕边时框就跑出去了；
+     *   2. **长文本按像素宽度折行**（{@link #wrapText}），不是截断 —— 一行 150 个字也读得完。
+     * 折行在**画之前**做：它会改变行数 ⇒ 高度、滚动上限、页码都得按"折行后的行数"算。
+     */
     private void renderTip(Draw g, Layout L, int mouseX, int mouseY) {
         if (tipLines.isEmpty()) {
             tipRect = null;
@@ -5030,33 +5038,68 @@ public final class ScopeScreen extends Screen {
             tipKeyShown = tipKey;
             tipScroll = 0;
         }
-        int lineH = 10;
-        int maxRows = 12;
-        int w = this.font.getStringWidth(tipTitle) + 10;
+        final int lineH = 10;
+        final int margin = 4;
+        // 可用宽度：屏幕（不是面板）留边距，再给框留 4px 描边
+        int maxTextW = Math.max(40, this.width - 2 * margin - 14);
+        // 正常提示不必铺满整屏：超过 ~420px 就折行
+        maxTextW = Math.min(maxTextW, 420);
+
+        List<String> titleLines = wrapText(tipTitle.isEmpty() ? " " : tipTitle, maxTextW);
+        List<String> body = new ArrayList<>();
         for (String l : tipLines) {
-            w = Math.max(w, this.font.getStringWidth(l) + 10);
+            body.addAll(wrapText(l, maxTextW));
         }
-        int rows = Math.min(tipLines.size(), maxRows);
-        int h = (rows + 1) * lineH + 4 + (tipLines.size() > rows ? lineH : 0);
+
+        // 高度也夹进屏幕：行数上限由可用高度决定
+        int maxRows = Math.max(1, Math.min(14, (this.height - 2 * margin - 4) / lineH - 2));
+        int rows = Math.min(body.size(), maxRows);
+        boolean scrollable = body.size() > rows;
+        tipScroll = Math.max(0, Math.min(tipScroll, Math.max(0, body.size() - rows)));
+
+        int w = 0;
+        for (String l : titleLines) {
+            w = Math.max(w, this.font.getStringWidth(l));
+        }
+        for (String l : body) {
+            w = Math.max(w, this.font.getStringWidth(l));
+        }
+        String more = scrollable
+                ? (tipScroll + rows) + " / " + body.size() + "  " + tr("logiscope.hint.scroll")
+                : null;
+        if (more != null) {
+            w = Math.max(w, this.font.getStringWidth(more));
+        }
+        w = Math.min(w, maxTextW) + 10;
+
+        int h = (titleLines.size() + rows) * lineH + 4 + (scrollable ? lineH : 0);
+        h = Math.min(h, this.height - 2 * margin);
+
+        // 默认放在光标右下；放不下就翻到左上，仍然放不下就贴边 —— 保证**整框可见**
         int x = mouseX + 10;
         int y = mouseY + 10;
-        if (x + w > L.x() + L.w() - 2) {
-            x = Math.max(L.x() + 2, mouseX - w - 10);
+        if (x + w + margin > this.width) {
+            x = mouseX - w - 10;
         }
-        if (y + h > L.y() + L.h() - 2) {
-            y = Math.max(L.y() + 2, mouseY - h - 10);
+        x = Math.max(margin, Math.min(x, this.width - w - margin));
+        if (y + h + margin > this.height) {
+            y = mouseY - h - 10;
         }
-        tipScroll = Math.max(0, Math.min(tipScroll, Math.max(0, tipLines.size() - rows)));
+        y = Math.max(margin, Math.min(y, this.height - h - margin));
+
         g.fill(x - 2, y - 2, x + w + 2, y + h, 0xF2181822);
         ring(g, x - 2, y - 2, w + 4, h + 2, 0xFF3A3A4A);
-        g.drawString(this.font, tipTitle, x + 2, y, COLOR_HILIGHT, false);
-        int ly = y + lineH + 1;
-        for (int i = tipScroll; i < Math.min(tipLines.size(), tipScroll + rows); i++) {
-            g.drawString(this.font, cut(tipLines.get(i), w - 6), x + 2, ly, 0xFFE0E0EC, false);
+        int ty = y;
+        for (String l : titleLines) {
+            g.drawString(this.font, l, x + 2, ty, COLOR_HILIGHT, false);
+            ty += lineH;
+        }
+        int ly = ty + 1;
+        for (int i = tipScroll; i < Math.min(body.size(), tipScroll + rows); i++) {
+            g.drawString(this.font, body.get(i), x + 2, ly, 0xFFE0E0EC, false);
             ly += lineH;
         }
-        if (tipLines.size() > rows) {
-            String more = (tipScroll + rows) + " / " + tipLines.size() + "  " + tr("logiscope.hint.scroll");
+        if (more != null) {
             g.drawString(this.font, more, x + 2, y + h - lineH, 0xFF9099A8, false);
         }
         tipBuf[0] = x - 2;
