@@ -189,6 +189,7 @@
   "logiscope.picker.ae_hint": "读数 = 该物品 / 流体在此 AE 网络中的可用数量；网络断电时记 no-data，物品不在网内记 0",
   "logiscope.flash.ae_none": "先点选要监测的物品 / 流体",
   "logiscope.flash.ae_replaced": "已更新 AE 网络监测：当前目标 %s 条",
+  "logiscope.flash.ae_need_anchor": "AE 监测需要方块锚点：当前界面没有坐标（无线终端 / 快捷键打开的界面）。请对着 ME 终端方块右键打开后再选物品",
   "logiscope.picker.nbt_mode_hint": "NBT 追踪：按数据里的 slot 号建目标 —— 点哪格测哪格；「完成」= 覆写勾选的格子（默认关）",
   "logiscope.data.slot_fallback": "槽位 %s",
   "logiscope.flash.nbt_mode_off": "已退出 NBT 追踪"
