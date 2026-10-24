@@ -3983,6 +3983,13 @@ public final class ScopeScreen extends GuiScreen {
      * 界面上选了哪些物品，探针就只测哪些（与槽位锚点同一覆写语义）。
      * DATA 页的纯路径目标与 NBT 槽位锚点保留；一个都没选 = 什么都不动
      * （"读不到数据" ≠ "用户想清空"，同一纪律）。
+     *
+     * **没有锚点就拒绝提交**：AE 读值靠"这台设备方块所在的网络"
+     * （{@code AeNetworkReader} 走 AE2 的 node host 查询，入参是 level + pos），
+     * 而采样路径在维度为 null 时直接早退 —— 存下去只会得到一个
+     * **永远 no_data、连状态都显示 RECORDING 的空目标**。什么时候没有锚点：用无线终端
+     * 或快捷键打开的界面（客户端没有右键方块那一刻，见 {@code ProbeContext} 的第三种
+     * 来源）；右键方块终端打开则一定有坐标。0.1.3 的闪退就是这里把 null 塞进了目标。
      */
     private void commitAeTargets(ProbeInstance p) {
         if (selectedAeIds.isEmpty()) {
@@ -3990,6 +3997,10 @@ public final class ScopeScreen extends GuiScreen {
             return;
         }
         ProbeTarget t = p.target();
+        if (!t.hasPersistentId()) {
+            say(tr("logiscope.flash.ae_need_anchor"));
+            return;
+        }
         List<DataTarget> ae = new ArrayList<>();
         for (String id : selectedAeIds) {
             ae.add(DataTarget.aeNetwork(id, t.deviceName(), t.dimension(), t.pos()));

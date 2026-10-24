@@ -2,6 +2,7 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.analysis.AeKeyText;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.text.TextComponentTranslation;
 import com.jessetech.logiscope.compat.Dim;
 import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
@@ -215,7 +216,19 @@ public final class DataTarget {
         return false;
     }
 
+    /**
+     * 锚点的显示写法（{@code overworld 10,64,10}）。
+     *
+     * **空锚点是合法状态，不是异常**：模组界面用无线终端 / 快捷键打开时，客户端没有
+     * "右键方块"那一刻，维度与坐标都拿不到（见 {@code ProbeContext} 的第三种来源）。
+     * 这种目标在显示层只能标成"运行时锚点" —— 0.1.3 的 AE 监测闪退就是这里直接解引用
+     * {@code dimension.path()}（dimension 为 null）。"AE 网络目标必须有锚点才能读值"
+     * 这条约束由 {@code ScopeScreen#commitAeTargets} 拦，不归显示层管。
+     */
     public String anchorText() {
+        if (dimension == null || pos == null) {
+            return new TextComponentTranslation("logiscope.anchor.runtime").getUnformattedText();
+        }
         return dimension.path() + " " + pos.getX() + "," + pos.getY() + "," + pos.getZ();
     }
 
