@@ -1,7 +1,7 @@
 package com.jessetech.logiscope.ui;
 
-import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.ChartData;
+import com.jessetech.logiscope.bind.NameText;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -841,17 +841,18 @@ public final class ChartRenderer {
     }
 
     /**
-     * 给图例 / 读数用的短名字。
+     * 给图例 / 读数 / 计算页用的短名字。
      *
-     * 物品是 registry id 的短名；AE 的非物品键（流体 / 化学品 / 电力）身份是一整段
-     * SNBT，走 {@link AeKeyText#label} 取里头那个 id 的短名（如 {@code water}）——
-     * 否则图例上会出现 `{#t:"ae2:f",id:...}` 这种东西。
+     * **统一走 {@link NameText}**：注册名（{@code iron_ingot} / {@code water}）还是实际名
+     * （{@code 铁锭} / {@code 水}）由「名称」开关决定，选格页 / 图例 / 计算三处同口径。
+     * 开关只影响显示 —— 系列的身份串（{@code ChartData#series} 里的 {@code itemId}）不变，
+     * 所以聚合、存档、导出都不受影响。
      */
     public static String label(int seriesIndex, String itemId) {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
         }
-        return AeKeyText.label(itemId);
+        return NameText.of(itemId);
     }
 
     /**

@@ -323,6 +323,34 @@ VERIFY / GOALS / README）。
 
 离线：build 通过；TestChart 489 条全过（纯 UI 行为，无可断言逻辑）。
 
+## 第二十轮①：名称显示开关（选格页 / 图表页 / 计算页三处同源，2026-10-24）
+
+**需求**（用户原话归纳）：AE 监测里，选格页对通用包裹堆栈（流体 / 化学品）显示**实际名**
+（水、熔岩、氢），物品显示注册名（`iron_ingot`）；而图表图例对同一批键只显示注册名
+（`water`）—— 同一份数据在两个页面名字对不上。要一个**可记忆、与 config 同步**的按钮，
+在选格页 / 图表页 / 计算页各放一个，统一决定"注册名还是实际名"，
+**不影响 probe data 里的名字**。
+
+| 件 | 内容 |
+|---|---|
+| `bind/NameText`（新） | 所有显示名的唯一出口：`of(id[, hint])`。`REGISTRY` = `AeKeyText.label`（去命名空间的 id，AE 键取 SNBT 里的 `id`）；`DISPLAY` = 物品走 `Item#getDescription()`、AE 键走 `AeKeys.decodeKey` + `AEKey#getDisplayName()`；解析不出来**退回注册名，不编名字** |
+| `LogiScopeConfig` | 新增 `display.nameDisplay`（默认 **true = 实际名**）+ `nameDisplay()` / `setNameDisplay()`（写入即 `SPEC.save()` 落盘） |
+| `ui/ChartRenderer#label` | 改为 `NameText.of(itemId)` —— 图例、实时读数、计算页标题与列表、悬浮详情**全部跟着切** |
+| `ui/ScopeScreen` | 选格页行文字与筛选（`NameText.of(v.itemId(), v.label())`，AE 行复用已拿到的真名）；三个页面各一个 `name_style` 按钮（文案 `名称: 实际名 / 注册名`），点一下写回 config |
+| `assets/logiscope/lang/*` | `logiscope.btn.name_style` / `logiscope.name.display` / `logiscope.name.registry` / `logiscope.flash.name_style`（中英各 4 条，190 键） |
+
+**只影响显示**：系列身份、`selectedAeIds`、存档与导出仍用键身份（物品 = registry id，
+AE 非物品 = `ae:` + SNBT）—— 换开关不会让旧存档对不上新曲线，也不影响同物品多格求和。
+
+★ 计算页的标题是**拼好缓存的**（键 = 区间 × 曲线 × 对象 × 运算），换风格不在这四个键里；
+所以切换时顺手把 `aLo` 置 `Long.MIN_VALUE` 强制重算，否则标题会停在旧写法。
+
+★ `NameText.of` 两种写法都缓存（选格页每帧每行、图例每帧每系列都要算），
+切换风格时整表作废；`style()` 里连 `NoClassDefFoundError` 都兜住（离线断言环境没有配置类）。
+
+离线：`build` 通过；TestChart 489 条全过（新逻辑依赖注册表/AE，不适合进纯逻辑断言）。
+**本次只在 main（1.21.1）实现，其余四条线未移植**（用户明确要求）。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |
