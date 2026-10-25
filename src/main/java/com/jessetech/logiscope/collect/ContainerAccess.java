@@ -238,10 +238,33 @@ public final class ContainerAccess {
         return viewOf(index, menu.inventorySlots.get(index));
     }
 
-    /** 物品栈 → registry id（拿不到就 "unknown"，绝不编一个像样的假 id） */
+    /**
+     * 物品栈 → 身份串（拿不到就 "unknown"，绝不编一个像样的假 id）。
+     *
+     * **必须带子类型（meta）**：1.12.2 的 AE2 把线缆 / 终端 / 各类 part 全注册成同一个
+     * {@code appliedenergistics2:part}，靠 metadata 区分。只取 registry id 会让它们
+     * **塌成一个身份**，实测症状（2026-10-25 用户反馈）：
+     * <pre>
+     *   注册名模式：线缆、终端全显示 "part"
+     *   实际名模式：全显示成 meta=0 那一种的名字（"ME Glass Cable - White"）
+     *   图表 / 聚合：不同线缆合成同一条线；点一行把同 item 的变体全选中
+     * </pre>
+     * 规则：{@code meta != 0} 且**不是耐久物品**时才带 {@code :meta}
+     * —— 工具的 metadata 是损伤值不是"种类"，进了身份会让一把镐每掉一点耐久就换一条线。
+     * 拼 {@code :} 而不是 {@code #}，与 1.12.2 的书写习惯（{@code mod:item:meta}）一致，
+     * 且 {@link com.jessetech.logiscope.analysis.AeKeyText#label} 去掉命名空间后正好是
+     * {@code part:11} 这种可读形式。
+     */
     public static String itemIdOf(ItemStack stack) {
         ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
-        return id == null ? "unknown" : id.toString();
+        if (id == null) {
+            return "unknown";
+        }
+        int meta = stack.getMetadata();
+        if (meta != 0 && !stack.isItemStackDamageable()) {
+            return id + ":" + meta;
+        }
+        return id.toString();
     }
 
     /**

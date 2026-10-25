@@ -32,8 +32,8 @@ import java.util.Map;
  * | 身份 | 注册名（REGISTRY） | 实际名（DISPLAY） |
  * |---|---|---|
  * | {@code minecraft:iron_ingot} | {@code iron_ingot}（去命名空间） | {@code ItemStack#getDisplayName()}，如「铁锭」 |
+ * | {@code appliedenergistics2:part:11}（带子类型，见 {@code ContainerAccess#itemIdOf}） | {@code part:11} | 该变体自己的名字，如「ME Glass Cable - White」 |
  * | {@code ae:{#t:"ae2:f",id:"minecraft:water"}} | {@code water} | {@code FluidStack#getLocalizedName()}，如「水」 |
- * | {@code ae:{#t:"ae2:i",id:"…"}} | 内层 id 的短名 | 物品的显示名 |
  * | 其它（数据路径 / 占位名） | 原样短名 | 原样短名（解析不出来就**不编名字**） |
  *
  * ★ **本线没有 AEKey 解码器**（AE2 rv6 的键是 IAEItemStack / IAEFluidStack，见 {@code collect/AeSlots}）：
@@ -150,20 +150,71 @@ public final class NameText {
         }
     }
 
-    /** 物品 id → 游戏内显示名；不是物品 / 取不到 → null */
+    /**
+     * 物品 id → 游戏内显示名；不是物品 / 取不到 → null。
+     *
+     * 身份串可能带子类型（{@code appliedenergistics2:part:11}，见
+     * {@code ContainerAccess#itemIdOf}）—— 带 meta 才有正确的变体名，
+     * 否则线缆 / 终端会全显示成 meta=0 那一种的名字。
+     */
     @Nullable
     private static String itemName(String id) {
-        Item item = Item.getByNameOrId(id);   // 1.12.2 的查法：注册名直接给，找不到返回 null
-        if (item == null) {
-            return null;
-        }
-        ItemStack stack = new ItemStack(item);
-        if (stack.isEmpty()) {
+        ItemStack stack = stackOf(id);
+        if (stack == null) {
             return null;
         }
         // 1.12.2 的 ItemStack#getDisplayName() 直接返回 String（1.13+ 才是 ITextComponent）
         String text = stack.getDisplayName();
         return text == null || text.trim().isEmpty() ? null : text;
+    }
+
+    /**
+     * 身份串 → 一个数量 1 的 ItemStack（只为取它的显示名）。
+     *
+     * 先按整串查；查不到再把"最后一段纯数字"当成 meta —— 这就是带子类型的身份形式
+     * （{@code appliedenergistics2:part:11}）。两种来源（老存档的裸 id、新的带 meta）
+     * 都能取到名字。
+     */
+    @Nullable
+    private static ItemStack stackOf(String id) {
+        Item item = null;
+        int meta = 0;
+        try {
+            item = Item.getByNameOrId(id);   // 1.12.2 的查法：注册名直接给，找不到返回 null
+        } catch (Throwable ignored) {
+            // 形如 a:b:11 的串不是合法 ResourceLocation（1.12.2 只认 a:b）→ 走下面的拆分
+        }
+        if (item == null) {
+            int cut = id.lastIndexOf(':');
+            if (cut > 0 && cut < id.length() - 1 && isDigits(id.substring(cut + 1))) {
+                try {
+                    item = Item.getByNameOrId(id.substring(0, cut));
+                    if (item != null) {
+                        meta = Integer.parseInt(id.substring(cut + 1));
+                    }
+                } catch (Throwable ignored) {
+                    item = null;
+                }
+            }
+        }
+        if (item == null) {
+            return null;
+        }
+        ItemStack stack = new ItemStack(item, 1, meta);
+        return stack.isEmpty() ? null : stack;
+    }
+
+    /** 纯数字（meta 只有 0~15 有意义，留到 4 位容忍异常值） */
+    private static boolean isDigits(String s) {
+        if (s.isEmpty() || s.length() > 4) {
+            return false;
+        }
+        for (int i = 0; i < s.length(); i++) {
+            if (s.charAt(i) < '0' || s.charAt(i) > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 流体 id → 游戏内显示名（{@code getLocalizedName()} 已处理本地化）；取不到 → null */

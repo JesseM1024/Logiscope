@@ -463,3 +463,10 @@ while (Keyboard.next()) { ... KeyboardInputEvent.Pre ... }
    `IMEInventory#getAvailableItems`），另开一轮。
 10. **AE 流体的身份是 `ae:fluid:<流体注册名>`、数量单位 mB**；图例显示成 `fluid:water` 这类短名  
     （注册名是稳定的，本地化名不稳定 —— 身份优先）。
+11. **物品身份带子类型 `item:meta`**（2026-10-25 修）：1.12.2 的 AE2 把线缆 / 终端 / 各类 part  
+    注册成同一个 `appliedenergistics2:part`，靠 metadata 区分。只取 registry id 会让所有变体  
+    **塌成一个身份**，实测症状：注册名模式全显示 `part`、实际名模式全显示成 meta=0 那一种的名字  
+    （"ME Glass Cable - White"）、图表里不同线缆合成一条线、点一行把同 item 的变体全选中。  
+    `ContainerAccess#itemIdOf` 现在在 `meta != 0` 且**非耐久物品**时拼 `:meta`  
+    （工具的 metadata 是损伤值不是"种类"，进身份会让一把镐每掉一点耐久就换一条线）。  
+    老存档里的裸 id 仍能正常回放；只是新采样不会再与老数据的同名系列合并。
