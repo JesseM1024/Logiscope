@@ -1,6 +1,8 @@
 package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
+import com.jessetech.logiscope.bind.RsKeys;
 import com.jessetech.logiscope.bind.AeKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.registries.ForgeRegistries;
@@ -100,6 +102,12 @@ public final class ContainerAccess {
         if (menu == null) {
             return out;
         }
+        // RS 网格：**行不在菜单里**（在界面的 IGridView 上，见 RsKeys 的类注释），
+        // 而菜单里的槽位是合成格 / 样板格 —— 一行都不能列，否则"点了个合成格"会被当成
+        // "网络里的东西"。所以这里直接返回空表，行由 ScopeScreen 从界面取。
+        if (RsKeys.isRsGridMenu(menu)) {
+            return out;
+        }
         // AE 终端才有"网络列表显示格"：先判一次菜单家族，别的容器一格反射都不做
         boolean aeMenu = AeNetworkReader.isAeStorageMenu(menu);
         for (int i = 0; i < menu.slots.size(); i++) {
@@ -183,6 +191,20 @@ public final class ContainerAccess {
     }
 
     /**
+     * RS 网格的行 → 槽位快照。
+     *
+     * 行的 `menuSlotIndex` 固定 -1：RS 1.x 的清单挂在界面上、不对应任何菜单槽位，
+     * 选中 / 去重全靠身份串（与 AE 那条路同一套 `selectedNetIds`）。
+     */
+    public static List<SlotView> fromRsRows(List<RsKeys.Row> rows) {
+        List<SlotView> out = new ArrayList<>(rows.size());
+        for (RsKeys.Row r : rows) {
+            out.add(new SlotView(-1, r.index(), r.id(), r.amount(), false, r.label()));
+        }
+        return out;
+    }
+
+    /**
      * 从任意 ItemStack 造一个快照。WorldProbe 走方块实体读值时也用它，
      * 这样"界面打开"和"坐标跟踪"两条路径产出的数据类型完全一致。
      */
@@ -204,9 +226,9 @@ public final class ContainerAccess {
     public record SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, long count,
                            boolean empty, @Nullable String label) {
 
-        /** 给界面显示用的短名称，去掉命名空间前缀；AE 键走 {@link AeKeyText#label} */
+        /** 给界面显示用的短名称，去掉命名空间前缀；AE / RS 键走各自的文本层 */
         public String shortName() {
-            return AeKeyText.label(itemId);
+            return RsKeyText.isRs(itemId) ? RsKeyText.label(itemId) : AeKeyText.label(itemId);
         }
 
         /**

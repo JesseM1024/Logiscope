@@ -2,8 +2,11 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.material.Fluid;
+import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.registries.ForgeRegistries;
 import org.jetbrains.annotations.Nullable;
 
@@ -118,12 +121,21 @@ public final class NameText {
         if (hit != null) {
             return hit;
         }
-        String name = display ? resolveDisplay(id) : AeKeyText.label(id);
+        String name = display ? resolveDisplay(id) : registryLabel(id);
         CACHE.put(id, name);
         return name;
     }
 
-    /** 真正的解析：AE 键 → AEKey 的显示名；物品 id → 物品显示名；其它 → 短 id */
+    /**
+     * 注册名档的写法。**两种键身份各有一套文本层**：
+     * {@code rs:} 串走 {@link RsKeyText}（它认得 {@code rs:f:} / {@code rs:i:} 的形状），
+     * 其余仍走 {@link AeKeyText}（物品 id 与 {@code ae:} SNBT 都是它的活）。
+     */
+    private static String registryLabel(String id) {
+        return RsKeyText.hasPrefix(id) ? RsKeyText.label(id) : AeKeyText.label(id);
+    }
+
+    /** 真正的解析：AE 键 → AEKey 的显示名；RS 键 → 注册表里的本名；物品 id → 物品显示名；其它 → 短 id */
     private static String resolveDisplay(String id) {
         try {
             if (AeKeyText.isAe(id)) {
@@ -134,6 +146,9 @@ public final class NameText {
                 }
                 // 解不出来（键类型没注册 / SNBT 坏了 / AE2 不在）→ 短 id，不编名字
                 return AeKeyText.label(id);
+            }
+            if (RsKeyText.isRs(id)) {
+                return resolveRsDisplay(id);
             }
             ResourceLocation rl = ResourceLocation.tryParse(id);
             if (rl != null) {
@@ -147,7 +162,35 @@ public final class NameText {
             return AeKeyText.label(id);
         } catch (Throwable t) {
             // 注册表没就绪（离线断言）/ 客户端没进世界 —— 退回注册名，绝不炸渲染帧
-            return AeKeyText.label(id);
+            return registryLabel(id);
         }
+    }
+
+    /**
+     * RS 键的实际名：**只按 registry id 取名**，NBT 载荷不参与
+     * （它是一段机器可读的标签文本，写进图例只会把那行挤爆）。
+     *
+     * 流体用 {@code FluidStack#getDisplayName()}（本线的名字）。
+     */
+    private static String resolveRsDisplay(String id) {
+        RsKeyText.Parsed p = RsKeyText.parse(id);
+        if (p == null) {
+            return RsKeyText.label(id);
+        }
+        ResourceLocation rl = ResourceLocation.tryParse(p.registryId());
+        if (rl == null) {
+            return RsKeyText.label(id);
+        }
+        if (p.type() == RsKeyText.FLUID) {
+            Fluid fluid = ForgeRegistries.FLUIDS.getValue(rl);
+            if (fluid != null) {
+                return new FluidStack(fluid, 1000).getDisplayName().getString();
+            }
+        }
+        Item item = ForgeRegistries.ITEMS.getValue(rl);
+        if (item != null) {
+            return item.getDescription().getString();
+        }
+        return RsKeyText.label(id);
     }
 }
