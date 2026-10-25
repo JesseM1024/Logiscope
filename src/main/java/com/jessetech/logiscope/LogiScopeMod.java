@@ -4,6 +4,7 @@ import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.DataCommand;
 import com.jessetech.logiscope.bind.KeyBindings;
 import com.jessetech.logiscope.collect.ProbeManager;
+import com.jessetech.logiscope.ui.ProbeHighlight;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
@@ -73,6 +74,9 @@ public final class LogiScopeMod {
 
         // 记录最近一次右键的方块（容器界面的持久锚点）
         MinecraftForge.EVENT_BUS.register(ContainerAnchor.class);
+
+        // 探针追踪目标的世界内高亮框（穿墙、1 Hz 红黄闪）：渲染 + 换世界时清理
+        MinecraftForge.EVENT_BUS.register(ProbeHighlight.class);
     }
 
     @Mod.EventHandler
