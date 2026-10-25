@@ -12,6 +12,7 @@ import net.minecraftforge.common.config.ConfigManager;
  * | `maxProbes` | 16 | 1 ~ 64 | 同时运行的探针实例上限 |
  * | `maxItemKinds` | 256 | 1 ~ 4096 | 一个实例最多画多少种物品的线；超出的照旧进统计但不画线，面板显示 `+N 未显示` |
  * | `dataRefreshTicks` | 20 | 0 ~ 40 | Probe data 页自动重发 `data get block` 的间隔（客户端 tick）；**0 = 不刷新** |
+ * | `nameDisplay` | **true** | true / false | 界面上的名字写法：true = 游戏内实际名（水 / 铁锭），false = 注册名（water / iron_ingot）。**只影响显示**，采样名与存档永远是键身份 |
  *
  * 【这一代的配置与 ForgeConfigSpec 的差别（别再照抄另外三条线）】
  *   · 没有 `defineInRange` 那种建造器：**字段本身就是配置项**，注解上写范围
@@ -61,6 +62,16 @@ public final class LogiScopeConfig {
     @Config.Name("dataRefreshTicks")
     public static int dataRefreshTicks = 20;
 
+    @Config.Comment({
+            "界面上的名字写法：true = 游戏内的实际名（水 / 铁锭）",
+            "false = 注册名（water / iron_ingot）。",
+            "选格页 / 图表页 / 计算页上都有「名称: …」按钮，点一下就切换并立即写回本文件。",
+            "只影响显示：探针记录、存档、导出里的名字永远是键身份",
+            "（物品 = registry id；AE 的非物品键 = ae: + 键的 SNBT）。"
+    })
+    @Config.Name("nameDisplay")
+    public static boolean nameDisplay = true;
+
     private LogiScopeConfig() {
     }
 
@@ -100,6 +111,30 @@ public final class LogiScopeConfig {
             ConfigManager.sync(LogiScopeMod.MODID, Config.Type.INSTANCE);
         } catch (Throwable ignored) {
             // 落盘失败不影响本次会话（内存值已经改了），下次启动回到旧档位
+        }
+        return true;
+    }
+
+    /** 界面上的名字用「实际名」还是「注册名」。读不到（离线断言）按 true。 */
+    public static boolean nameDisplay() {
+        return nameDisplay;
+    }
+
+    /**
+     * 「名称」按钮写回：改内存值并**落盘**（下次启动保持同一个档位）。
+     * 只影响显示，不碰任何已记录的名字（见 {@link com.jessetech.logiscope.bind.NameText}）。
+     *
+     * @return 值是否真的变了
+     */
+    public static boolean setNameDisplay(boolean v) {
+        if (nameDisplay == v) {
+            return false;
+        }
+        nameDisplay = v;
+        try {
+            ConfigManager.sync(LogiScopeMod.MODID, Config.Type.INSTANCE);
+        } catch (Throwable ignored) {
+            // 落盘失败不影响本次会话
         }
         return true;
     }

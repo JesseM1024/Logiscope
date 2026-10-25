@@ -44,6 +44,9 @@ logiscope.btn.cell_mode=选择容器格
 logiscope.btn.cell_mode_on=结束选格
 logiscope.btn.clear_cells=清空选择
 logiscope.btn.done=完成
+logiscope.btn.name_style=名称: %s
+logiscope.name.display=实际名
+logiscope.name.registry=注册名
 logiscope.btn.open_folder=打开存储文件夹
 logiscope.btn.open_archive_folder=打开存档文件夹
 logiscope.btn.to_list=主界面
@@ -186,3 +189,4 @@ logiscope.flash.ae_need_anchor=AE 监测需要方块锚点：当前界面没有�
 logiscope.picker.nbt_mode_hint=NBT 追踪：按数据里的 slot 号建目标 —— 点哪格测哪格；「完成」= 覆写勾选的格子（默认关）
 logiscope.data.slot_fallback=槽位 %s
 logiscope.flash.nbt_mode_off=已退出 NBT 追踪
+logiscope.flash.name_style=名称显示：%s（选格页 / 图例 / 计算页 同步生效，已写入配置）
