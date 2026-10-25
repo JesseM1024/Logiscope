@@ -1662,7 +1662,7 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   AE 与 RS 两类目标。理由：一个探针对准的是**一台方块**，它要么是 AE 设备、要么是
   RS 设备 —— 留着另一类只会得到永远 no_data 的死目标。DATA 页的纯路径目标与 NBT
   槽位锚点不受影响。
-- **C28-9 提交前必须校验锚点落在设备上**（0.1.4-a 实机 J12 后补）：`ScopeScreen#anchorIsDevice`。
+- **C28-9 提交前必须校验锚点落在设备上**（实机 J12 后补）：`ScopeScreen#anchorIsDevice`。
   起因：手持**便携网格**对着地面右键时，`RightClickBlock` 先把地面记成锚点
   （`ContainerAnchor` 的 pending），界面随后由**物品**打开 —— 于是 `hasPersistentId()` 为真
   却指向一块泥土，目标存下去恒 no_data 且**界面上一个字都不提示**。

@@ -3425,7 +3425,7 @@ public final class ScopeScreen extends Screen {
      * 右键方块终端打开则一定有坐标。0.1.3 的闪退就是这里把 null 塞进了目标。
      *
      * **有锚点也不够 —— 锚点上的方块必须真的是那家的设备**（{@link #anchorIsDevice}）。
-     * 实测（0.1.4-a，J12）：手持**便携网格**对着地面右键，`RightClickBlock` 先把地面记成锚点
+     * 实测（J12）：手持**便携网格**对着地面右键，`RightClickBlock` 先把地面记成锚点
      * （{@link ContainerAnchor} 的 pending），界面随后由物品打开 —— 于是"有锚点"却指向一块
      * 泥土，目标存下去之后恒 no_data，界面上一个字都不提示。这是"读不到"被伪装成
      * "一直在读"的典型，必须在提交这一刻拦住。
