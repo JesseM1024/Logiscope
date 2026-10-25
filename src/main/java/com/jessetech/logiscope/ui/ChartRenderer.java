@@ -1,7 +1,7 @@
 package com.jessetech.logiscope.ui;
 
-import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.ChartData;
+import com.jessetech.logiscope.bind.NameText;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -844,8 +844,10 @@ public final class ChartRenderer {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
         }
-        // AE 的非物品键（流体 / 化学品 / 电力）身份是一整段 SNBT —— 取里头那个 id 的短名
-        return AeKeyText.label(itemId);
+        // AE 的非物品键（流体 / 化学品 / 电力）身份是一整段 SNBT —— 取里头那个 id 对应的名字。
+        // **统一走 NameText**：注册名（water）还是实际名（水）由「名称」开关决定，
+        // 选格页 / 图例 / 计算页三处同口径；开关只影响显示，系列身份串不变。
+        return NameText.of(itemId);
     }
 
     /**
