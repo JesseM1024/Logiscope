@@ -7,7 +7,7 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **513 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+- **代码 / 离线**：`build` 全过；TestChart **519 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
   `verify-jar.py` 全过；lang 中英各 **203** 键一致；`ProbeRsApi` = `RS_API_OK`。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.3 待发布**
   —— 版本号已提至 `0.1.3-1.21.1`（0.1.2 未单独发布，变更并入 0.1.3），
@@ -407,7 +407,7 @@ AE 非物品 = `ae:` + SNBT）—— 换开关不会让旧存档对不上新曲�
 3. **行来自仓库视图，不来自槽位** —— RS 2.0 的网格不是"一格一个 Slot"，界面按
    `getViewList()` 逐格画。副产品：AE 只能选当前页，RS 能选整个网络。
 
-离线：`build` 通过；TestChart **513 条**（新增 t43 共 24 条）；lang 中英各 **203** 键；
+离线：`build` 通过；TestChart **519 条**（新增 t43 共 30 条）；lang 中英各 **203** 键；
 **新增 `dev-check/ProbeRsApi.java` —— 对真实 RS 2.0.9 jar 把本类用到的每一个反射入口
 解析一遍，输出 `RS_API_OK`**（`getRepository` / `getViewList` / `getAmount` /
 `getResourceForRecipeMods` / `getName` / `item` / `fluid` / `components` /

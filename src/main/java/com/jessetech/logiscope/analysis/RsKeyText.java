@@ -48,7 +48,35 @@ public final class RsKeyText {
     /** 组件指纹与 registry id 之间的分隔符 */
     private static final char COMPONENTS = '|';
 
+    /**
+     * 组件指纹的长度上限（字符）。
+     *
+     * 【为什么必须有上限】指纹会进**身份串**，而身份串是每个采样点都存一份的
+     * （{@code Sample#itemId}）。大多数组件很短（`{minecraft:damage=5}`），但
+     * `minecraft:container` / `minecraft:bees` / `minecraft:custom_data` 这类能到几 KB ——
+     * 20 样本/秒 × 1 小时 × 5 KB ≈ 360 MB，存档会被撑爆。
+     *
+     * 超限就换成短形式 `{…<条目数>:<哈希>}`：**仍然只由内容决定**（同内容 → 同串，
+     * 采样的必要条件不变），代价是不同内容可能撞车 —— 与"指纹用 toString"同一类
+     * 降级，撞车只会把两行合并（数量相加），不会读出假值。
+     */
+    public static final int FINGERPRINT_MAX = 160;
+
     private RsKeyText() {
+    }
+
+    /**
+     * 把**已排序**的组件条目拼成指纹。
+     *
+     * @param sortedParts 形如 {@code minecraft:damage=5} 的条目，**调用方负责排序**
+     *                    （{@code DataComponentPatch} 的迭代顺序是插入顺序，直接拼会抖动）
+     */
+    public static String componentFingerprint(java.util.List<String> sortedParts) {
+        String joined = "{" + String.join(",", sortedParts) + "}";
+        if (joined.length() <= FINGERPRINT_MAX) {
+            return joined;
+        }
+        return "{…" + sortedParts.size() + ':' + Integer.toHexString(joined.hashCode()) + '}';
     }
 
     public static boolean isRs(@Nullable String id) {

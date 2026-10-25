@@ -1623,6 +1623,11 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   - 为什么要"值.toString()"：反射层没有可靠的组件往返手段，而**采样只需要
     "同一个补丁对象算出来的字符串恒定"**（这一条成立）。代价是跨版本 / 两个模组手写的
     `toString` 可能撞车 —— 撞车的后果是**两行合并成一行（数量相加），不会读出假值**。
+  - **长度上限 `FINGERPRINT_MAX = 160`**（`RsKeyText#componentFingerprint`）：身份串是
+    **每个采样点都存一份**的（`Sample#itemId`），而 `minecraft:container` /
+    `minecraft:bees` / `minecraft:custom_data` 这几类组件能到几 KB —— 20 样本/秒 × 1 小时
+    ≈ 360 MB，存档会被撑爆。超限换成 `{…<条目数>:<哈希>}`：仍只由内容决定
+    （采样必需的性质不变），代价同上（撞车只会合并）。
 - **C28-4 选格页的行来自仓库，不来自槽位**：RS 2.0 的网格不是"一格一个 Slot"的容器，
   界面按仓库视图逐格画（`AbstractGridScreen#renderCell`）。所以
   `RsKeys#rows(menu)` 直接读 `AbstractGridContainerMenu#getRepository()`

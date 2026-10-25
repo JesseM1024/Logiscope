@@ -170,7 +170,7 @@ python verify-jar.py build/libs/logiscope-0.1.4-a-1.21.1.jar
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build` | `BUILD SUCCESSFUL` |
-| E2 | `TestChart` | **513 条**断言全过；lang 中英各 **203** 键一致 |
+| E2 | `TestChart` | **519 条**断言全过；lang 中英各 **203** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
 | E6 | `ProbeRsApi`（可选，需第三方 jar） | 打印 **`RS_API_OK`**；命令见 `dev-check/ProbeRsApi.java` 头部。RS 换版本后必须重跑 |

@@ -1622,6 +1622,25 @@ public class TestChart {
         // 两种前缀互不冒充（AE 的 isAe / RS 的 isRs 是两条独立判定）
         no("RS 键 rs 串不算 ae 键", AeKeyText.isAe(water));
         no("RS 键 ae 串不算 rs 键（反向）", RsKeyText.isRs("ae:{id:\"minecraft:water\"}"));
+
+        // 组件指纹：短的保持可读，超长的换成"条目数 + 哈希"（身份串每 tick 存一份，
+        // 几 KB 的指纹会把存档撑爆 —— 见 RsKeyText.FINGERPRINT_MAX）
+        eq("指纹 短形式可读", "{minecraft:damage=5}",
+                RsKeyText.componentFingerprint(java.util.List.of("minecraft:damage=5")));
+        eq("指纹 空表", "{}", RsKeyText.componentFingerprint(java.util.List.of()));
+        StringBuilder big = new StringBuilder();
+        for (int i = 0; i < 200; i++) {
+            big.append('x');
+        }
+        String longPart = "minecraft:custom_data=" + big;
+        String capped = RsKeyText.componentFingerprint(java.util.List.of(longPart, longPart));
+        yes("指纹 超长被压短", capped.length() <= 24);
+        yes("指纹 短形式带条目数", capped.startsWith("{…2:"));
+        eq("指纹 压短后仍由内容决定（同输入同输出）", capped,
+                RsKeyText.componentFingerprint(java.util.List.of(longPart, longPart)));
+        yes("指纹 压短后不同内容不同串",
+                !capped.equals(RsKeyText.componentFingerprint(
+                        java.util.List.of(longPart, longPart + "y"))));
     }
 
 

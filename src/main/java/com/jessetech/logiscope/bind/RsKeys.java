@@ -157,6 +157,9 @@ public final class RsKeys {
      * 【为什么要指纹】RS 自己就按组件区分资源（{@code ItemResource.equals} 比 item + 组件）。
      * 塌成一个身份 = 两瓶不同的药水合成一行，违反"同名不同物"。
      *
+     * 【长度】拼好的串可能几 KB（箱子内容 / 蜜蜂 / 自定义 NBT），而身份串是**每个采样点
+     * 都存一份**的 —— 所以超长时换成短形式，见 {@link RsKeyText#FINGERPRINT_MAX}。
+     *
      * 【已知限制】{@code toString()} 不是 Mojang 承诺的稳定序列化格式。同一 MC 版本内
      * "同一个补丁对象算出来的字符串恒定"（采样必需的性质成立），但跨版本 / 两个模组
      * 手写的 toString 有可能撞车 —— 撞车的后果是两行合并成一行（数量相加），
@@ -178,7 +181,7 @@ public final class RsKeys {
             parts.add(name + '=' + value);
         }
         Collections.sort(parts);
-        return "{" + String.join(",", parts) + "}";
+        return RsKeyText.componentFingerprint(parts);
     }
 
     // ==================================================================
