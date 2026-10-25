@@ -178,6 +178,8 @@ public final class ScopeScreen extends Screen {
     private static final int MIN_CHART_H = 44;
     /** 列表行末尾删除按钮的宽度 */
     private static final int DEL_W = 13;
+    /** 列表行里「高亮追踪目标」按钮的宽度（十字准星图标，紧挨在删除按钮左边） */
+    private static final int HL_W = 11;
 
     private static final String SERIES_PREFIX = "series:";
     /** 选格页「忽略空槽」按钮（占筛选行右端，不进 Layout.buttons —— 见 pickerIgnoreRect） */
@@ -1879,11 +1881,12 @@ public final class ScopeScreen extends Screen {
             ProbeInstance p = list.get(idx);
             int ry = listTop + i * ROW_H;
             boolean active = p.id() == LogiScopeMod.probes().activeId();
-            boolean overRow = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8 - DEL_W - 2, ROW_H);
+            boolean overRow = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8 - DEL_W - HL_W - 4, ROW_H);
             boolean overDel = isIn(mouseX, mouseY, deleteX(L), ry - 1, DEL_W, ROW_H);
+            boolean overHl = isIn(mouseX, mouseY, probeHlX(L), ry - 1, HL_W, ROW_H);
 
             if (overRow) {
-                g.fill(x + 4, ry - 1, x + L.w() - 4 - DEL_W - 2, ry + ROW_H - 1, 0x40FFFFFF);
+                g.fill(x + 4, ry - 1, x + L.w() - 4 - DEL_W - HL_W - 4, ry + ROW_H - 1, 0x40FFFFFF);
             }
             if (active) {
                 g.fill(x + 4, ry - 1, x + 4 + 2, ry + ROW_H - 1, 0xFF3FE0A0);
@@ -1897,11 +1900,19 @@ public final class ScopeScreen extends Screen {
             g.drawString(this.font, st, stX, ry, stateColor(p), false);
             String desc = p.describe();
             int descX = stX + this.font.width(st) + 6;
-            int descW = x + L.w() - 4 - DEL_W - 4 - descX;
+            int descW = x + L.w() - 4 - DEL_W - HL_W - 4 - descX;
             if (descW > 20) {
                 g.drawString(this.font, cut(desc, descW), descX, ry,
                         p.hasSlots() ? 0xFF9099A8 : 0xFF70707A, false);
             }
+
+            // 高亮按钮（十字准星）：把这条探针的追踪目标在世界里画出来（穿墙，1Hz 红黄闪）
+            int hx = probeHlX(L);
+            boolean hlOn = ProbeHighlight.isActiveFor(p.id());
+            g.fill(hx, ry - 1, hx + HL_W, ry + ROW_H - 1,
+                    hlOn ? 0xFF5A4420 : overHl ? 0xFF3A4A5A : 0xFF2A2A38);
+            drawCrosshair(g, hx, ry,
+                    hlOn ? 0xFFFFD24A : overHl ? 0xFFE0E8FF : 0xFF9AA0B0);
 
             // 删除按钮：停止监测 + 删掉这个实例的缓存
             int dx = deleteX(L);
@@ -1917,6 +1928,66 @@ public final class ScopeScreen extends Screen {
 
     private static int deleteX(Layout L) {
         return L.x() + L.w() - 4 - DEL_W;
+    }
+
+    /** 探针行的「高亮目标」按钮左边界：紧挨在删除按钮左边 */
+    private static int probeHlX(Layout L) {
+        return deleteX(L) - HL_W - 2;
+    }
+
+    /**
+     * 画一个十字准星图标：上下左右四段短线 + 中心一个方形像素点（需求原文的图形）。
+     *
+     * 全部用 {@code g.fill} 拼（1~2px 的细条），不依赖字体里的符号 —— 字体里的 "✛"
+     * 在不同语言包里宽度和基线都不一样，画出来会偏。坐标取整行高度 11px 内居中。
+     */
+    private void drawCrosshair(GuiGraphics g, int x, int ry, int color) {
+        int cx = x + HL_W / 2;          // 竖线所在列
+        int cy = ry + 5;                // 横线所在行（行高 11，取正中）
+        g.fill(cx, cy - 4, cx + 1, cy - 2, color);      // 上
+        g.fill(cx, cy + 3, cx + 1, cy + 5, color);      // 下
+        g.fill(cx - 4, cy, cx - 2, cy + 1, color);      // 左
+        g.fill(cx + 3, cy, cx + 5, cy + 1, color);      // 右
+        g.fill(cx - 1, cy - 1, cx + 2, cy + 2, color);  // 中心方块
+    }
+
+    /**
+     * 点十字准星：高亮 / 取消高亮这条探针的追踪目标。
+     *
+     * 开启前先校验一次（没坐标 / 在别的维度 / 超过 128 格都直接拒绝并说明原因）——
+     * 与其画一个看不见的框让人以为坏了，不如明确说为什么看不见。
+     * 开启之后**每帧还会再判一次**（见 {@link ProbeHighlight}）：走出去只是不画，状态保留。
+     */
+    private void toggleProbeHighlight(ProbeInstance p) {
+        if (ProbeHighlight.isActiveFor(p.id())) {
+            ProbeHighlight.clear();
+            say(tr("logiscope.flash.hl_off"));
+            return;
+        }
+        ProbeTarget t = p.target();
+        if (!t.hasPersistentId()) {
+            say(tr("logiscope.flash.hl_no_target"));
+            return;
+        }
+        if (this.minecraft == null || this.minecraft.level == null || this.minecraft.player == null) {
+            return;
+        }
+        if (!this.minecraft.level.dimension().equals(t.dimension())) {
+            say(tr("logiscope.flash.hl_other_dim")
+                    .replace("%s", String.valueOf(t.dimension().location())));
+            return;
+        }
+        BlockPos tp = t.pos();
+        BlockPos pp = this.minecraft.player.blockPosition();
+        // 需求：不算欧氏距离，三轴差值绝对值都 < 128
+        if (Math.abs(tp.getX() - pp.getX()) >= ProbeHighlight.RANGE
+                || Math.abs(tp.getY() - pp.getY()) >= ProbeHighlight.RANGE
+                || Math.abs(tp.getZ() - pp.getZ()) >= ProbeHighlight.RANGE) {
+            say(tr("logiscope.flash.hl_far").replace("%s", String.valueOf(ProbeHighlight.RANGE)));
+            return;
+        }
+        ProbeHighlight.set(p.id(), t.dimension(), tp);
+        say(tr("logiscope.flash.hl_on").replace("%s", p.name()));
     }
 
     /** 存档行的删除按钮左边界（与探针行同一个观感：贴右边、{@link #DEL_W} 宽） */
@@ -2955,15 +3026,24 @@ public final class ScopeScreen extends Screen {
                     break;
                 }
                 int ry = L.listTop() + i * ROW_H;
+                // 最右侧的「高亮」按钮先判（它在删除按钮左边，两者不重叠但要按顺序判）
+                if (isIn(mx, my, probeHlX(L), ry - 1, HL_W, ROW_H)) {
+                    toggleProbeHighlight(list.get(idx));
+                    return true;
+                }
                 // 删除按钮优先命中（它在行内右侧，先判它）
                 if (isIn(mx, my, deleteX(L), ry - 1, DEL_W, ROW_H)) {
                     ProbeManager mgr = LogiScopeMod.probes();
                     ProbeInstance p = list.get(idx);
                     mgr.remove(p.id());
+                    // 探针没了，它的高亮框也不该继续画（否则那个方框会永远留在世界里）
+                    if (ProbeHighlight.isActiveFor(p.id())) {
+                        ProbeHighlight.clear();
+                    }
                     say(tr("logiscope.flash.probe_deleted").replace("%s", p.name()));
                     return true;
                 }
-                if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8 - DEL_W - 2, ROW_H)) {
+                if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8 - DEL_W - HL_W - 4, ROW_H)) {
                     openProbe(list.get(idx));
                     return true;
                 }
