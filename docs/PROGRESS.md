@@ -362,6 +362,34 @@ Esc 才是清空。
 
 离线：`build` 通过（产物 261 KB、12 处 `func_` = 已重混淆）；TestChart 493 条全过。
 
+## [1.16.5] 轮次 4：精致存储（RS 1.x）网络采样兼容（2026-10-25，自 1.20.1 线移植）
+
+**需求**：把 main（1.21.1）的「精致存储网络采样」移植到本线。实例里装的是
+**refinedstorage-1.9.18**（RS **1.x**）—— 与 RS 2.x 是两套完全不同的 API；
+与 1.20.1/1.18.2 的 1.10~1.12 是**同一套形状**，所以反射链原样，只改类名与这一代的 MC 名字。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/RsKeyText`（新） | RS 键的纯文本身份（无游戏依赖，t43 共 25 条断言）。**Java 8**：`Parsed` 写成普通类（无 record） |
+| `bind/RsKeys`（新） | `isRsGridMenu` 比类名（**本线菜单叫 `container.GridContainer`**，1.12.x 那代才叫 GridContainerMenu）；`rows(Screen)` 从 `GridScreen#getView()` → `IGridView#getAllStacks()`；`encode` 零反射 |
+| `collect/RsNetworkReader`（新） | `INetworkNodeProxy#getNode` → `INetworkNode#getNetwork` → `INetwork#canRun` → `getItemStorageCache/getFluidStorageCache` → `getList` → `getCount(stack)` |
+| 接线 | 与 1.20.1 线一致（`rs:network` 标记、`netMode()`、`anchorIsDevice`、覆写语义） |
+
+★ **本线的名字差异（全部编译期抓到）**：
+`net.minecraft.item.ItemStack` / `net.minecraft.util.math.BlockPos` / `net.minecraft.util.ResourceLocation` /
+`net.minecraft.fluid.Fluid` / `net.minecraft.client.gui.screen.Screen` / `net.minecraft.tileentity.TileEntity` /
+`net.minecraft.world.server.ServerWorld` / `RegistryKey<World>`；
+`CompoundNBT`（不是 CompoundTag，SNBT 走 `toString()`）、`JsonToNBT.getTagFromJson`（没有 TagParser）、
+`ResourceLocation.tryCreate`（没有 tryParse）、`world.getTileEntity(pos)`（没有 getBlockEntity）、
+`world.getDimensionKey()`（没有 dimension()）。
+
+★ **Java 8**：没有 `record`、没有 `instanceof 模式变量`、没有 `List.of()` —— 三处都写成
+普通类 / 强制转换 / `Collections.emptyList()`，与总线其它类的写法一致。
+
+离线：`build` 通过，产出 `logiscope-1.0.0-1.16.5.jar`；TestChart **518 条**（493 + 25 t43）；
+lang 中英各 **205** 键；**新增 `dev-check/ProbeRsApi`：对真实 refinedstorage-1.9.18.jar
+把每一个反射入口解析一遍 → `RS_API_OK`（零 SKIP）**。**实机待测**：`VERIFY.md` J 组。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |

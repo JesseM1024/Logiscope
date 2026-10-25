@@ -1,6 +1,8 @@
 package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.bind.AeKeys;
+import com.jessetech.logiscope.analysis.RsKeyText;
+import com.jessetech.logiscope.bind.RsKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraftforge.registries.ForgeRegistries;
 import net.minecraft.util.ResourceLocation;
@@ -100,6 +102,12 @@ public final class ContainerAccess {
         }
         // AE 终端：菜单里的 RepoSlot 是"网络列表的显示窗口"，数量与身份都得另读
         // （见 viewOfAe）。8.x 与 19.x 在这一点上一致：终端界面 init 时把 RepoSlot
+        // RS 网格：**行不在菜单里**（在界面的 IGridView 上，见 RsKeys 的类注释），
+        // 而菜单里的槽位是合成格 / 样板格 —— 一行都不能列，否则"点了个合成格"会被当成
+        // "网络里的东西"。所以这里直接返回空表，行由 ScopeScreen 从界面取。
+        if (RsKeys.isRsGridMenu(menu)) {
+            return out;
+        }
         // 塞进菜单，所以选格页不用另开一条数据源。
         boolean aeMenu = AeNetworkReader.isAeStorageMenu(menu);
         for (int i = 0; i < menu.inventorySlots.size(); i++) {
@@ -175,6 +183,20 @@ public final class ContainerAccess {
     public static String itemIdOf(ItemStack stack) {
         ResourceLocation id = ForgeRegistries.ITEMS.getKey(stack.getItem());
         return id == null ? "unknown" : id.toString();
+    }
+
+    /**
+     * RS 网格的行 → 槽位快照。
+     *
+     * 行的 `menuSlotIndex` 固定 -1：RS 1.x 的清单挂在界面上、不对应任何菜单槽位，
+     * 选中 / 去重全靠身份串（与 AE 那条路同一套 `selectedNetIds`）。
+     */
+    public static List<SlotView> fromRsRows(List<RsKeys.Row> rows) {
+        List<SlotView> out = new ArrayList<>(rows.size());
+        for (RsKeys.Row r : rows) {
+            out.add(new SlotView(-1, r.index(), r.id(), r.amount(), false, r.label()));
+        }
+        return out;
     }
 
     /**
