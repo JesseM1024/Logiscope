@@ -1943,7 +1943,9 @@ public final class ScopeScreen extends Screen {
      */
     private void drawCrosshair(GuiGraphics g, int x, int ry, int color) {
         int cx = x + HL_W / 2;          // 竖线所在列
-        int cy = ry + 5;                // 横线所在行（行高 11，取正中）
+        // 行高 11（按钮占 ry-1 … ry+9，共 11 行），四条线段要以按钮为基准上下对称：
+        // cy = ry+5 时下段会贴到按钮底边（实测偏下一像素），改成 ry+4 正好居中
+        int cy = ry + 4;
         g.fill(cx, cy - 4, cx + 1, cy - 2, color);      // 上
         g.fill(cx, cy + 3, cx + 1, cy + 5, color);      // 下
         g.fill(cx - 4, cy, cx - 2, cy + 1, color);      // 左
