@@ -463,6 +463,14 @@ public final class ScopeScreen extends Screen {
     /** 筛选框是否有键盘焦点（聚焦时按键进框；Esc 清空并收起，Enter 保留并收起） */
     private boolean archFilterFocus;
     /**
+     * 已"待确认删除"的存档目录名（空 = 没有待删项）。
+     *
+     * 存档是**用户的文件**，误删无法撤销（不像探针只是内存实例），所以做成两段式：
+     * 第一下只把那一行的 × 变成红色「!」并提示"再点一次"，第二下同一个按钮才真删；
+     * 期间点任何别的地方（含别的存档行 / 别的按钮）都会把它清掉。
+     */
+    private String archiveDeleteArmed = "";
+    /**
      * 选格页筛选框的文字（第十九轮①）。非空时槽位列表只显示命中的行 ——
      * 规则见 {@link com.jessetech.logiscope.analysis.PickerFilter}：
      * 空白分隔的多个词取**与**，`#N` 是序号精确匹配，其余按子串（名称 / AE 显示名）。
@@ -1692,7 +1700,7 @@ public final class ScopeScreen extends Screen {
         int headNameW = Math.max(96, (L.w() - 16) * 44 / 100);
         int headNameX = x + 8;
         int headDirX = headNameX + headNameW + 6;
-        int headCntX = x + L.w() - 8 - this.font.width(colCnt);
+        int headCntX = archRight(L) - this.font.width(colCnt);
         // 标题行左侧 = 筛选输入框：空时显示原「存档」标题文字作占位符
         renderArchiveFilter(g, L, mouseX, mouseY);
         if (!head.isEmpty()) {
@@ -1721,9 +1729,11 @@ public final class ScopeScreen extends Screen {
             Archives.Info info = list.get(idx);
             int ry = y + ROW_H + i * ROW_H;
             boolean loaded = replayArchive != null && info.dirName().equals(replayDir);
-            boolean over = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8, ROW_H);
+            boolean over = isIn(mouseX, mouseY, x + 4, ry - 1, L.w() - 8 - DEL_W - 2, ROW_H);
+            boolean overDel = isIn(mouseX, mouseY, archDeleteX(L), ry - 1, DEL_W, ROW_H);
+            boolean armed = info.dirName().equals(archiveDeleteArmed);
             if (over) {
-                g.fill(x + 4, ry - 1, x + L.w() - 4, ry + ROW_H - 1, 0x40FFFFFF);
+                g.fill(x + 4, ry - 1, x + L.w() - 4 - DEL_W - 2, ry + ROW_H - 1, 0x40FFFFFF);
             }
             if (loaded) {
                 g.fill(x + 4, ry - 1, x + 6, ry + ROW_H - 1, COLOR_ANALYZE);
@@ -1734,7 +1744,7 @@ public final class ScopeScreen extends Screen {
             int nameW = Math.max(96, (L.w() - 16) * 44 / 100);
             int nameX = x + 8;
             int dirX = nameX + nameW + 6;
-            int cntX = x + L.w() - 8 - this.font.width(cnt);
+            int cntX = archRight(L) - this.font.width(cnt);
             g.drawString(this.font, cut(name, nameW), nameX, ry,
                     loaded ? 0xFFF0E0F8 : 0xFFC8C8D8, false);
             int dirW = Math.max(16, cntX - dirX - 8);
@@ -1742,6 +1752,14 @@ public final class ScopeScreen extends Screen {
                 g.drawString(this.font, cut(info.dirName(), dirW), dirX, ry, 0xFF9099A8, false);
             }
             g.drawString(this.font, cnt, cntX, ry, 0xFF9099A8, false);
+
+            // 删除按钮（行尾，与探针列表同一个观感）：
+            // 第一次点只是**待确认**（红色「!」+ 提示），再点同一个按钮才真删 —— 存档是用户的文件，不能一点就没
+            int dx = archDeleteX(L);
+            g.fill(dx, ry - 1, dx + DEL_W, ry + ROW_H - 1,
+                    armed ? 0xFFB03040 : overDel ? 0xFF7A3038 : 0xFF2A2A38);
+            g.drawString(this.font, armed ? "!" : "×", dx + 4, ry,
+                    armed ? 0xFFFFE0E0 : overDel ? 0xFFFFD0D0 : 0xFFC0A0A8, false);
         }
         if (list.size() > L.archRows()) {
             String more = (scrollArchives + L.archRows()) + " / " + list.size()
@@ -1902,6 +1920,16 @@ public final class ScopeScreen extends Screen {
 
     private static int deleteX(Layout L) {
         return L.x() + L.w() - 4 - DEL_W;
+    }
+
+    /** 存档行的删除按钮左边界（与探针行同一个观感：贴右边、{@link #DEL_W} 宽） */
+    private static int archDeleteX(Layout L) {
+        return L.x() + L.w() - 4 - DEL_W;
+    }
+
+    /** 存档行「列内容」的右边界：样本数右对齐到这里，右边让给删除按钮 */
+    private static int archRight(Layout L) {
+        return archDeleteX(L) - 4;
     }
 
     private String shortState(ProbeInstance p) {
@@ -2893,6 +2921,10 @@ public final class ScopeScreen extends Screen {
 
         // 5) 列表（根页的实例列表 / 选格页的槽位列表）+ 根页的存档列表
         if (page == Page.ROOT) {
+            // 根页上任何一次点击都先解除"待确认删除"：只有**接着点同一个 ×** 才算确认，
+            // 否则点别处（别的行 / 别的按钮 / 空白）都自动反悔 —— 存档是用户的文件，不能一点就没。
+            String armedBeforeClick = archiveDeleteArmed;
+            archiveDeleteArmed = "";
             // 筛选框：点在框上 → 聚焦（吃掉这次点击，不触发别的）
             if (inArchFilter(L, mx, my)) {
                 archFilterFocus = true;
@@ -2907,8 +2939,14 @@ public final class ScopeScreen extends Screen {
                         break;
                     }
                     int ry = L.archTop() + ROW_H + i * ROW_H;
-                    if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8, ROW_H)) {
-                        openArchive(arch.get(idx));
+                    Archives.Info info = arch.get(idx);
+                    // 删除按钮优先命中（它在行内右侧，先判它）
+                    if (isIn(mx, my, archDeleteX(L), ry - 1, DEL_W, ROW_H)) {
+                        clickArchiveDelete(info, info.dirName().equals(armedBeforeClick));
+                        return true;
+                    }
+                    if (isIn(mx, my, L.x() + 4, ry - 1, L.w() - 8 - DEL_W - 2, ROW_H)) {
+                        openArchive(info);
                         return true;
                     }
                 }
@@ -2980,6 +3018,8 @@ public final class ScopeScreen extends Screen {
     private void openProbe(ProbeInstance p) {
         LogiScopeMod.probes().setActive(p.id());
         scrollRow = 0;
+        // 离开根页就把"待确认删除"清掉：回来之后不该一次点击就删掉存档
+        archiveDeleteArmed = "";
         if (p.hasAnything()) {
             page = Page.CHART;
             live = true;
@@ -3508,10 +3548,40 @@ public final class ScopeScreen extends Screen {
             // 身份用目录名（永不改），显示名可用 name.txt 覆盖
             replayDir = info.dirName();
             replayName = info.displayName().isBlank() ? info.dirName() : info.displayName();
+            archiveDeleteArmed = "";
             say(tr("logiscope.flash.replay_loaded").replace("%s", replayName));
         } catch (Exception e) {
             LogiScopeMod.LOGGER.error("[LogiScope] archive load failed: {}", info.dirName(), e);
             say(tr("logiscope.flash.archive_failed"));
+        }
+    }
+
+    /**
+     * 存档行的删除按钮。**两段式**：第一下只是"待确认"（按钮变红「!」+ 提示），
+     * 第二下点同一个按钮才真删目录 —— 存档是用户磁盘上的文件，误删不可撤销。
+     *
+     * @param armed 这一次点击**之前**这一行就已经是待确认状态
+     */
+    private void clickArchiveDelete(Archives.Info info, boolean armed) {
+        String shown = info.displayName().isBlank() ? info.dirName() : info.displayName();
+        if (!armed) {
+            archiveDeleteArmed = info.dirName();
+            say(tr("logiscope.flash.arch_delete_confirm").replace("%s", shown));
+            return;
+        }
+        if (Archives.delete(info.dirName())) {
+            // 删掉的正好是当前载入的回放 → 把回放状态一起收掉，
+            // 否则回放页还挂着一份"目录已经不在了"的数据
+            if (info.dirName().equals(replayDir)) {
+                replayArchive = null;
+                replayDir = "";
+            }
+            archiveList = Archives.scan();
+            scrollArchives = Math.max(0, Math.min(scrollArchives,
+                    Math.max(0, archiveList.size() - 1)));
+            say(tr("logiscope.flash.arch_deleted").replace("%s", shown));
+        } else {
+            say(tr("logiscope.flash.arch_delete_fail").replace("%s", shown));
         }
     }
 
