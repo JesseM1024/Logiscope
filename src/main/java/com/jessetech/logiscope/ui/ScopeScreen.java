@@ -5288,11 +5288,11 @@ public final class ScopeScreen extends Screen {
             }
         }
 
-        // --- 2.5) AE 模式第二行（黄色提示行）→ 悬浮显示说明---
-        if (page == Page.PICKER && aeMode
+        // --- 2.5) 网络模式第二行（黄色提示行）→ 悬浮显示说明---
+        if (page == Page.PICKER && netMode()
                 && mouseY >= L.infoTop() + ROW_H && mouseY < L.infoTop() + 2 * ROW_H) {
-            wantTip(4, tr("logiscope.picker.ae_mode"),
-                    java.util.Arrays.asList(tr("logiscope.picker.ae_hint")));
+            wantTip(4, tr(rsMode ? "logiscope.picker.rs_mode" : "logiscope.picker.ae_mode"),
+                    java.util.Arrays.asList(tr(rsMode ? "logiscope.picker.rs_hint" : "logiscope.picker.ae_hint")));
             return;
         }
 
