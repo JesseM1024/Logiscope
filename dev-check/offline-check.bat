@@ -34,13 +34,13 @@ java -Dfile.encoding=UTF-8 -cp "build\dev-check;build\classes\java\main" BenchRe
 if errorlevel 1 goto fail
 
 echo === [4/5] verify-jar ===
-python verify-jar.py build\libs\logiscope-0.1.4-a-1.16.5.jar
+python verify-jar.py build\libs\logiscope-1.0.0-1.16.5.jar
 if errorlevel 1 goto fail
 
 rem Catches "compiles fine, dies in-game" deps (e.g. org/slf4j on 1.16.5:
 rem present in the dev classpath, absent from the production one).
 echo === [5/5] runtime reference check ===
-python dev-check\check-runtime-refs.py build\libs\logiscope-0.1.4-a-1.16.5.jar build\mcdeps
+python dev-check\check-runtime-refs.py build\libs\logiscope-1.0.0-1.16.5.jar build\mcdeps
 if errorlevel 1 goto fail
 
 echo ALL_OK
