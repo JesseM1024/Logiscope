@@ -6,9 +6,11 @@ import com.jessetech.logiscope.bind.KeyBindings;
 import com.jessetech.logiscope.bind.TextInputGuard;
 import com.jessetech.logiscope.collect.ProbeManager;
 import com.jessetech.logiscope.collect.ProbeSlots;
+import com.jessetech.logiscope.ui.ProbeHighlight;
 import net.minecraftforge.api.distmarker.Dist;
 import net.minecraftforge.client.event.ClientChatReceivedEvent;
 import net.minecraftforge.client.event.ClientPlayerNetworkEvent;
+import net.minecraftforge.client.event.RenderLevelStageEvent;
 import net.minecraftforge.client.event.ScreenEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.TickEvent;
@@ -118,7 +120,12 @@ public final class LogiScopeMod {
             DataCommand.reset();
             ContainerAnchor.clearActive();
             ProbeSlots.reset();
+            // 探针全清了，高亮框指向的探针也不存在了 —— 不清会把这个框带进新世界
+            ProbeHighlight.clear();
         });
+
+        // 探针追踪目标的世界内高亮框（穿墙、1 Hz 红黄闪）。渲染事件也在**游戏总线**上。
+        MinecraftForge.EVENT_BUS.<RenderLevelStageEvent>addListener(ProbeHighlight::onRenderLevel);
 
         // 没有界面打开时，Screen 按键事件不触发；补一条走标准 KeyMapping 的路径，
         // 这样关掉容器界面之后还能按快捷键把面板叫出来
