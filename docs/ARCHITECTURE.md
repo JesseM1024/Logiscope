@@ -1586,6 +1586,88 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
 
 ---
 
+### CP28 · RS（精致存储）网络目标：与 AE 结构同构、API 没有一处相同　风险：中
+
+**背景**：精致存储（Refined Storage 2，下称 RS）与 AE 是同一个故事 ——
+网格界面上的格子不是容器内容，是**网络存储的显示窗口**。所以 RS 也走
+"网络目标"这条特例路（CP27 的兄弟），但它的类体系、读值链、身份格式**一处都不共通**，
+代码是并行的两套（`RsKeys` / `RsNetworkReader` 对应 `AeKeys` / `AeNetworkReader`）。
+
+**契约**：
+- **C28-1 检测靠菜单家族**：`RsKeys.isRsGridMenu(menu)` 沿父类链比**类名**
+  `common.grid.AbstractGridContainerMenu`（终端 / 合成终端 / 便携网格都在这个家族下，
+  字节码核实过）。和 C27-1 同一理由：**不用 `Class.forName`** —— NeoForge 下每个模组
+  在自己的模块加载器里，`forName` 用的是**调用方**的加载器，不一定看得见 RS；
+  而 `menu.getClass()` 是运行时真实对象，往上走总能拿到那个类。RS 未安装 → false，一切照旧。
+- **C28-2 目标身份 = RS 资源的字符串身份**（`DataTarget.rsNetwork(keyId, …)`，
+  `valuePath` 固定标记 `"rs:network"`，去重先比标记再比 `literalName`）。三种形态
+  （`analysis/RsKeyText`，t43 断言钉住）：
+
+  | 目标 | 身份串 | 例子 |
+  |---|---|---|
+  | 物品，**无数据组件** | 裸 registry id（**不挂前缀**） | `minecraft:iron_ingot` |
+  | 物品，带组件 | `rs:i:<id>\|<组件指纹>` | `rs:i:minecraft:potion\|{minecraft:potion_contents=…}` |
+  | 流体 | `rs:f:<id>`（带组件再加 `\|` 尾巴） | `rs:f:minecraft:water` |
+
+  **无组件物品为什么不挂前缀**：RS 的 `ItemResource(item, 空组件)` 与"原版的一件铁锭"
+  是同一个东西。共用裸 id 换来三件事 —— ① 名称解析不必认识 RS（C28-6）；
+  ② 同一件东西在 AE / RS 两条网络里天然同名（一个探针对准一台方块，不会同探针撞车）；
+  ③ 旧目标 / 旧存档不受影响。
+  **组件为什么必须进身份**：RS 自己就按 `ItemResource.equals(item + 组件)` 区分资源。
+  塌成一个身份 = 两瓶不同的药水合成一行、数量相加，正是 C23「同名不同物」的反面。
+- **C28-3 组件指纹（已知限制，已接受）**：`RsKeys#fingerprint` = 把
+  `DataComponentPatch.entrySet()` 的每条拼成 `组件类型id=值`、**排序**后 `{}` 包起来。
+  - 为什么要排序：`DataComponentPatch.toString()` 按**插入顺序**打印（字节码核实：
+    `Reference2ObjectMaps.fastIterable`），两个相等的补丁可能打出不同字符串 ——
+    那样的指纹会让同一条曲线每 tick 换一个身份。
+  - 为什么要"值.toString()"：反射层没有可靠的组件往返手段，而**采样只需要
+    "同一个补丁对象算出来的字符串恒定"**（这一条成立）。代价是跨版本 / 两个模组手写的
+    `toString` 可能撞车 —— 撞车的后果是**两行合并成一行（数量相加），不会读出假值**。
+- **C28-4 选格页的行来自仓库，不来自槽位**：RS 2.0 的网格不是"一格一个 Slot"的容器，
+  界面按仓库视图逐格画（`AbstractGridScreen#renderCell`）。所以
+  `RsKeys#rows(menu)` 直接读 `AbstractGridContainerMenu#getRepository()`
+  → `getViewList()`（RS 自己筛过 / 排过序的那一份）→ 每项取
+  `getResourceForRecipeMods()`（真实键）/ `getName()`（游戏内名）/ `getAmount(key)`。
+  副产品：**AE 那条路只能选到当前页的格子，RS 这条路能选到整个网络**。
+  行的 `menuSlotIndex = -1`（RS 的行不对应任何菜单槽），选中 / 去重全靠身份串 ——
+  所以 `toggleRow` 里 AE 那条"必须落在 `RepoSlot` 上"的守卫 **RS 不走**。
+- **C28-5 读值链（服务端，全反射，零编译依赖）**：
+  `level.getBlockEntity(pos)` → 沿**该对象自己的类**的接口链找
+  `common.api.grid.Grid`（实现类 `AbstractGridBlockEntity`）→ `isGridActive()` →
+  `getItemStorage()` → `StorageView#getAll()`（`Collection<ResourceAmount>`）→
+  逐条 `encode(resource())` 与目标身份串比对，命中累加 `amount()`。
+  - **`getItemStorage()` 的名字会骗人**：字节码核实它返回的是
+    `network.getComponent(StorageNetworkComponent.class)` —— **所有资源类型的根存储**
+    （RS 自己的 `GridData#of` 也用同一个组件），所以流体**不需要**第二次调用。
+  - **为什么是"拉全量再比对"而不是"按 key 精确查"**：`RootStorage#get(ResourceKey)`
+    更快，但它要一个 RS 的资源键**对象**，而这个对象只能从"物品/流体 + 组件补丁"重建 ——
+    组件补丁在反射层没有可靠往返（C28-3）。用**自己的编码**去比对，就把"读值"和"身份"
+    钉在同一条规则上：**编得出来就读得到，编不出来那一行根本没被列出**。
+  - 反射链只解析一次；整张网络的清单**同一 tick 只拉一遍**（按 `(storage, gameTime)`
+    缓存成"身份串 → 数量"的 Map，弱引用持有 storage，避免静态字段钉住世界的对象图）。
+- **C28-6 名称**：`NameText` 只按身份串里的 registry id 取名 —— 流体走
+  `new FluidStack(fluid, 1000).getHoverName()`（与 RS 自己算名的方式一致），物品走
+  `Item#getDescription()`。**组件指纹不参与取名**（它不是可反解的序列化），所以带组件
+  物品在"实际名"档显示的是物品本名（自定义命名的药水显示"药水"）。选格页不受影响：
+  那里直接用 RS 算好的 `GridResource#getName()`（`SlotView#label` → `NameText.of` 的 hint）。
+- **C28-7 三种语义**（与 C27-5 同一条纪律）：返回 **null** = 读不到（不是 RS 网格设备 /
+  网络断电 / RS 未安装 / 反射链断了）→ no_data；返回 **0** = 网络在线但没这东西（真值）；
+  返回 **n** = 该身份在网内的数量。
+- **C28-8 覆写语义按"全部网络目标"算**：`ProbeInstance#replaceNetworkTargets` 一次换掉
+  AE 与 RS 两类目标。理由：一个探针对准的是**一台方块**，它要么是 AE 设备、要么是
+  RS 设备 —— 留着另一类只会得到永远 no_data 的死目标。DATA 页的纯路径目标与 NBT
+  槽位锚点不受影响。
+- **C28-9 已知边界**：① `"rs:network"` 是保留的 valuePath（同 C27-7）；
+  ② **附属模组自定义的 RS 资源类型不列出**（`RsKeys#encode` 返回 null）—— 与其给一个
+  "看着像身份、其实读不回来"的串让人勾上一行永远 no-data 的东西，不如不列；
+  ③ 便携 / 无线网格没有方块锚点 → 「完成」拒绝提交并提示（与 C27-3 的无线终端同一条）。
+- **C28-10 离线实证**：`dev-check/ProbeRsApi.java` 把本类用到的**每一个反射入口**
+  对真实 jar 解析一遍（`RS_API_OK`）。它尽量沿代码自己的推导路径走
+  （`getRepository()` 的返回类型 → `getViewList`；从运行时资源键类往上找 `ResourceKey`），
+  免得探针与实现各自漂移。**不在** `offline-check.bat` 里（依赖仓库外的第三方 jar）。
+
+---
+
 ## 四、设计权衡（已做的决策与理由）
 
 | 决策 | 选择 | 备选 | 理由 |
@@ -1775,6 +1857,29 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
 | `mezz.jei.api.runtime.IIngredientListOverlay#hasKeyboardFocus()` | `boolean` | 判断 JEI 搜索框是否有焦点 |
 | `mezz.jei.gui.input.GuiTextFieldFilter` | **`extends EditBox`**，但**不挂进 `screen.children()`** | 解释了为什么第 1 层守卫看不见它 |
 
+**精致存储 2（refinedstorage-neoforge-2.0.9）** —— CP28 用到的那几个（全部 `javap` 核实过）：
+
+| API | 真实签名 / 位置 | 用途 |
+|---|---|---|
+| `common.grid.AbstractGridContainerMenu` | `public abstract`，`getRepository()` 是 **public** | 判"这是不是 RS 网格菜单"+ 拿仓库 |
+| `api.resource.repository.ResourceRepository` | `getViewList() → List<T>`、`getAmount(ResourceKey) → long` | 界面行 + 客户端存量 |
+| `common.api.grid.view.GridResource` | `getResourceForRecipeMods() → PlatformResourceKey`、`getName() → String` | 行的键 / 名字 |
+| `common.support.resource.ItemResource` | `item() → Item`、`components() → DataComponentPatch` | 物品身份 |
+| `common.support.resource.FluidResource` | `fluid() → Fluid`、`components()` | 流体身份 |
+| `common.api.grid.Grid` | `isGridActive() → boolean`、`getItemStorage() → Storage` | 服务端读值入口 |
+| `api.storage.Storage`（`extends StorageView`） | `getAll() → Collection<ResourceAmount>` | 全量清单 |
+| `api.resource.ResourceAmount` | `resource() → ResourceKey`、`amount() → long`（record） | 一条资源 |
+| `common.grid.AbstractGridBlockEntity` | `implements Grid`（`GridBlockEntity` 继承它） | "这台方块是 RS 网格" |
+
+两条值得单独记的坑：
+- **`Grid#getItemStorage()` 的名字会骗人**：它返回的是
+  `network.getComponent(StorageNetworkComponent.class)` = **所有资源类型的根存储**
+  （`StorageNetworkComponent extends RootStorage`），流体也在这份清单里。
+- **`DataComponentPatch.toString()` 按插入顺序打印**（`Reference2ObjectMaps.fastIterable`），
+  不是规范化的序列化 —— 拿它当身份指纹必须自己排序（C28-3）。
+- **离线夹具要带上 Guava / fastutil**：RS 的菜单继承链会牵到它们（游戏里由 NeoForge 提供），
+  只挂两个 jar 会得到一串 `NoClassDefFoundError`（那是夹具缺件，不是签名错）。
+
 > 反查方法：`javap -p -cp run/mods/<mod>.jar <类名>`（直接读 class，不需要源码）。
 
 ### 5.4 反面清单（不存在 / 不要用）
@@ -1802,7 +1907,9 @@ src/main/java/com/jessetech/logiscope/
 │  ├─ ContainerAnchor.java      绑定层：右键方块 → 维度 + 坐标锚点（CP9）
 │  ├─ ProbeTarget.java          绑定层：探针目标（一组槽位引用 + 持久身份）（CP16）
 │  ├─ ProbeContext.java         绑定层：当前可探测的容器（容器界面 / 准星）（CP17）
-│  ├─ DataTarget.java           绑定层：NBT 数据目标（路径 / 名称 / 锚点；含 slot 锚点与 AE 变体）（CP20 / CP24 / CP27）
+│  ├─ DataTarget.java           绑定层：NBT 数据目标（路径 / 名称 / 锚点；含 slot 锚点与 AE / RS 网络变体）（CP20 / CP24 / CP27 / CP28）
+│  ├─ AeKeys.java               绑定层：AE 键的反射层（编码 / 解码 / 显示名 / 终端显示格）（CP27）
+│  ├─ RsKeys.java               绑定层：RS 键与网格菜单的反射层（编码 / 组件指纹 / 仓库行）（CP28）
 │  └─ DataCommand.java          绑定层：读方块 NBT 的取数通道（服务端直读 / 多人命令回退）（CP20）
 ├─ collect/
 │  ├─ ContainerAccess.java      采集层：读菜单槽位（菜单兜底路径）（CP1）
@@ -1810,6 +1917,7 @@ src/main/java/com/jessetech/logiscope/
 │  ├─ ProbeSlots.java           采集层：无 GUI 容器的槽位清单（CP16）
 │  ├─ DataProbe.java            采集层：按 NBT 路径读值（服务端 tick 采样）（CP20 / CP24）
 │  ├─ AeNetworkReader.java      采集层：AE 网络物品数量（全反射，零编译依赖）（CP27）
+│  ├─ RsNetworkReader.java      采集层：RS 网络资源数量（全反射，零编译依赖）（CP28）
 │  ├─ ServerClock.java          采集层：全局权威世界 tick（状态机 / 回退路径）（CP15）
 │  ├─ ProbeInstance.java        采集层：一个探针的状态机 + 每 tick 采样（CP4 / CP5 / CP9 / CP16 / CP20）
 │  └─ ProbeManager.java         采集层：实例表 / 创建 / 删除 / 两个驱动点（CP4 / CP16）
@@ -1824,6 +1932,8 @@ src/main/java/com/jessetech/logiscope/
 │  ├─ CurveMath.java            分析层：区间统计与事件分析（回放计算）（CP19）
 │  ├─ Val.java                  分析层：自适应数值（long 精确 / double）（CP26）
 │  ├─ Snbt.java                 分析层：SNBT 文本解析与路径取值（CP20）
+│  ├─ AeKeyText.java            分析层：AE 键的字符串身份（纯文本）（CP27）
+│  ├─ RsKeyText.java            分析层：RS 键的字符串身份（纯文本）（CP28）
 │  ├─ SlotAlign.java            分析层："顺序 + 内容"对齐（CP24）
 │  ├─ NbtSlotLayout.java        分析层：NBT 槽位列表的形状识别（CP24）
 │  ├─ WaveColumns.java          分析层：波形列聚合（CP21）
@@ -1839,8 +1949,10 @@ src/main/java/com/jessetech/logiscope/
    └─ ChartRenderer.java        呈现层：坐标轴 / 自动缩放 / 多线 / 框选 / 准线 / 标记（CP11 / CP18 / CP21）
 
 dev-check/
-├─ TestChart.java               离线断言（不启动游戏）：断点规则 / 分组 / 配色 / 统计 / 聚合 / 对齐 / 计算 / 数值解析
-└─ BenchRender.java             渲染路径离线压测：列聚合与游程合并的 fill 次数（CP21）
+├─ TestChart.java               离线断言（不启动游戏）：断点规则 / 分组 / 配色 / 统计 / 聚合 / 对齐 / 计算 / 数值解析 / 两种键身份
+├─ BenchRender.java             渲染路径离线压测：列聚合与游程合并的 fill 次数（CP21）
+├─ ProbeAeApi.java              反射链实证：AE2 的每一个反射签名（需第三方 jar，不在 offline-check.bat 里）
+└─ ProbeRsApi.java              反射链实证：RS 的每一个反射入口（同上）（CP28）
 ```
 
 **为什么分析层要保持"零游戏依赖"**：`analysis/`、`store/` 不 import 任何 `net.minecraft` ——

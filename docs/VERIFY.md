@@ -1,7 +1,7 @@
-# LogiScope · 实机验证清单（当前版本 0.1.3-1.21.1）
+# LogiScope · 实机验证清单（当前版本 0.1.4-a-1.21.1）
 
 > **本文档是"当前这一版要测什么"的合并全集**：十六轮⑦⑨、十七轮①、十八轮①–⑤、
-> 十九轮①–② 的
+> 十九轮①–②、二十轮①②③ 的
 > 待测项与回归项，合并去重、不按轮分节。已通过轮次（第一 ~ 十六轮⑥⑧）的结论在
 > [`VERIFY-HISTORY.md`](VERIFY-HISTORY.md)；原理索引在 [`ARCHITECTURE.md`](ARCHITECTURE.md)。
 > ★ = 优先项；编号沿用原轮次分组，便于与 [PROGRESS.md](PROGRESS.md) 对照。
@@ -19,8 +19,9 @@ build\moddev\runClient.cmd
 **准备**：
 1. 一个有产线的存档，含 **原版箱子 / 熔炉** + **MEK 机器** + **精妙存储箱子** 各一台；
 2. 一个 **AE2 网络 + 终端**（C-1 组用）；
-3. 一个**超过 2³¹** 的 NBT 数值（如 MEK 能量立方）；
-4. 能随手挖掉一台机器（测"换设备"）。
+3. 一个 **RS 网格 + 存储磁盘**（J 组用），网络里放几样物品 + 一种流体；
+4. 一个**超过 2³¹** 的 NBT 数值（如 MEK 能量立方）；
+5. 能随手挖掉一台机器（测"换设备"）。
 
 ---
 
@@ -163,16 +164,17 @@ javac -encoding UTF-8 -cp "build/classes/java/main;dev-check/lib/gson-2.10.1.jar
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main;dev-check/lib/gson-2.10.1.jar;dev-check/lib/guava-32.1.2-jre.jar;build/moddev/artifacts/neoforge-21.1.209-merged.jar" TestChart
 javac -encoding UTF-8 -cp build/classes/java/main -d build/dev-check dev-check/BenchRender.java
 java  -Dfile.encoding=UTF-8 -cp "build/dev-check;build/classes/java/main" BenchRender
-python verify-jar.py build/libs/logiscope-0.1.3-1.21.1.jar
+python verify-jar.py build/libs/logiscope-0.1.4-a-1.21.1.jar
 ```
 
 | # | 检查 | 期望 |
 |---|---|---|
 | E1 | `gradlew.bat build` | `BUILD SUCCESSFUL` |
-| E2 | `TestChart` | **489 条**断言全过；lang 中英各 **185** 键一致 |
+| E2 | `TestChart` | **513 条**断言全过；lang 中英各 **203** 键一致 |
 | E3 | `BenchRender` | 台阶 ≥ 99%、混合 ≥ 60% |
 | E4 | `verify-jar.py` | 全部通过 |
-| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.3-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
+| E6 | `ProbeRsApi`（可选，需第三方 jar） | 打印 **`RS_API_OK`**；命令见 `dev-check/ProbeRsApi.java` 头部。RS 换版本后必须重跑 |
+| E5 | 游戏内模组列表 / 启动日志 | 版本显示 **`0.1.4-a-1.21.1`**。拷进整合包测共存前**先删旧的 `logiscope-*.jar`**（文件名变了，旧的不会被顶掉） |
 
 ## F. 回归抽查
 
@@ -236,6 +238,30 @@ python verify-jar.py build/libs/logiscope-0.1.3-1.21.1.jar
 | I2 | 「存档并停止」后（刚从图表页导出的回放）点同一个按钮 | 同样落到刚导出的那个目录（目录名 = 存档名） |
 | I3 | 中英文环境 | 「打开存档文件夹」/「Open archive folder」都在按钮行里、不被挤掉；没有回放时按钮置灰 |
 | I4 | 根页的「打开文件夹」 | 行为不变（仍打开 `logiscope/` 根目录） |
+
+## J. 精致存储（RS 2）网络目标（第二十轮③）
+
+> 这组专门验精致存储。要 **Refined Storage 2.0.x**（`refinedstorage-neoforge-*.jar`）
+> + 一个网格（Grid）+ 若干存储磁盘 + 至少一种流体存储。
+> 原理：ARCHITECTURE **CP28**；身份格式见 `analysis/RsKeyText`（t43 断言钉住）。
+
+| # | 操作 | 期望 |
+|---|---|---|
+| ★J1 | 右键**网格方块**打开界面（网络里有物品）→ 按面板键 → 选格页 | 说明行是**"RS 网络终端 · 点选要监测的条目"**（不是"无容器格"、也不是 AE 那句）；列表里是**整个网络**的条目（含翻页之外的），不是当前页那 54 格 |
+| ★J2 | 勾两个物品 →「完成」→ 图表页 | 两条独立曲线；读数 = 网络里的真实存量（与 RS 界面上的数字一致）；推/抽物品时跟着变 |
+| ★J3 | 网络里存流体（如水）→ 选格页看那一行 | 显示**流体的真名**（"水"/"Water"）与真实数量，不是 `bucket`/空行 |
+| ★J4 | 勾那个流体 →「完成」 | 曲线读数是 mB 真值；**不是 0**、也不是 `no_data` |
+| ★J5 | 同时勾"水"和"岩浆" | 两条**独立**的线（身份分别是 `rs:f:minecraft:water` / `rs:f:minecraft:lava`，不会塌成同一行） |
+| J6 | 断开网格与网络的连接（拆桥 / 断电缆）后再看 | 该组线变 **`no_data`**（不是 0）—— 与"网络里有 0 个"必须能区分 |
+| J7 | 网络在线但**清空**某种物品（全部抽出） | 读数变 **0**（真值），线**不断** |
+| J8 | 关掉 RS 界面后再看图表 | 读数照常（与 GUI 无关；采样在服务端） |
+| J9 | 数据页的目标列表里看这些行 | 显示 `rs:network[iron_ingot]` / `rs:network[water]` 这样的名字（不是一长串组件指纹） |
+| J10 | 名称开关切到"实际名" | 选格页 / 图例 / 计算页三处同步变成"水 / 铁锭"；切回"注册名"变 `water` / `iron_ingot` |
+| J11 | 同一网络里放两瓶**不同**的药水（不同效果） | 选格页是**两行**；各勾一个后是**两条**曲线（身份带组件指纹，不会合并成一个数） |
+| J12 | 用**便携网格 / 无线网格**（没有方块锚点）打开 →「完成」 | 拒绝提交并提示"RS 监测需要方块锚点…"（不会存下一个永远 no_data 的死目标） |
+| J13 | 一个 RS 探针挂 5 个目标，`/tick rate 200` 跑 10 秒 | 读数逐 tick 变化、没有明显卡顿（同 tick 同网络只拉一遍清单） |
+| J14 | 已有 AE 探针 → 对着 RS 网格打开选格页 →「完成」 | 该探针的 AE 目标**被替换**成 RS 目标（一个探针对准一台方块，两家的目标不会并存）；DATA 页的手输路径目标仍在 |
+| J15 | RS 未安装的实例（其他整合包） | 一切照旧：选格页不会进入 RS 模式，日志里没有 `RS ... failed` 之类的刷屏 |
 
 ---
 

@@ -1,6 +1,7 @@
 package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
@@ -65,6 +66,16 @@ public record DataTarget(
     public static final String AE_NETWORK_PATH = "ae:network";
 
     /**
+     * 精致存储（RS）网络目标的 {@code valuePath} 固定值 —— 同样是**标记不是路径**。
+     *
+     * 与 {@link #AE_NETWORK_PATH} 分开两个标记（而不是共用一个）：两类网络的读值链
+     * 完全不同（AE 走 {@code GridHelper} + KeyCounter，RS 走 {@code Grid#getItemStorage}
+     * + 自己的编码比对），共用标记会让"这台设备到底是哪家的"在数据层丢失 ——
+     * 而采样分派必须知道该调哪个读值器。
+     */
+    public static final String RS_NETWORK_PATH = "rs:network";
+
+    /**
      * **AE 网络目标**：监测 {@code itemId}（registry id）在探针所对准的那台
      * AE 设备所在网络里的可用数量。
      * 读值 = 服务端从设备拿 IGrid → StorageService → availableStacks（KeyCounter）
@@ -75,9 +86,34 @@ public record DataTarget(
         return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null, false);
     }
 
+    /**
+     * **RS 网络目标**：监测 {@code keyId}（见 {@code RsKeyText}：无组件物品用裸
+     * registry id，其余用 {@code rs:} 串）在探针所对准的那台 RS 网格设备所在网络里的数量。
+     * 读值 = 服务端从设备拿 Grid → 根存储的全量清单 → 按身份串比对求和；
+     * 不在网内 = 0（网络在线），设备不可用 / 断电 = no_data。
+     */
+    public static DataTarget rsNetwork(String keyId, String blockLabel,
+                                       ResourceKey<Level> dimension, BlockPos pos) {
+        return new DataTarget(RS_NETWORK_PATH, null, keyId, blockLabel, dimension, pos, -1, null, false);
+    }
+
     /** 是不是 AE 网络目标 */
     public boolean isAeNetwork() {
         return AE_NETWORK_PATH.equals(valuePath);
+    }
+
+    /** 是不是 RS 网络目标 */
+    public boolean isRsNetwork() {
+        return RS_NETWORK_PATH.equals(valuePath);
+    }
+
+    /**
+     * 是不是**网络类**目标（AE 或 RS）。
+     * 两类共用三件事：采样分派的入口、去重规则、"没有容器格"这个前提。
+     * 需要区分是哪一家时用 {@link #isAeNetwork()} / {@link #isRsNetwork()}。
+     */
+    public boolean isNetwork() {
+        return isAeNetwork() || isRsNetwork();
     }
 
     /**
@@ -119,7 +155,7 @@ public record DataTarget(
      * | 目标类型 | 重复判据 | 为什么 |
      * |---|---|---|
      * | NBT 槽位锚点（{@code isSlotAnchor}） | (列表路径, slot 号) 相同 | 同一 slot 只该有一条 |
-     * | **AE 网络** | {@code literalName}（物品 registry id）相同 | 读的是"网络中该物品"，名字就是身份；valuePath 全是 {@code ae:network}，**绝不能拿它去重**（不然所有 AE 目标互判重复） |
+     * | **网络目标**（AE / RS） | 标记相同 **且** {@code literalName}（身份串）相同 | 读的是"网络中这种东西"，名字就是身份；valuePath 全是标记值，**绝不能拿它去重**（不然所有网络目标互判重复）。标记也要比：AE 与 RS 的同名身份是两种东西 |
      * | 普通路径 | valuePath 相同 | 一个路径一个数 |
      *
      * 普通路径的强制数值标记（{@code forceNumeric}）**不参与**去重 —— 同一路径
@@ -129,13 +165,13 @@ public record DataTarget(
     public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
         for (DataTarget d : list) {
             boolean dup;
-            if (t.isAeNetwork() && d.isAeNetwork()) {
-                dup = d.literalName().equals(t.literalName());
+            if (t.isNetwork() && d.isNetwork()) {
+                dup = d.valuePath().equals(t.valuePath()) && d.literalName().equals(t.literalName());
             } else if (d.isSlotAnchor() && t.isSlotAnchor()) {
                 dup = d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath());
             } else {
                 dup = !d.isSlotAnchor() && !t.isSlotAnchor()
-                        && !d.isAeNetwork() && !t.isAeNetwork()
+                        && !d.isNetwork() && !t.isNetwork()
                         && d.valuePath().equals(t.valuePath());
             }
             if (dup) {
@@ -152,7 +188,7 @@ public record DataTarget(
      * "右键方块"那一刻，维度与坐标都拿不到（见 {@code ProbeContext} 的第三种来源）。
      * 这种目标在显示层只能标成"运行时锚点" —— 0.1.3 的 AE 监测闪退就是这里直接解引用
      * {@code dimension.location()}（dimension 为 null）。"AE 网络目标必须有锚点才能读值"
-     * 这条约束由 {@code ScopeScreen#commitAeTargets} 拦，不归显示层管。
+     * 这条约束由 {@code ScopeScreen#commitNetworkTargets} 拦，不归显示层管。
      */
     public String anchorText() {
         if (dimension == null || pos == null) {
@@ -171,7 +207,11 @@ public record DataTarget(
             String name = AeKeyText.isAe(fallbackName())
                     ? AeKeyText.label(fallbackName())
                     : fallbackName();
-            return "ae:network[" + name + "]";
+            return AE_NETWORK_PATH + "[" + name + "]";
+        }
+        if (isRsNetwork()) {
+            // RS 身份串：裸物品 id 走短名，rs: 串走 RsKeyText（去掉命名空间 + 丢掉组件指纹）
+            return RS_NETWORK_PATH + "[" + RsKeyText.label(fallbackName()) + "]";
         }
         return isSlotAnchor() ? valuePath + "[slot=" + nbtSlot + "]" : valuePath;
     }
@@ -179,7 +219,7 @@ public record DataTarget(
     /** 面板上的一行描述 */
     public String describe() {
         String label = blockLabel == null || blockLabel.isBlank() ? "block" : blockLabel;
-        if (isAeNetwork()) {
+        if (isNetwork()) {
             return label + " · " + displayValue() + " · " + anchorText();
         }
         if (isSlotAnchor()) {

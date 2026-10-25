@@ -1,7 +1,9 @@
 package com.jessetech.logiscope.collect;
 
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import com.jessetech.logiscope.bind.AeKeys;
+import com.jessetech.logiscope.bind.RsKeys;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.HolderLookup;
 import net.minecraft.core.registries.BuiltInRegistries;
@@ -86,6 +88,9 @@ public final class ContainerAccess {
      * 只列「外部设备」的槽位 *   · 没有外部容器界面时直接返回空（面板可以在关掉容器界面后单独打开，
      *     那时 containerMenu 是玩家自己的背包，列出来会让人误以为那是机器）
      *   · 有外部容器界面时，跳过玩家背包那 36 格与模组的假槽位（见 isSelectable）
+     *   · **两条网络特例**：AE 终端与 RS 网格的"格子"不是容器内容，是网络存储的
+     *     显示窗口（见 {@link #viewOfAe} 与 {@link RsKeys#rows}）—— 它们的行不从
+     *     {@code menu.slots} 来，要走各自的反射层。
      */
     public static List<SlotView> snapshot() {
         List<SlotView> out = new ArrayList<>();
@@ -96,15 +101,34 @@ public final class ContainerAccess {
         if (menu == null) {
             return out;
         }
-        // AE 终端才有"网络列表显示格"：先判一次菜单家族，别的容器一格反射都不做
+        // AE 终端：逐个显示格解包（那条路必须看槽位）
         boolean aeMenu = AeNetworkReader.isAeStorageMenu(menu);
         HolderLookup.Provider registries = aeMenu ? registries() : null;
+        if (aeMenu) {
+            for (int i = 0; i < menu.slots.size(); i++) {
+                Slot slot = menu.slots.get(i);
+                if (!isSelectable(slot)) {
+                    continue;
+                }
+                out.add(viewOfAe(i, slot, registries));
+            }
+            return out;
+        }
+        // RS 网格：整份仓库视图（不是槽位），见 RsKeys.rows 为什么
+        List<RsKeys.Row> rsRows = RsKeys.rows(menu);
+        if (rsRows != null) {
+            for (RsKeys.Row r : rsRows) {
+                // menuSlotIndex = -1：RS 的行不对应任何菜单槽（选中/去重都不靠下标，靠身份串）
+                out.add(new SlotView(-1, r.index(), r.id(), r.amount(), false, r.label()));
+            }
+            return out;
+        }
         for (int i = 0; i < menu.slots.size(); i++) {
             Slot slot = menu.slots.get(i);
             if (!isSelectable(slot)) {
                 continue;
             }
-            out.add(aeMenu ? viewOfAe(i, slot, registries) : make(i, slot.getContainerSlot(), slot.getItem()));
+            out.add(make(i, slot.getContainerSlot(), slot.getItem()));
         }
         return out;
     }
@@ -210,9 +234,9 @@ public final class ContainerAccess {
     public record SlotView(int menuSlotIndex, int containerSlotIndex, String itemId, long count,
                            boolean empty, @Nullable String label) {
 
-        /** 给界面显示用的短名称，去掉命名空间前缀；AE 键走 {@link AeKeyText#label} */
+        /** 给界面显示用的短名称，去掉命名空间前缀；AE / RS 键走各自的文本层 */
         public String shortName() {
-            return AeKeyText.label(itemId);
+            return RsKeyText.isRs(itemId) ? RsKeyText.label(itemId) : AeKeyText.label(itemId);
         }
 
         /**

@@ -7,8 +7,8 @@
 
 ## 一句话现状
 
-- **代码 / 离线**：`build` 全过；TestChart **489 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
-  `verify-jar.py` 全过；lang 中英各 **185** 键一致。
+- **代码 / 离线**：`build` 全过；TestChart **513 条**；`BenchRender`（台阶 99.3%・混合 63.8%）；
+  `verify-jar.py` 全过；lang 中英各 **203** 键一致；`ProbeRsApi` = `RS_API_OK`。
 - **发布**：**0.1.1**（tag `neoforge-1.21.1-0.1.1`，含第十七轮① 上升 / 下降事件）；**0.1.3 待发布**
   —— 版本号已提至 `0.1.3-1.21.1`（0.1.2 未单独发布，变更并入 0.1.3），
   变更见「第十八轮⑥」+「第十九轮①–③」；0.1.0 同线；发布约定见
@@ -376,6 +376,45 @@ AE 非物品 = `ae:` + SNBT）—— 换开关不会让旧存档对不上新曲�
 
 离线：build 通过；TestChart 489 条全过（渲染依赖 GL 与游戏循环，不适合进纯逻辑断言）。
 **本版只在 main（1.21.1）实现，其余四条线未移植。**
+
+## 第二十轮③：精致存储（RS 2）网络采样兼容（2026-10-25）
+
+**需求**：为精致存储增加采样兼容 —— 与 AE2 类似（能存物品和流体），模组开源
+（`refinedmods/refinedstorage2`），实例里已装。先在 main（1.21.1）做。
+
+**结论**：与 AE 结构同构、API 没有一处共通 —— 新增两套并行实现（`RsKeys` / `RsNetworkReader`
+对 `AeKeys` / `AeNetworkReader`），并把"AE 模式"抽象成**网络模式**（`netMode()`），
+选格页 / 完成提交 / 禁用容器格三处只写一次。契约见 ARCHITECTURE **CP28**。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/RsKeyText`（新） | RS 键的**纯文本**身份（无游戏依赖，t43 断言钉住）：无组件物品 = 裸 registry id；其余 `rs:i:` / `rs:f:` + 可选 `\|组件指纹` |
+| `bind/RsKeys`（新） | 反射层：`isRsGridMenu`（沿父类链比类名，零 `forName`）、`rows`（仓库视图 → 行）、`encode`（键 → 身份）、`fingerprint`（排序后的组件指纹） |
+| `collect/RsNetworkReader`（新） | 服务端读值：`Grid#isGridActive` → `getItemStorage().getAll()` → 按身份串比对求和；同 tick 同网络只拉一遍 |
+| `bind/DataTarget` | 新增 `rs:network` 标记 + `rsNetwork(...)` + `isRsNetwork()` / `isNetwork()`；去重与显示按"家"区分 |
+| `collect/ProbeInstance` | 采样分派按 `isRsNetwork()` 选读值器；`replaceAeTargets` → **`replaceNetworkTargets`**（AE 与 RS 一起覆写） |
+| `collect/ContainerAccess` | `snapshot()` 增加 RS 分支（行来自 `RsKeys.rows`，`menuSlotIndex = -1`）；`SlotView#shortName` 认 `rs:` |
+| `bind/NameText` | `rs:` 身份取名（流体走 `FluidStack#getHoverName`，物品走 `getDescription`；组件指纹不参与取名） |
+| `ui/ScopeScreen` | `rsMode` 字段 + `netMode()`；`enterPicker` 两家各判各的；`toggleRow` 的 `RepoSlot` 守卫只有 AE 走；完成提示文案分家 |
+| lang | 中英各 +5 键（`picker.rs_mode` / `rs_hint` / `flash.rs_none` / `rs_replaced` / `rs_need_anchor`） |
+
+三个关键决定（细节见 CP28）：
+1. **无组件物品不挂前缀** —— 它与"原版的一件铁锭"是同一个东西，共用裸 id 让名称解析
+   不必认识 RS，也不影响旧目标。
+2. **组件必须进身份**（否则两瓶不同的药水合成一行）—— 指纹用"排序后的
+   `组件类型=值`"拼，因为 `DataComponentPatch.toString()` 按插入顺序打印，直接用会抖动。
+   已知限制：值的 `toString()` 不保证跨版本稳定，撞车只会合并（不会读出假值）。
+3. **行来自仓库视图，不来自槽位** —— RS 2.0 的网格不是"一格一个 Slot"，界面按
+   `getViewList()` 逐格画。副产品：AE 只能选当前页，RS 能选整个网络。
+
+离线：`build` 通过；TestChart **513 条**（新增 t43 共 24 条）；lang 中英各 **203** 键；
+**新增 `dev-check/ProbeRsApi.java` —— 对真实 RS 2.0.9 jar 把本类用到的每一个反射入口
+解析一遍，输出 `RS_API_OK`**（`getRepository` / `getViewList` / `getAmount` /
+`getResourceForRecipeMods` / `getName` / `item` / `fluid` / `components` /
+`isGridActive` / `getItemStorage` / `getAll` / `resource` / `amount`，
+以及三条"接口链里有没有"的判定）。
+**实机待测**（`VERIFY.md` 第二十轮③）：选格页列表、勾选 → 完成 → 图表、断电 no_data、
+流体与 AE 的并存。**其余四条线未移植。**
 
 ## 未完成 / 待优化项
 

@@ -2,10 +2,13 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import net.minecraft.client.Minecraft;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.level.material.Fluid;
+import net.neoforged.neoforge.fluids.FluidStack;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.HashMap;
@@ -34,7 +37,14 @@ import java.util.Optional;
  * |---|---|---|
  * | {@code minecraft:iron_ingot} | {@code iron_ingot}（去命名空间） | 物品的 {@code getDescription()}，如「铁锭」 |
  * | {@code ae:{#t:"ae2:f",id:"minecraft:water"}} | {@code water}（SNBT 里的 id 短名） | {@code AEKey#getDisplayName()}，如「水」 |
+ * | {@code rs:f:minecraft:water} | {@code water}（见 {@link RsKeyText}） | 流体的 {@code FluidStack#getHoverName()}，如「水」 |
+ * | {@code rs:i:<id>|<组件>} | 物品短名 | 物品的 {@code getDescription()}（组件解不回来，见下） |
  * | 其它（数据路径 / 占位名） | 原样短名 | 原样短名（解析不出来就**不编名字**） |
+ *
+ * 【RS 带组件物品的实际名只到"物品本名"】RS 的身份串里带一段组件指纹，它是给
+ * **采样比对**用的（见 {@code RsKeys#fingerprint}），不是可反解的序列化 —— 所以
+ * 一瓶自定义命名的药水在 DISPLAY 档显示的是"药水"。选格页不受影响：那里直接拿
+ * RS 自己算好的 {@code GridResource#getName()}（{@code hint}）。
  *
  * 【缓存】DISPLAY 模式要解 SNBT + 建 AEKey + 取本地化名，图例每帧都要调用，
  * 所以按身份串缓存；切换开关时 {@link #invalidate()} 清空。语言热重载后旧名字会留到
@@ -120,12 +130,21 @@ public final class NameText {
         if (hit != null) {
             return hit;
         }
-        String name = display ? resolveDisplay(id) : AeKeyText.label(id);
+        String name = display ? resolveDisplay(id) : registryLabel(id);
         CACHE.put(id, name);
         return name;
     }
 
-    /** 真正的解析：AE 键 → AEKey 的显示名；物品 id → 物品显示名；其它 → 短 id */
+    /**
+     * 注册名档的写法。**两种键身份各有一套文本层**：
+     * {@code rs:} 串走 {@link RsKeyText}（它认得 {@code rs:f:} / {@code rs:i:} 的形状），
+     * 其余仍走 {@link AeKeyText}（物品 id 与 {@code ae:} SNBT 都是它的活）。
+     */
+    private static String registryLabel(String id) {
+        return RsKeyText.hasPrefix(id) ? RsKeyText.label(id) : AeKeyText.label(id);
+    }
+
+    /** 真正的解析：AE 键 → AEKey 的显示名；RS 键 → 注册表里的本名；物品 id → 物品显示名；其它 → 短 id */
     private static String resolveDisplay(String id) {
         try {
             if (AeKeyText.isAe(id)) {
@@ -136,6 +155,9 @@ public final class NameText {
                 }
                 // 解不出来（键类型没注册 / SNBT 坏了 / AE2 不在）→ 短 id，不编名字
                 return AeKeyText.label(id);
+            }
+            if (RsKeyText.isRs(id)) {
+                return resolveRsDisplay(id);
             }
             ResourceLocation rl = ResourceLocation.tryParse(id);
             if (rl != null) {
@@ -148,8 +170,38 @@ public final class NameText {
             return AeKeyText.label(id);
         } catch (Throwable t) {
             // 注册表没就绪（离线断言）/ 客户端没进世界 —— 退回注册名，绝不炸渲染帧
-            return AeKeyText.label(id);
+            return registryLabel(id);
         }
+    }
+
+    /**
+     * RS 键的实际名：**只按 registry id 取名**，组件指纹不参与
+     * （它不是可反解的序列化，见类注释的已知限制）。
+     *
+     * 流体用 {@code FluidStack#getHoverName()} —— 与 RS 自己算名字的方式一致
+     * （{@code ForgeFluidResourceRepositoryMapper#getName} 就是
+     * {@code new FluidStack(fluid, 1000).getHoverName()}）。
+     */
+    private static String resolveRsDisplay(String id) {
+        RsKeyText.Parsed p = RsKeyText.parse(id);
+        if (p == null) {
+            return RsKeyText.label(id);
+        }
+        ResourceLocation rl = ResourceLocation.tryParse(p.registryId());
+        if (rl == null) {
+            return RsKeyText.label(id);
+        }
+        if (p.type() == RsKeyText.FLUID) {
+            Optional<Fluid> fluid = BuiltInRegistries.FLUID.getOptional(rl);
+            if (fluid.isPresent()) {
+                return new FluidStack(fluid.get(), 1000).getHoverName().getString();
+            }
+        }
+        Optional<Item> item = BuiltInRegistries.ITEM.getOptional(rl);
+        if (item.isPresent()) {
+            return item.get().getDescription().getString();
+        }
+        return RsKeyText.label(id);
     }
 
     /** 解码 AE 键要的 {@code HolderLookup.Provider}；没在世界里就是 null（decodeKey 会返回 null） */

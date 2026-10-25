@@ -34,6 +34,7 @@ import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.PickerFilter;
 import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.RectRuns;
@@ -106,6 +107,7 @@ public class TestChart {
         t40ForcedNumeric();
         t41PickerFilter();
         t42AeKeyText();
+        t43RsKeyText();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1575,6 +1577,53 @@ public class TestChart {
         eq("AE 键 空串", "", AeKeyText.label(""));
         eq("AE 键 null 安全", "", AeKeyText.label(null));
     }
+
+    // 43) RS（精致存储）键的字符串身份：无组件物品与 AE / 容器槽位共用裸 id，
+    //     流体与带组件物品挂 rs: 前缀。纯文本层，无游戏依赖。
+    private static void t43RsKeyText() {
+        // 无组件物品：**故意不挂前缀**（见 RsKeyText 类注释的三个理由）
+        eq("RS 键 无组件物品 = 裸 id", "minecraft:iron_ingot", RsKeyText.item("minecraft:iron_ingot"));
+        no("RS 键 裸 id 不算 rs 键", RsKeyText.isRs("minecraft:iron_ingot"));
+        eq("RS 键 裸 id 显示短名", "iron_ingot", RsKeyText.label("minecraft:iron_ingot"));
+
+        // 流体
+        String water = RsKeyText.fluid("minecraft:water");
+        eq("RS 键 流体形状", "rs:f:minecraft:water", water);
+        yes("RS 键 流体是 rs 键", RsKeyText.isRs(water));
+        eq("RS 键 流体显示短名", "water", RsKeyText.label(water));
+        eq("RS 键 流体类型", 'f', RsKeyText.parse(water).type());
+        eq("RS 键 流体 registry id", "minecraft:water", RsKeyText.parse(water).registryId());
+        eq("RS 键 流体无组件", null, RsKeyText.parse(water).components());
+
+        // 带组件物品：类型标记 i + 组件指纹（指纹形如 {a=1,b=2}，含 ':' 与 ','）
+        String potion = RsKeyText.itemWithComponents("minecraft:potion", "{minecraft:potion_contents={potion=minecraft:healing}}");
+        yes("RS 键 组件物品是 rs 键", RsKeyText.isRs(potion));
+        eq("RS 键 组件物品类型", 'i', RsKeyText.parse(potion).type());
+        eq("RS 键 组件物品 registry id 不被组件里的 ':' 干扰", "minecraft:potion",
+                RsKeyText.parse(potion).registryId());
+        eq("RS 键 组件物品指纹完整保留", "{minecraft:potion_contents={potion=minecraft:healing}}",
+                RsKeyText.parse(potion).components());
+        eq("RS 键 组件物品显示名丢掉指纹", "potion", RsKeyText.label(potion));
+
+        // 带组件流体：同一套规则
+        String tagged = RsKeyText.fluidWithComponents("minecraft:water", "{x=1}");
+        eq("RS 键 组件流体形状", "rs:f:minecraft:water|{x=1}", tagged);
+        eq("RS 键 组件流体显示短名", "water", RsKeyText.label(tagged));
+
+        // 边界：不是 rs 键 / 形状坏掉 —— 一律不假装，能读到哪算哪
+        no("RS 键 ae 键不算 rs 键", RsKeyText.isRs("ae:{#t:\"ae2:f\",id:\"minecraft:water\"}"));
+        no("RS 键 只有前缀不算", RsKeyText.isRs("rs:"));
+        no("RS 键 缺类型分隔符不算", RsKeyText.isRs("rs:f"));
+        eq("RS 键 null 安全", "", RsKeyText.label(null));
+        eq("RS 键 空串", "", RsKeyText.label(""));
+        eq("RS 键 坏形状露原文（带 ~ 标记）", true,
+                RsKeyText.label("rs:i:").startsWith("~") || RsKeyText.label("rs:i:").isEmpty());
+
+        // 两种前缀互不冒充（AE 的 isAe / RS 的 isRs 是两条独立判定）
+        no("RS 键 rs 串不算 ae 键", AeKeyText.isAe(water));
+        no("RS 键 ae 串不算 rs 键（反向）", RsKeyText.isRs("ae:{id:\"minecraft:water\"}"));
+    }
+
 
     private static void eq(String what, Object expect, Object actual) {
         if (expect == null ? actual == null : expect.equals(actual)) {
