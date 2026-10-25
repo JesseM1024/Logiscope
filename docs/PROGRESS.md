@@ -365,6 +365,38 @@ Esc 才是清空。
 
 离线：build 通过；TestChart 489 条全过（纯 UI 行为，无可断言逻辑）。
 
+## [1.20.1] 轮次 9：精致存储（RS 1.x）网络采样兼容（2026-10-25，自 1.21.1 线移植）
+
+**需求**：把 main（1.21.1）上的「精致存储网络采样」移植到本线。实例里装的是
+**refinedstorage-1.12.4**（RS **1.x**），和 1.21.1 线的 RS **2.x** 是**两套完全不同的 API** ——
+所以这不是搬代码，是按同一份语义重写一遍反射层；界面 / 数据层的接线（`netMode`、
+`anchorIsDevice`、覆写语义）照搬。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/RsKeyText`（新） | RS 键的**纯文本**身份（无游戏依赖，t43 共 21 条断言）：无 NBT 物品 = 裸 registry id；其余 `rs:i:` / `rs:f:` + 可选 `\|SNBT` |
+| `bind/RsKeys`（新） | 反射层：`isRsGridMenu`（比类名）、`rows(Screen)`（**行在界面上**：`GridScreen#getView()` → `IGridView#getAllStacks()`）、`encode`（`ItemStack`/`FluidStack` → 身份，**零反射**） |
+| `collect/RsNetworkReader`（新） | 读值：`INetworkNodeProxy#getNode` → `INetworkNode#getNetwork` → `INetwork#canRun` → `getItemStorageCache/getFluidStorageCache` → `getList` → `getCount(stack)` |
+| 接线 | `DataTarget` 加 `rs:network` 标记 + `isNetwork()`；`ProbeInstance#replaceNetworkTargets`；`ContainerAccess` 对 RS 网格返回空表 + `fromRsRows`；`ScopeScreen` 的 `rsMode`/`netMode()`/`anchorIsDevice`；`NameText` 认 `rs:` |
+
+★ **RS 1.x 和 2.x 的三个关键差别**（决定了代码不能照搬）：
+1. **清单在界面上，不在菜单里** —— 2.x 是 `AbstractGridContainerMenu#getRepository()`；
+   1.x 是 `GridScreen#getView()`。所以 `ContainerAccess.snapshot()` 对 RS 网格返回**空表**
+   （它的菜单槽位是合成格 / 样板格），行由 `ScopeScreen` 从父界面取。
+2. **键能精确重建** —— 1.x 的键就是 `ItemStack`/`FluidStack`，身份串里的 SNBT 用
+   `TagParser.parseTag` 解回来就能重建；所以读值是**直接问一条键**（`getCount`），
+   不必像 2.x 那样"拉全量再比对"。
+3. **`getCount(T)` 默认就比 NBT** —— 字节码核实：默认方法转调 `getCount(stack, 1)`，
+   而 `IComparer.COMPARE_NBT = 1`。所以附魔书与同名白书各算各的，不会读出"两者之和"。
+
+★ **`TagParser#parseTag` 在本线抛受检异常**（`CommandSyntaxException`），1.21.1 不抛 ——
+包一层 `parseNbt` 把失败转成"读不到"（no_data），绝不退回"同 id 全算"。
+
+离线：`build` 通过，产出 `logiscope-1.0.0-1.20.1.jar`；TestChart **514 条**（489 + 21 t43 + 4 别处）；
+lang 中英各 **205** 键；**新增 `dev-check/ProbeRsApi`：对真实 refinedstorage-1.12.4.jar
+把本线用到的每一个反射入口解析一遍 → `RS_API_OK`（零 SKIP）**。
+**实机待测**：J 组（见 `VERIFY.md`）。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |

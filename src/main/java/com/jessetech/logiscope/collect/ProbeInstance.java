@@ -284,18 +284,20 @@ public final class ProbeInstance {
     }
 
     /**
-     * **用"这一刻选中的物品"替换掉全部 AE 网络目标**。
+     * **用"这一刻选中的东西"替换掉全部网络类目标**（AE 与 RS 一起换）。
      *
-     * 只换 AE 目标：**DATA 页的纯路径目标（FE / 流体）与 NBT 槽位锚点原样保留**。
+     * 只换网络目标：**DATA 页的纯路径目标（FE / 流体）与 NBT 槽位锚点原样保留**。
+     * 两类网络目标一起换的理由：一个探针对准的是**一台方块**，它要么是 AE 设备、
+     * 要么是 RS 设备，不可能同时是两者 —— 留着另一类只会得到永远 no_data 的死目标。
      *
-     * @param itemIds 新的物品 registry id 集合（调用方已去重）
+     * @param targets 新的网络目标（调用方已去重）
      * @return 替换后该探针的目标总数
      */
-    public int replaceAeTargets(List<DataTarget> targets) {
+    public int replaceNetworkTargets(List<DataTarget> targets) {
         synchronized (sampleLock) {
             List<DataTarget> n = new ArrayList<>();
             for (DataTarget d : dataTargets) {
-                if (!d.isAeNetwork()) {
+                if (!d.isNetwork()) {
                     n.add(d);          // 其它两类目标：留下
                 }
             }
@@ -762,12 +764,14 @@ public final class ProbeInstance {
                 }
                 int got = 0;
                 for (DataTarget dt : dts) {
-                    if (dt.isAeNetwork()) {
-                        // AE 网络目标：读"这台 AE 设备所在网络中该物品
-                        // 的可用数量"—— 与菜单/GUI 状态无关（终端关掉照读）。
-                        // null = 设备读不到（不是 AE 节点 / 断电）→ 留空走 no_data；
-                        // 0 = 网络在线但没这物品（真值，不是 no_data）。
-                        Long v = AeNetworkReader.read(level, dt.pos(), dt.literalName());
+                    if (dt.isNetwork()) {
+                        // 网络目标：读"这台设备所在网络中这种东西的数量"——
+                        // 与菜单/GUI 状态无关（终端关掉照读）。
+                        // null = 设备读不到（不是那家的设备 / 断电 / 反射链断了）→ 留空走 no_data；
+                        // 0 = 网络在跑但没这东西（真值，不是 no_data）。
+                        Long v = dt.isRsNetwork()
+                                ? RsNetworkReader.read(level, dt.pos(), dt.literalName())
+                                : AeNetworkReader.read(level, dt.pos(), dt.literalName());
                         if (v == null) {
                             continue;
                         }
