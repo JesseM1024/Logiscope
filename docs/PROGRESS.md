@@ -374,7 +374,7 @@ Esc 才是清空。
 
 | 件 | 内容 |
 |---|---|
-| `analysis/RsKeyText`（新） | RS 键的**纯文本**身份（无游戏依赖，t43 共 21 条断言）：无 NBT 物品 = 裸 registry id；其余 `rs:i:` / `rs:f:` + 可选 `\|SNBT` |
+| `analysis/RsKeyText`（新） | RS 键的**纯文本**身份（无游戏依赖，t43 共 25 条断言）：无 NBT 物品 = 裸 registry id；其余 `rs:i:` / `rs:f:` + 可选 `\|SNBT` |
 | `bind/RsKeys`（新） | 反射层：`isRsGridMenu`（比类名）、`rows(Screen)`（**行在界面上**：`GridScreen#getView()` → `IGridView#getAllStacks()`）、`encode`（`ItemStack`/`FluidStack` → 身份，**零反射**） |
 | `collect/RsNetworkReader`（新） | 读值：`INetworkNodeProxy#getNode` → `INetworkNode#getNetwork` → `INetwork#canRun` → `getItemStorageCache/getFluidStorageCache` → `getList` → `getCount(stack)` |
 | 接线 | `DataTarget` 加 `rs:network` 标记 + `isNetwork()`；`ProbeInstance#replaceNetworkTargets`；`ContainerAccess` 对 RS 网格返回空表 + `fromRsRows`；`ScopeScreen` 的 `rsMode`/`netMode()`/`anchorIsDevice`；`NameText` 认 `rs:` |
@@ -392,7 +392,7 @@ Esc 才是清空。
 ★ **`TagParser#parseTag` 在本线抛受检异常**（`CommandSyntaxException`），1.21.1 不抛 ——
 包一层 `parseNbt` 把失败转成"读不到"（no_data），绝不退回"同 id 全算"。
 
-离线：`build` 通过，产出 `logiscope-1.0.0-1.20.1.jar`；TestChart **514 条**（489 + 21 t43 + 4 别处）；
+离线：`build` 通过，产出 `logiscope-1.0.0-1.20.1.jar`；TestChart **514 条**（489 + 25 t43）；
 lang 中英各 **205** 键；**新增 `dev-check/ProbeRsApi`：对真实 refinedstorage-1.12.4.jar
 把本线用到的每一个反射入口解析一遍 → `RS_API_OK`（零 SKIP）**。
 **实机待测**：J 组（见 `VERIFY.md`）。
