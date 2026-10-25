@@ -53,6 +53,46 @@ public final class Archives {
         return rootDir().resolve(dirName);
     }
 
+    /**
+     * 删除一个存档目录（连同里面的 {@code recording.json} / {@code .csv} / {@code name.txt}）。
+     *
+     * 【为什么要有前缀校验】{@code dirName} 来自扫描结果，本来只会是根目录下的一层目录名；
+     * 但它是字符串，将来万一有人从输入框拼进来（`../..`），一句 {@code deleteIfExists}
+     * 就能把别的东西删掉。所以先 resolve + normalize，再要求"父目录正好是根目录"。
+     *
+     * 【为什么用 walk 逆序】目录非空时 {@code Files.delete} 会失败；{@code walk} 是前序遍历，
+     * 反过来就保证"先删文件、再删空目录"。
+     *
+     * @return 是否真的删掉了（目录本来就不存在也算成功 —— 用户手动删过）
+     */
+    public static boolean delete(String dirName) {
+        if (dirName == null || dirName.trim().isEmpty()) {
+            return false;
+        }
+        try {
+            Path root = rootDir().toAbsolutePath().normalize();
+            Path dir = root.resolve(dirName).toAbsolutePath().normalize();
+            if (!root.equals(dir.getParent())) {
+                return false;   // 不在根目录的下一层 → 拒绝（防 ../ 逃逸）
+            }
+            if (!Files.exists(dir)) {
+                return true;
+            }
+            List<Path> all = new ArrayList<>();
+            try (Stream<Path> walk = Files.walk(dir)) {
+                walk.forEach(all::add);
+            }
+            all.sort(Comparator.reverseOrder());
+            for (Path p : all) {
+                Files.deleteIfExists(p);
+            }
+            return !Files.exists(dir);
+        } catch (Exception e) {
+            LogiScopeMod.LOGGER.warn("[LogiScope] delete archive failed: {}", dirName, e);
+            return false;
+        }
+    }
+
     // ------------------------------------------------------------------
     // 导出
     // ------------------------------------------------------------------
