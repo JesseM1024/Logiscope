@@ -1,7 +1,7 @@
 package com.jessetech.logiscope.ui;
 
-import com.jessetech.logiscope.analysis.AeKeyText;
 import com.jessetech.logiscope.analysis.ChartData;
+import com.jessetech.logiscope.bind.NameText;
 import com.jessetech.logiscope.analysis.Series;
 import com.jessetech.logiscope.analysis.RectRuns;
 import com.jessetech.logiscope.analysis.WaveColumns;
@@ -953,17 +953,19 @@ public final class ChartRenderer {
     }
 
     /**
-     * 给图例 / 读数用的短名字。
+     * 给图例 / 读数 / 计算页用的短名字。
      *
      * AE 的非物品键（本线只有流体）身份是一整段 `ae:{#t:"ae2:f",id:"minecraft:water"}`，
-     * 直接去掉命名空间会印成 `{#t:"ae2:f",id:...}` 这种东西 —— 走
-     * {@link AeKeyText#label} 取里头那个 id 的短名（如 {@code water}）。
+     * 直接去掉命名空间会印成 `{#t:"ae2:f",id:...}` 这种东西 —— 走 {@link NameText} 取名字。
+     * 注册名（{@code water}）还是实际名（{@code 水}）由「名称」开关决定，三处同口径。
      */
     public static String label(int seriesIndex, String itemId) {
         if (ChartData.EMPTY_ITEM.equals(itemId)) {
             return tr("logiscope.slot.empty");
         }
-        return AeKeyText.label(itemId);
+        // 统一走 NameText：注册名（water）还是实际名（水）由「名称」开关决定，
+        // 选格页 / 图例 / 计算页三处同口径；开关只影响显示，系列身份串不变。
+        return NameText.of(itemId);
     }
 
     /**
