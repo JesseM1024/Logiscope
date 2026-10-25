@@ -1662,11 +1662,27 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   AE 与 RS 两类目标。理由：一个探针对准的是**一台方块**，它要么是 AE 设备、要么是
   RS 设备 —— 留着另一类只会得到永远 no_data 的死目标。DATA 页的纯路径目标与 NBT
   槽位锚点不受影响。
-- **C28-9 已知边界**：① `"rs:network"` 是保留的 valuePath（同 C27-7）；
+- **C28-9 提交前必须校验锚点落在设备上**（0.1.4-a 实机 J12 后补）：`ScopeScreen#anchorIsDevice`。
+  起因：手持**便携网格**对着地面右键时，`RightClickBlock` 先把地面记成锚点
+  （`ContainerAnchor` 的 pending），界面随后由**物品**打开 —— 于是 `hasPersistentId()` 为真
+  却指向一块泥土，目标存下去恒 no_data 且**界面上一个字都不提示**。
+  判据按"会不会误拒"分强弱：
+
+  | 情况 | 处理 | 理由 |
+  |---|---|---|
+  | 锚点跨维度 / 没有世界 | **放行** | 验不了就不凭空拒绝 |
+  | 方块没有方块实体 | 拒绝 | 任何网络设备的 BE 一定存在（线缆总线也是 BE） |
+  | RS 模式下 BE 不是 `Grid` | 拒绝 | 与读值器**同一个判据**（`RsNetworkReader#isGridBlock`） |
+  | AE 模式下 BE 存在 | 放行 | 见 C27-11 |
+
+- **C28-10 已知边界**：① `"rs:network"` / `"ae:network"` 是保留的 valuePath（同 C27-7）；
   ② **附属模组自定义的 RS 资源类型不列出**（`RsKeys#encode` 返回 null）—— 与其给一个
   "看着像身份、其实读不回来"的串让人勾上一行永远 no-data 的东西，不如不列；
-  ③ 便携 / 无线网格没有方块锚点 → 「完成」拒绝提交并提示（与 C27-3 的无线终端同一条）。
-- **C28-10 离线实证**：`dev-check/ProbeRsApi.java` 把本类用到的**每一个反射入口**
+  ③ **便携网格方块（`AbstractPortableGridBlockEntity`）读不出来**：它只实现
+  `ExtendedMenuProvider<PortableGridData>`，**不是** `Grid` —— 存量在物品内部的磁盘里，
+  不在任何网络上。所以它在选格页会被 `isGridBlock` 判为"读不到"而拒绝提交（诚实）；
+  ④ 便携 / 无线网格**从手上打开**时没有方块锚点 → 拒绝（同 C27-3 的无线终端）。
+- **C28-11 离线实证**：`dev-check/ProbeRsApi.java` 把本类用到的**每一个反射入口**
   对真实 jar 解析一遍（`RS_API_OK`）。它尽量沿代码自己的推导路径走
   （`getRepository()` 的返回类型 → `getViewList`；从运行时资源键类往上找 `ResourceKey`），
   免得探针与实现各自漂移。**不在** `offline-check.bat` 里（依赖仓库外的第三方 jar）。
@@ -1884,6 +1900,21 @@ AE 终端的格子不是容器内容（是网络存储列表的显示窗口，�
   不是规范化的序列化 —— 拿它当身份指纹必须自己排序（C28-3）。
 - **离线夹具要带上 Guava / fastutil**：RS 的菜单继承链会牵到它们（游戏里由 NeoForge 提供），
   只挂两个 jar 会得到一串 `NoClassDefFoundError`（那是夹具缺件，不是签名错）。
+- **便携网格方块不是 `Grid`**：`AbstractPortableGridBlockEntity` 只实现
+  `ExtendedMenuProvider<PortableGridData>`（存量在内部磁盘里）。把它当网格会读出一片
+  no_data —— 本项目的做法是**拒绝提交并说明**（C28-10 ③）。
+- **`CableBusBlockEntity` 不直接实现 `IInWorldGridNodeHost`**（AE 侧）：
+  它实现 `AEMultiBlockEntity`，节点经 `AECapabilities.IN_WORLD_GRID_NODE_HOST` 能力转发 ——
+  所以"按接口判这块是不是 AE 设备"会漏掉最常见的线缆终端（C27-11）。
+
+- **C27-11 提交前只做"能确定的那一半"校验**：`ScopeScreen#anchorIsDevice` 对 AE 只拒绝
+  **"锚点方块没有方块实体"**（见 C28-9 的表）。想判"这块是不是 AE 设备"得更进一步，
+  但 `CableBusBlockEntity` **不直接实现** `IInWorldGridNodeHost`
+  （javap 核实：它实现的是 `AEMultiBlockEntity`，靠 `AECapabilities.IN_WORLD_GRID_NODE_HOST`
+  能力转发，`GridHelper#getNodeHost` 就是一次 `getCapability`）。客户端查能力有风险 ——
+  `getCapability` 返回 null 时**分不清**"这个方块没这个能力"和"能力系统此时不可用"，
+  后者会把所有合法提交一起拒掉。所以宁可留下"锚点在箱子上 → 读数恒 no_data"这个窄洞，
+  也不做一次可能全盘误拒的判定。
 
 > 反查方法：`javap -p -cp run/mods/<mod>.jar <类名>`（直接读 class，不需要源码）。
 

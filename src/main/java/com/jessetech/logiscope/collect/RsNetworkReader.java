@@ -192,6 +192,21 @@ public final class RsNetworkReader {
         }
     }
 
+    /**
+     * 这个方块实体是不是 **RS 网格**（判据 = 实现 `common.api.grid.Grid`）。
+     *
+     * 客户端也能判（纯类检查，不碰网络状态、不碰 Level）—— 提交网络目标时用它拦掉
+     * "锚点落在普通方块上"的情况。读值那条路的入口正是同一个接口，
+     * 所以"这里说能读"和"那边真去读"用的是**同一个判据**，不会各说各的。
+     *
+     * ⚠️ **便携网格方块不在这里面**（`AbstractPortableGridBlockEntity` 只实现
+     * `ExtendedMenuProvider<PortableGridData>`，不是 `Grid` —— 它的存量来自内部磁盘，
+     * 不是网络）。所以它同样被这个方法判为"读不到"，这是对的：本读值器确实读不出它。
+     */
+    public static boolean isGridBlock(@Nullable BlockEntity be) {
+        return be != null && interfaceNamed(be.getClass(), GRID) != null;
+    }
+
     /** 在类自身与它的接口链里按名字找接口 */
     @Nullable
     private static Class<?> interfaceNamed(@Nullable Class<?> from, String name) {

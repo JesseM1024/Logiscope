@@ -205,6 +205,8 @@
   "logiscope.picker.rs_hint": "value = that entry's stored amount in this Refined Storage network; powered-off or disconnected reads no-data, absent entries read 0",
   "logiscope.flash.rs_none": "pick entries to track first",
   "logiscope.flash.rs_replaced": "RS targets updated: %s total",
+  "logiscope.flash.rs_anchor_not_grid": "the anchored block (%s) is not an RS grid - RS tracking needs a grid block you right-clicked; a portable/wireless grid opened from the hand has no readable anchor",
+  "logiscope.flash.ae_anchor_not_device": "the anchored block (%s) has no block entity, so it is not an AE device - right-click an ME terminal block, then pick items again",
   "logiscope.flash.rs_need_anchor": "RS tracking needs a block anchor - this screen has no coordinates (portable/wireless grid or a hotkey-opened GUI). Right-click a grid block, then pick entries again",
   "logiscope.picker.nbt_mode_hint": "NBT tracking: targets come from the slot number in the data - the cell you click is the cell tracked, independent of the GUI; Done overwrites the checked cells (off by default, so non-slot machines stay on the normal path)",
   "logiscope.data.slot_fallback": "slot %s",

@@ -416,6 +416,36 @@ AE 非物品 = `ae:` + SNBT）—— 换开关不会让旧存档对不上新曲�
 **实机待测**（`VERIFY.md` 第二十轮③）：选格页列表、勾选 → 完成 → 图表、断电 no_data、
 流体与 AE 的并存。**其余四条线未移植。**
 
+## 第二十轮④：网络目标提交前校验锚点（J12 实机反馈，2026-10-25）
+
+**反馈**（用户原话）：「J12 可以完成，之后报 nodata，没有拦截并弹出提示」。
+
+**根因**：`ContainerAnchor` 的锚点来自 `PlayerInteractEvent.RightClickBlock`，它只知道
+"为了打开这个界面玩家右键了哪个方块"。手持**便携网格**对着地面右键时，那次右键也算数 ——
+锚点落在一块泥土上，而界面其实是被**物品**打开的。于是 `hasPersistentId()` 为真、
+`rs_need_anchor` 那条守卫不触发，目标带着一个毫无意义的坐标存下去，读数恒 no_data。
+
+★ 顺带查清一个更硬的事实：**便携网格方块根本不是 `Grid`**
+（`AbstractPortableGridBlockEntity` 只实现 `ExtendedMenuProvider<PortableGridData>`，
+存量在内部磁盘里，不在任何网络上）⇒ 它本来就**读不出来**，以前是"允许提交然后永远 no_data"。
+
+| 件 | 内容 |
+|---|---|
+| `collect/RsNetworkReader#isGridBlock`（新） | `be instanceof Grid`（按接口链比类名）。**与读值器同一个判据** —— "这里说能读"和"那边真去读"不会各说各的 |
+| `ui/ScopeScreen#anchorIsDevice`（新） | 提交前校验：跨维度/没世界 → **放行**（验不了不凭空拒绝）；方块没有 BE → **拒绝**；RS 模式下 BE 不是 `Grid` → **拒绝**；AE 模式下 BE 存在 → 放行（见下） |
+| lang | 中英各 +2：`flash.rs_anchor_not_grid`（带方块名）/ `flash.ae_anchor_not_device` |
+
+★ **AE 为什么只做一半**：`CableBusBlockEntity` **不直接实现** `IInWorldGridNodeHost`
+（javap 核实：实现的是 `AEMultiBlockEntity`，节点经 `AECapabilities.IN_WORLD_GRID_NODE_HOST`
+能力转发 —— `GridHelper#getNodeHost` 就是一次 `getCapability`）。客户端查能力有风险：
+`getCapability` 返回 null 时**分不清**"这块没这个能力"和"能力系统此时不可用"，
+后者会把所有合法提交一起拒掉。所以宁可留下"锚点在箱子上 → 恒 no_data"这个窄洞
+（`be == null` 那一半仍然拦得住绝大多数误锚点：地面 / 水 / 装饰方块都没有 BE）。
+
+离线：`build` 通过；TestChart **519 条**全过（这次改动在界面层，依赖 Level 与客户端 BE，
+不适合进纯逻辑断言）；lang 中英各 **205** 键。
+**实机待测**：J12 改成两种表现（对地面右键 → 提示；对着网格方块右键 → 正常），新增 J16。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |

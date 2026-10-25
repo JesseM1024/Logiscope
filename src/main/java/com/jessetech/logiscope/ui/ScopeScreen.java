@@ -27,6 +27,7 @@ import com.jessetech.logiscope.collect.ContainerAccess;
 import com.jessetech.logiscope.collect.ProbeInstance;
 import com.jessetech.logiscope.collect.ProbeManager;
 import com.jessetech.logiscope.collect.ProbeSlots;
+import com.jessetech.logiscope.collect.RsNetworkReader;
 import com.jessetech.logiscope.store.Sample;
 import net.minecraft.Util;
 import net.minecraft.client.KeyMapping;
@@ -43,6 +44,7 @@ import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.inventory.Slot;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
+import net.minecraft.world.level.block.entity.BlockEntity;
 import net.neoforged.neoforge.client.ClientHooks;
 import net.neoforged.neoforge.client.extensions.common.IClientItemExtensions;
 import org.jetbrains.annotations.Nullable;
@@ -3421,6 +3423,12 @@ public final class ScopeScreen extends Screen {
      * RECORDING 的空目标**。什么时候没有锚点：用无线终端或快捷键打开的界面
      * （客户端没有右键方块那一刻，见 {@code ProbeContext} 的第三种来源）；
      * 右键方块终端打开则一定有坐标。0.1.3 的闪退就是这里把 null 塞进了目标。
+     *
+     * **有锚点也不够 —— 锚点上的方块必须真的是那家的设备**（{@link #anchorIsDevice}）。
+     * 实测（0.1.4-a，J12）：手持**便携网格**对着地面右键，`RightClickBlock` 先把地面记成锚点
+     * （{@link ContainerAnchor} 的 pending），界面随后由物品打开 —— 于是"有锚点"却指向一块
+     * 泥土，目标存下去之后恒 no_data，界面上一个字都不提示。这是"读不到"被伪装成
+     * "一直在读"的典型，必须在提交这一刻拦住。
      */
     private void commitNetworkTargets(ProbeInstance p) {
         if (selectedNetIds.isEmpty()) {
@@ -3431,6 +3439,9 @@ public final class ScopeScreen extends Screen {
         if (!t.hasPersistentId()) {
             say(tr(rsMode ? "logiscope.flash.rs_need_anchor" : "logiscope.flash.ae_need_anchor"));
             return;
+        }
+        if (!anchorIsDevice(t)) {
+            return;   // 提示已在里面说过
         }
         List<DataTarget> next = new ArrayList<>();
         for (String id : selectedNetIds) {
@@ -3458,6 +3469,49 @@ public final class ScopeScreen extends Screen {
         page = Page.CHART;
         say(tr(rsMode ? "logiscope.flash.rs_replaced" : "logiscope.flash.ae_replaced")
                 .replace("%s", String.valueOf(total)));
+    }
+
+    /**
+     * **提交前的锚点校验：锚点上的方块必须真的是一台可读的网络设备。**
+     *
+     * 【为什么"有锚点"不等于"能读"】{@link ContainerAnchor} 的锚点来自
+     * {@code PlayerInteractEvent.RightClickBlock} —— 它只知道"为了打开这个界面，玩家
+     * 右键了哪个方块"。手持**便携 / 无线网格**对着方块右键时，那次右键也算数，
+     * 于是锚点落在了一块泥土 / 一个箱子上。界面本身是物品打开的，与那个方块毫无关系。
+     * 结果：目标存下来有坐标、状态 RECORDING，读数恒 no_data，**界面上没有任何提示**
+     * （实测 J12）。这正是"读不到被伪装成一直在读"，必须在提交这一刻拦住。
+     *
+     * 【判据的强弱，按"会不会误拒"来分】
+     * | 情况 | 处理 | 理由 |
+     * |---|---|---|
+     * | 锚点跨维度 / 没有世界 | **放行** | 验不了就不凭空拒绝（假拒绝比漏检更烦人） |
+     * | 方块没有方块实体 | 拒绝 | 任何网络设备的 BE 一定存在（线缆总线也是 BE） |
+     * | RS 模式下 BE 不是 `Grid` | 拒绝 | 与读值器**同一个判据**（{@link RsNetworkReader#isGridBlock}），
+     * 连"便携网格方块"也一并拒绝 —— 它确实读不出来（存量在内部磁盘里，不是网络） |
+     * | AE 模式下 BE 存在 | 放行 | AE 的终端方块实体**不**都直接实现
+     * `IInWorldGridNodeHost`（`CableBusBlockEntity` 实现的是 `AEMultiBlockEntity`，
+     * 靠能力转发），客户端又不宜去查能力（查不到时无法区分"没这个能力"和"能力系统没注册"）
+     * ⇒ 只做能确定的那一半，剩下的留给"读数 no_data"这个诚实的结果 |
+     *
+     * @return true = 可以提交；false = 已 say 原因，调用方应就地返回
+     */
+    private boolean anchorIsDevice(ProbeTarget t) {
+        Minecraft mc = Minecraft.getInstance();
+        Level level = mc.level;
+        if (level == null || t.dimension() == null || t.pos() == null
+                || !level.dimension().equals(t.dimension())) {
+            return true;   // 验不了（跨维度 / 没世界）→ 不凭空拒绝
+        }
+        BlockPos pos = t.pos();
+        BlockEntity be = level.getBlockEntity(pos);
+        boolean ok = be != null && (!rsMode || RsNetworkReader.isGridBlock(be));
+        if (ok) {
+            return true;
+        }
+        String what = ProbeContext.blockName(level, pos);
+        say(tr(rsMode ? "logiscope.flash.rs_anchor_not_grid" : "logiscope.flash.ae_anchor_not_device")
+                .replace("%s", what));
+        return false;
     }
 
     private void commitNbtSlotAnchors(ProbeInstance p) {
