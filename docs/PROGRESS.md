@@ -582,6 +582,39 @@ Esc 才是清空。
 离线：build / TestChart 443 条 / BenchRender（台阶 99.3%・混合 63.8%）/ verify-jar 全过
 （lang 176 键一致）。实机复测见 `VERIFY.md` 第十八轮④（N1–N9）。
 
+## [1.12.2] 轮次 8：精致存储（RS 1.6）网络采样兼容（2026-10-25，自 1.20.1 线移植）
+
+**需求**：把 main（1.21.1）的「精致存储网络采样」移植到本线。实例里装的是
+**refinedstorage-1.6.16** —— 又一代不同的 RS：**老包名 `com.raoulvdberge.refinedstorage`**，
+而且**没有 `IStackList#getCount(T)`**（1.9~1.12 那三代才有）。
+
+| 件 | 内容 |
+|---|---|
+| `analysis/RsKeyText`（新） | RS 键的纯文本身份（无游戏依赖，t43 共 25 条断言）。Java 8：`Parsed` 是普通类 |
+| `bind/RsKeys`（新） | `isRsGridMenu`（本线容器叫 `container.ContainerGrid`）；`rows(GuiScreen)` 从 `gui.grid.GuiGrid#getView()` → `IGridView#getStacks()`；`encode` 零反射（键就是原版栈） |
+| `collect/RsNetworkReader`（新） | `INetworkNodeProxy#getNode` → `INetworkNode#getNetwork` → `INetwork#canRun` → `getItemStorageCache/getFluidStorageCache` → `getList` → `getStacks` → **用 RS 自己的 `IComparer` 找那一条** → 取数量 |
+| 接线 | `DataTarget` 的 `rs:network` + `isNetwork()`；`ProbeInstance#replaceNetworkTargets`（AE 仍不支持：本线 rv6 是另一套 API，采样里照旧 `continue`）；`ContainerAccess` 对 RS 网格返回空表 + `fromRsRows`；`ScopeScreen` 的 `rsMode`/`netMode()`/`anchorIsDevice`；`NameText` 认 `rs:` |
+
+★ **本线的三个独有坑**：
+1. **没有 `getCount(T)`** ⇒ 只能遍历汇总表，用 `IComparer.isEqual(a, b, COMPARE_NBT)` 比对。
+   比较器实例没有静态入口，只能 `Class.forName("…apiimpl.util.Comparer", false, 网络对象的类加载器)`
+   + `newInstance()` —— **loader 取自运行时对象**，不假设调用方加载器。
+2. ★ **`COMPARE_NBT` 的值在这一代是 2**（1.9+ 是 1）⇒ 常量一律**反射读**，绝不硬编码。
+   硬编码会让 1.6 的比对标志变成 `COMPARE_DAMAGE`，同 id 不同 NBT 的东西被合并成一个数（假值）。
+3. **名字差异**：`GuiScreen` / `TileEntity` / `WorldServer` / `NBTTagCompound`（`hasNoTags()`，
+   SNBT 走 `toString()`）/ `JsonToNBT.getTagFromJson` / `getTagCompound()` / `FluidStack.tag` 字段 /
+   `FluidRegistry`（**没有 `ForgeRegistries.FLUIDS`**，且原版流体按 `water` / `lava` 无命名空间注册 ——
+   补 `minecraft:` 前缀）/ 没有 `ResourceLocation.tryCreate`（构造函数 + try/catch）/ `.lang` 语言文件。
+
+离线：`build` 通过，产出 `logiscope-1.0.0-1.12.2.jar`；TestChart **503 条**（476 + 25 t43）；
+lang 中英各 **207** 键；门禁的 `check-version.py` / `check-runtime-refs.py` 全过。
+**本线没有跑 `ProbeRsApi`**（FG3 的映射后 MC jar 不在固定路径，探针取不到类路径）——
+反射入口改用 `javap` 逐个核实（`INetworkNodeProxy#getNode` / `INetwork#canRun` /
+`getItemStorageCache` / `getFluidStorageCache` / `IStorageCache#getList` / `IStackList#getStacks` /
+`IComparer.isEqual×2` + `COMPARE_NBT=2` / `Comparer()` 公开构造 / `ContainerGrid` / `GuiGrid` /
+`IGridView#getStacks` / `IGridStack#getName|getQuantity|getIngredient` / `TileNode implements INetworkNodeProxy`）。
+**实机待测**：`VERIFY.md` J 组。
+
 ## 未完成 / 待优化项
 
 | 项 | 说明 | 出处 |

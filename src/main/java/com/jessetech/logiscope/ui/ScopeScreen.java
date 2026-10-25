@@ -21,6 +21,7 @@ import com.jessetech.logiscope.bind.DataTarget;
 import com.jessetech.logiscope.bind.NameText;
 import com.jessetech.logiscope.bind.ProbeContext;
 import com.jessetech.logiscope.bind.ProbeTarget;
+import com.jessetech.logiscope.bind.RsKeys;
 import com.jessetech.logiscope.collect.ContainerAccess;
 import com.jessetech.logiscope.collect.ProbeInstance;
 import com.jessetech.logiscope.collect.ProbeManager;
@@ -42,6 +43,8 @@ import net.minecraft.inventory.Container;
 import net.minecraft.inventory.Slot;
 import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
+import net.minecraft.tileentity.TileEntity;
+import com.jessetech.logiscope.collect.RsNetworkReader;
 import org.jetbrains.annotations.Nullable;
 
 import java.nio.file.Files;
@@ -269,8 +272,16 @@ public final class ScopeScreen extends GuiScreen {
     private List<NbtSlotLayout.Entry> nbtSlotEntries = java.util.Collections.emptyList();
     /** AE 网络模式：菜单是 AE 的 ME 存储界面家族时启用 —— 点格 = 选"网络中的物品" */
     private boolean aeMode;
+    /**
+     * RS（精致存储）网络模式：菜单是 RS 的网格界面家族时启用。
+     *
+     * 与 {@link #aeMode} **并列而不是合并**：两者的读值链、身份格式、行来源都不同，
+     * 合成一个布尔就必须再带一个"是哪一家"的枚举。两个布尔 + {@link #netMode()}
+     * 让"网络类语义"（选中/提交/禁选容器格）只写一次。
+     */
+    private boolean rsMode;
     /** AE 模式选中的物品 registry id（覆写语义：「完成」= 替换全部 AE 目标） */
-    private final Set<String> selectedAeIds = new LinkedHashSet<>();
+    private final Set<String> selectedNetIds = new LinkedHashSet<>();
     private String nbtSlotParsedFrom = "";
     private long nbtSlotNextRequest;
     /**
@@ -828,7 +839,10 @@ public final class ScopeScreen extends GuiScreen {
     }
 
     private void refreshSnapshots() {
-        menuSlots = ContainerAccess.snapshot();
+        // RS 1.6 的清单挂在**界面**上（IGridView），不在菜单里 —— 所以这一条要在
+        // ContainerAccess 之前判：那个方法对 RS 菜单只返回空表（它的槽位是合成格）。
+        List<RsKeys.Row> rsRows = RsKeys.rows(parent);
+        menuSlots = rsRows != null ? ContainerAccess.fromRsRows(rsRows) : ContainerAccess.snapshot();
         worldSlots = ProbeSlots.slots();
         source = resolveSource();
         hasTarget = ProbeContext.current(Minecraft.getMinecraft()) != null;
@@ -890,15 +904,19 @@ public final class ScopeScreen extends GuiScreen {
         // 本线不做 AE（1.12.2 的 AE2 是 rv6，另一套 API）⇒ 菜单永远不算 AE 终端。
         // AE 模式的界面与数据通路保留着，等将来接上读值链即可复用。
         boolean menuIsAe = false;
+        boolean menuIsRs = RsKeys.isRsGridMenu(ContainerAccess.currentMenu());
         boolean pureAeProbe = p.target().slots().isEmpty()
                 && p.dataTargets().stream().anyMatch(DataTarget::isAeNetwork);
-        aeMode = menuIsAe || pureAeProbe;
-        // AE 选择 = 探针现有 AE 目标（覆写语义的不变量：界面上勾的就是探针在测的）。
+        boolean pureRsProbe = p.target().slots().isEmpty()
+                && p.dataTargets().stream().anyMatch(DataTarget::isRsNetwork);
+        aeMode = menuIsAe || (pureAeProbe && !menuIsRs);
+        rsMode = menuIsRs || (pureRsProbe && !menuIsAe);
+        // 选择集 = 探针现有的网络目标（覆写语义的不变量：界面上勾的就是探针在测的）。
         // 每次进入都重建 —— 用户没 Done 就离开的编辑不保留（与槽位选择不同，但一致于覆写）。
-        selectedAeIds.clear();
+        selectedNetIds.clear();
         for (DataTarget d : p.dataTargets()) {
-            if (d.isAeNetwork()) {
-                selectedAeIds.add(d.literalName());
+            if ((aeMode && d.isAeNetwork()) || (rsMode && d.isRsNetwork())) {
+                selectedNetIds.add(d.literalName());
             }
         }
         seedSelectionOnce(p);
@@ -1560,7 +1578,7 @@ public final class ScopeScreen extends GuiScreen {
                         pick != null && pick.target().hasPersistentId() && nbtSlotDetected));
                 out.add(new Item("cell_mode",
                         cellMode ? tr("logiscope.btn.cell_mode_on") : tr("logiscope.btn.cell_mode"),
-                        menu && !aeMode && VISUAL_CELL_PICK));
+                        menu && !netMode() && VISUAL_CELL_PICK));
                 out.add(new Item("clear_cells", tr("logiscope.btn.clear_cells"), selectionCount() > 0));
                 // 
                 ProbeInstance pp = pickerProbe();
@@ -2160,10 +2178,10 @@ public final class ScopeScreen extends GuiScreen {
                 String head = p == null ? tr("logiscope.hint.no_container") : p.describe();
                 g.drawString(this.fontRenderer, cut(head, L.w() - 2 * PAD), left, y, 0xBFBFBF, false);
                 y += ROW_H;
-                if (aeMode) {
-                    // AE 网络终端：这一页的语义完全不同。
+                if (netMode()) {
+                    // 网络终端（AE / RS）：这一页的语义完全不同。
                     // 说明行改为**悬浮**在黄行上显示
-                    String line = tr("logiscope.picker.ae_mode") + "  ·  "
+                    String line = tr(rsMode ? "logiscope.picker.rs_mode" : "logiscope.picker.ae_mode") + "  ·  "
                             + tr("logiscope.info.selected") + " " + selectionCount();
                     g.drawString(this.fontRenderer, cut(line, L.w() - 2 * PAD), left, y, 0xFFE8C97A, false);
             break;
@@ -2696,9 +2714,19 @@ public final class ScopeScreen extends GuiScreen {
     // 选格页
     // ------------------------------------------------------------------
 
+    /**
+     * 现在是不是**网络类**模式（AE 终端 / RS 网格）。
+     *
+     * 两者的界面语义完全一致：行是"网络里的一种东西"而不是"一个容器格"，
+     * 选中靠身份串而不是槽位下标，「完成」= 覆写全部网络目标。
+     */
+    private boolean netMode() {
+        return aeMode || rsMode;
+    }
+
     private int selectionCount() {
-        if (aeMode) {
-            return selectedAeIds.size();
+        if (netMode()) {
+            return selectedNetIds.size();
         }
         return source == Source.WORLD ? selContainerSlots.size() : selMenuSlots.size();
     }
@@ -2737,8 +2765,8 @@ public final class ScopeScreen extends GuiScreen {
     }
 
     private boolean isSelected(ContainerAccess.SlotView v) {
-        if (aeMode) {
-            return !v.empty() && selectedAeIds.contains(v.itemId());
+        if (netMode()) {
+            return !v.empty() && selectedNetIds.contains(v.itemId());
         }
         return source == Source.MENU ? selMenuSlots.contains(v.menuSlotIndex())
                 : selContainerSlots.contains(v.containerSlotIndex());
@@ -3874,6 +3902,17 @@ public final class ScopeScreen extends GuiScreen {
 
     /** 选格页点了一行：切换这一格 */
     private void toggleRow(ContainerAccess.SlotView v) {
+        if (rsMode) {
+            // RS 网格：这一页的每一行**都是**网络里的条目（行来自界面的 IGridView，
+            // 见 RsKeys），所以不需要 AE 那条"必须落在 RepoSlot 上"的守卫。
+            if (v.empty()) {
+                return;
+            }
+            if (!selectedNetIds.remove(v.itemId())) {
+                selectedNetIds.add(v.itemId());
+            }
+            return;
+        }
         if (aeMode) {
             // AE 网络：只有网络列表的显示格（RepoSlot）能选 ——
             // 背包/合成格里的东西不是"网络中的物品"，点了忽略（不弹错，误触不该有反馈负担）。
@@ -3887,8 +3926,8 @@ public final class ScopeScreen extends GuiScreen {
             if (!menu.inventorySlots.get(v.menuSlotIndex()).getClass().getName().endsWith(".RepoSlot")) {
                 return;
             }
-            if (!selectedAeIds.remove(v.itemId())) {
-                selectedAeIds.add(v.itemId());
+            if (!selectedNetIds.remove(v.itemId())) {
+                selectedNetIds.add(v.itemId());
             }
             return;
         }
@@ -3955,8 +3994,8 @@ public final class ScopeScreen extends GuiScreen {
     }
 
     private void applyCell(Slot slot, boolean add) {
-        if (aeMode) {
-            return;   // AE 模式没有"容器格"语义（cell_mode 按钮也已禁用，双保险）
+        if (netMode()) {
+            return;   // 网络模式没有"容器格"语义（cell_mode 按钮也已禁用，双保险）
         }
         if (add) {
             selMenuSlots.add(slot.slotNumber);
@@ -4056,8 +4095,8 @@ public final class ScopeScreen extends GuiScreen {
         // NBT 槽位型容器// 这类机器（MEK 等）把槽位号写在 NBT 的 `slot` 字段里，菜单位置与容器下标都可能
         // 对不上。所以**不组 SlotRef**，改成："把点到的格子按内容反查成 slot 号"，
         // 之后无论 GUI 开还是关，都只按 slot 号读 NBT —— 一条路，不会自相矛盾。
-        if (aeMode) {
-            commitAeTargets(p);
+        if (netMode()) {
+            commitNetworkTargets(p);
             return;
         }
         if (nbtSlotMode) {
@@ -4139,21 +4178,26 @@ public final class ScopeScreen extends GuiScreen {
      * 或快捷键打开的界面（客户端没有右键方块那一刻，见 {@code ProbeContext} 的第三种
      * 来源）；右键方块终端打开则一定有坐标。0.1.3 的闪退就是这里把 null 塞进了目标。
      */
-    private void commitAeTargets(ProbeInstance p) {
-        if (selectedAeIds.isEmpty()) {
-            say(tr("logiscope.flash.ae_none"));
+    private void commitNetworkTargets(ProbeInstance p) {
+        if (selectedNetIds.isEmpty()) {
+            say(tr(rsMode ? "logiscope.flash.rs_none" : "logiscope.flash.ae_none"));
             return;
         }
         ProbeTarget t = p.target();
         if (!t.hasPersistentId()) {
-            say(tr("logiscope.flash.ae_need_anchor"));
+            say(tr(rsMode ? "logiscope.flash.rs_need_anchor" : "logiscope.flash.ae_need_anchor"));
             return;
         }
-        List<DataTarget> ae = new ArrayList<>();
-        for (String id : selectedAeIds) {
-            ae.add(DataTarget.aeNetwork(id, t.deviceName(), t.dimension(), t.pos()));
+        if (!anchorIsDevice(t)) {
+            return;   // 提示已在里面说过
         }
-        int total = p.replaceAeTargets(ae);
+        List<DataTarget> next = new ArrayList<DataTarget>();
+        for (String id : selectedNetIds) {
+            next.add(rsMode
+                    ? DataTarget.rsNetwork(id, t.deviceName(), t.dimension(), t.pos())
+                    : DataTarget.aeNetwork(id, t.deviceName(), t.dimension(), t.pos()));
+        }
+        int total = p.replaceNetworkTargets(next);
 
         ProbeTarget old = p.target();
         // 槽位清空：AE 目标只走"网络读值"一条路，不碰菜单/坐标槽位 ——
@@ -4171,7 +4215,38 @@ public final class ScopeScreen extends GuiScreen {
         builtVersion = Long.MIN_VALUE;
         cellMode = false;
         page = Page.CHART;
-        say(tr("logiscope.flash.ae_replaced").replace("%s", String.valueOf(total)));
+        say(tr(rsMode ? "logiscope.flash.rs_replaced" : "logiscope.flash.ae_replaced")
+                .replace("%s", String.valueOf(total)));
+    }
+
+    /**
+     * **提交前的锚点校验：锚点上的方块必须真的是一台可读的网络设备。**
+     *
+     * 起因：{@code ContainerAnchor} 的锚点来自右键方块事件，手持便携网格对着地面右键时
+     * 那次右键也算数 —— 于是"有锚点"却指向一块泥土，目标存下来恒 no_data 且无任何提示。
+     *
+     * 判据的强弱按"会不会误拒"分：跨维度 / 没世界 → **放行**（验不了不凭空拒绝）；
+     * 方块没有方块实体 → 拒绝；RS 模式下不是 RS 网络方块 → 拒绝
+     * （与读值器同一个判据 {@link RsNetworkReader#isNetworkBlock}）；
+     * AE 模式下 BE 存在 → 放行（本线不做 AE，先不引入可能误拒的判定）。
+     */
+    private boolean anchorIsDevice(ProbeTarget t) {
+        Minecraft mc = Minecraft.getMinecraft();
+        World level = mc.world;
+        if (level == null || t.dimension() == null || t.pos() == null
+                || !Dim.of(level).equals(t.dimension())) {
+            return true;   // 验不了（跨维度 / 没世界）→ 不凭空拒绝
+        }
+        BlockPos pos = t.pos();
+        TileEntity be = level.getTileEntity(pos);
+        boolean ok = be != null && (!rsMode || RsNetworkReader.isNetworkBlock(be));
+        if (ok) {
+            return true;
+        }
+        String what = ProbeContext.blockName(level, pos);
+        say(tr(rsMode ? "logiscope.flash.rs_anchor_not_grid" : "logiscope.flash.ae_anchor_not_device")
+                .replace("%s", what));
+        return false;
     }
 
     private void commitNbtSlotAnchors(ProbeInstance p) {
@@ -4335,7 +4410,8 @@ public final class ScopeScreen extends GuiScreen {
     /** 选格页的「返回列表」。还没选过格的空实例顺手删掉，不留垃圾。 */
     private void leavePicker() {
         nbtSlotMode = false;      // 每次进选格页都回到"默认关"（需求明确要求默认不启用）
-        aeMode = false;           // AE 模式跟随菜单（重开时由 seedSelectionOnce 重新检测）
+        aeMode = false;           // 网络模式跟随菜单（重开时由 seedSelectionOnce 重新检测）
+        rsMode = false;
         nbtSeedPending = false;
         nbtSlotListPath = "";
         nbtSlotEntries = java.util.Collections.emptyList();
@@ -4533,7 +4609,7 @@ public final class ScopeScreen extends GuiScreen {
             {
                 selMenuSlots.clear();
                 selContainerSlots.clear();
-                selectedAeIds.clear();
+                selectedNetIds.clear();
                 say(tr("logiscope.flash.cells_cleared"));
             }
             break;
@@ -5424,11 +5500,11 @@ public final class ScopeScreen extends GuiScreen {
             }
         }
 
-        // --- 2.5) AE 模式第二行（黄色提示行）→ 悬浮显示说明---
-        if (page == Page.PICKER && aeMode
+        // --- 2.5) 网络模式第二行（黄色提示行）→ 悬浮显示说明---
+        if (page == Page.PICKER && netMode()
                 && mouseY >= L.infoTop() + ROW_H && mouseY < L.infoTop() + 2 * ROW_H) {
-            wantTip(4, tr("logiscope.picker.ae_mode"),
-                    java.util.Arrays.asList(tr("logiscope.picker.ae_hint")));
+            wantTip(4, tr(rsMode ? "logiscope.picker.rs_mode" : "logiscope.picker.ae_mode"),
+                    java.util.Arrays.asList(tr(rsMode ? "logiscope.picker.rs_hint" : "logiscope.picker.ae_hint")));
             return;
         }
 
@@ -6042,7 +6118,7 @@ public final class ScopeScreen extends GuiScreen {
         // 不必先删再加。只扫普通路径目标：slot 锚点 / AE 目标即便路径字符串偶然相同也不参与。
         DataTarget old = null;
         for (DataTarget dt : src.dataTargets()) {
-            if (!dt.isSlotAnchor() && !dt.isAeNetwork() && dt.valuePath().equals(path)) {
+            if (!dt.isSlotAnchor() && !dt.isNetwork() && dt.valuePath().equals(path)) {
                 old = dt;
                 break;
             }

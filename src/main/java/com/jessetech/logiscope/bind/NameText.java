@@ -2,6 +2,7 @@ package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.LogiScopeConfig;
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 import net.minecraftforge.fluids.Fluid;
@@ -122,9 +123,17 @@ public final class NameText {
         if (hit != null) {
             return hit;
         }
-        String name = display ? resolveDisplay(id) : AeKeyText.label(id);
+        String name = display ? resolveDisplay(id) : registryLabel(id);
         CACHE.put(id, name);
         return name;
+    }
+
+    /**
+     * 注册名档的写法。**两种键身份各有一套文本层**：
+     * {@code rs:} 串走 {@link RsKeyText}，其余走 {@link AeKeyText}。
+     */
+    private static String registryLabel(String id) {
+        return RsKeyText.hasPrefix(id) ? RsKeyText.label(id) : AeKeyText.label(id);
     }
 
     /** 真正的解析：非物品键按类型走注册表；物品 id 走物品注册表；其它原样短名 */
@@ -142,11 +151,23 @@ public final class NameText {
                 }
                 return AeKeyText.label(id);   // 认不出的键类型 → 短 id，不编名字
             }
+            if (RsKeyText.isRs(id)) {
+                RsKeyText.Parsed parsed = RsKeyText.parse(id);
+                if (parsed != null) {
+                    String rsName = parsed.type() == RsKeyText.FLUID
+                            ? fluidName(parsed.registryId())
+                            : itemName(parsed.registryId());
+                    if (rsName != null) {
+                        return rsName;
+                    }
+                }
+                return RsKeyText.label(id);   // 解不出来 → 短 id，不编名字
+            }
             String name = itemName(id);
             return name != null ? name : AeKeyText.label(id);
         } catch (Throwable t) {
             // 注册表没就绪（离线断言）/ 客户端没进世界 —— 退回注册名，绝不炸渲染帧
-            return AeKeyText.label(id);
+            return registryLabel(id);
         }
     }
 

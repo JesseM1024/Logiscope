@@ -198,3 +198,10 @@ logiscope.picker.nbt_mode_hint=NBT 追踪：按数据里的 slot 号建目标 �
 logiscope.data.slot_fallback=槽位 %s
 logiscope.flash.nbt_mode_off=已退出 NBT 追踪
 logiscope.flash.name_style=名称显示：%s（选格页 / 图例 / 计算页 同步生效，已写入配置）
+logiscope.picker.rs_mode=RS 网络终端 · 点选要监测的条目
+logiscope.picker.rs_hint=读数 = 该条目在此精致存储网络中的存量；网络断电 / 未接通时记 no-data，条目不在网内记 0
+logiscope.flash.rs_none=先点选要监测的条目
+logiscope.flash.rs_replaced=已更新 RS 网络监测：当前目标 %s 条
+logiscope.flash.rs_need_anchor=RS 监测需要方块锚点：当前界面没有坐标（便携 / 无线网格或快捷键打开的界面）。请对着网络方块右键打开后再选条目
+logiscope.flash.rs_anchor_not_grid=锚点上的方块（%s）不是 RS 网络方块 —— 精致存储监测必须对着网络里的方块右键打开；便携 / 无线网格从手上打开时读不到
+logiscope.flash.ae_anchor_not_device=锚点上的方块（%s）没有方块实体，不是 AE 设备 —— 请对着 ME 终端方块右键打开后再选物品

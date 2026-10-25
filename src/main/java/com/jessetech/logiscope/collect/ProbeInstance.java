@@ -291,11 +291,11 @@ public final class ProbeInstance {
      * @param itemIds 新的物品 registry id 集合（调用方已去重）
      * @return 替换后该探针的目标总数
      */
-    public int replaceAeTargets(List<DataTarget> targets) {
+    public int replaceNetworkTargets(List<DataTarget> targets) {
         synchronized (sampleLock) {
             List<DataTarget> n = new ArrayList<>();
             for (DataTarget d : dataTargets) {
-                if (!d.isAeNetwork()) {
+                if (!d.isNetwork()) {
                     n.add(d);          // 其它两类目标：留下
                 }
             }
@@ -764,6 +764,20 @@ public final class ProbeInstance {
                 }
                 int got = 0;
                 for (DataTarget dt : dts) {
+                    if (dt.isRsNetwork()) {
+                        // RS 网络目标：读"这台 RS 设备所在网络中这种东西的数量"——
+                        // 与菜单/GUI 状态无关（终端关掉照读）。
+                        // null = 读不到（不是 RS 网络方块 / 没电 / 反射链断了）→ 留空走 no_data；
+                        // 0 = 网络在跑但没这东西（真值，不是 no_data）。
+                        Long v = RsNetworkReader.read(level, dt.pos(), dt.literalName());
+                        if (v == null) {
+                            continue;
+                        }
+                        bufIds[got] = dt.literalName();
+                        bufVals[got] = Val.of(v);
+                        got++;
+                        continue;
+                    }
                     if (dt.isAeNetwork()) {
                         // AE 网络目标：**本线不做 AE 兼容**（1.12.2 的 AE2 是 rv6，又是另一套 API）。
                         // 这类目标一律留空 → 上层记 no_data，绝不编一个 0 出来。

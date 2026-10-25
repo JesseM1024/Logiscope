@@ -34,6 +34,7 @@ import com.jessetech.logiscope.analysis.CurveMath;
 import com.jessetech.logiscope.analysis.NbtSlotLayout;
 import com.jessetech.logiscope.analysis.PickerFilter;
 import com.jessetech.logiscope.analysis.RectRuns;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import com.jessetech.logiscope.analysis.SlotAlign;
 import com.jessetech.logiscope.analysis.WaveColumns;
 import com.jessetech.logiscope.analysis.RectRuns;
@@ -100,6 +101,7 @@ public class TestChart {
         t40ForcedNumeric();
         t41PickerFilter();
         t42AeKeyText();
+        t43RsKeyText();
         t22StoreResize();
         System.out.println();
         if (failed == 0) {
@@ -1529,6 +1531,46 @@ public class TestChart {
         eq("AE 键 idOf 组件物品", "minecraft:iron_ingot", AeKeyText.idOf(item));
         eq("AE 键 idOf 普通 id 返回 null", null, AeKeyText.idOf("minecraft:iron_ingot"));
         eq("AE 键 idOf 坏文本返回 null", null, AeKeyText.idOf("ae:{broken"));
+    }
+
+    // 43) RS（精致存储 1.6）键的字符串身份：无 NBT 物品与容器槽位共用裸 id，
+    //     流体与带 NBT 物品挂 rs: 前缀。纯文本层，无游戏依赖。
+    private static void t43RsKeyText() {
+        eq("RS 键 无 NBT 物品 = 裸 id", "minecraft:iron_ingot", RsKeyText.item("minecraft:iron_ingot"));
+        no("RS 键 裸 id 不算 rs 键", RsKeyText.isRs("minecraft:iron_ingot"));
+        eq("RS 键 裸 id 显示短名", "iron_ingot", RsKeyText.label("minecraft:iron_ingot"));
+
+        String water = RsKeyText.fluid("minecraft:water");
+        eq("RS 键 流体形状", "rs:f:minecraft:water", water);
+        yes("RS 键 流体是 rs 键", RsKeyText.isRs(water));
+        eq("RS 键 流体显示短名", "water", RsKeyText.label(water));
+        eq("RS 键 流体类型", 'f', RsKeyText.parse(water).type());
+        eq("RS 键 流体 registry id", "minecraft:water", RsKeyText.parse(water).registryId());
+        eq("RS 键 流体无 NBT", null, RsKeyText.parse(water).payload());
+
+        String sword = RsKeyText.itemWithNbt("minecraft:iron_sword", "{Damage:5,display:{Name:x}}");
+        yes("RS 键 NBT 物品是 rs 键", RsKeyText.isRs(sword));
+        eq("RS 键 NBT 物品类型", 'i', RsKeyText.parse(sword).type());
+        eq("RS 键 NBT 物品 registry id 不被载荷里的 ':' 干扰", "minecraft:iron_sword",
+                RsKeyText.parse(sword).registryId());
+        eq("RS 键 NBT 载荷完整保留", "{Damage:5,display:{Name:x}}",
+                RsKeyText.parse(sword).payload());
+        eq("RS 键 NBT 物品显示名丢掉载荷", "iron_sword", RsKeyText.label(sword));
+
+        String tagged = RsKeyText.fluidWithNbt("minecraft:water", "{x:1}");
+        eq("RS 键 NBT 流体形状", "rs:f:minecraft:water|{x:1}", tagged);
+        eq("RS 键 NBT 流体显示短名", "water", RsKeyText.label(tagged));
+
+        no("RS 键 ae 键不算 rs 键", RsKeyText.isRs("ae:{#t:\"ae2:f\",id:\"minecraft:water\"}"));
+        no("RS 键 只有前缀不算", RsKeyText.isRs("rs:"));
+        no("RS 键 缺类型分隔符不算", RsKeyText.isRs("rs:f"));
+        yes("RS 键 坏形状仍认前缀", RsKeyText.hasPrefix("rs:i:"));
+        eq("RS 键 null 安全", "", RsKeyText.label(null));
+        eq("RS 键 空串", "", RsKeyText.label(""));
+        eq("RS 键 坏形状露原文（带 ~ 标记）", true, RsKeyText.label("rs:i:").startsWith("~"));
+
+        no("RS 键 rs 串不算 ae 键", AeKeyText.isAe(water));
+        no("RS 键 ae 串不算 rs 键（反向）", RsKeyText.isRs("ae:{id:\"minecraft:water\"}"));
     }
 
     private static void eq(String what, Object expect, Object actual) {

@@ -198,3 +198,10 @@ logiscope.picker.nbt_mode_hint=NBT tracking: targets come from the slot number i
 logiscope.data.slot_fallback=slot %s
 logiscope.flash.nbt_mode_off=NBT tracking off
 logiscope.flash.name_style=Name display: %s (picker / legend / analysis, saved to config)
+logiscope.picker.rs_mode=RS network grid - click entries to track
+logiscope.picker.rs_hint=value = that entry's stored amount in this Refined Storage network; powered-off or disconnected reads no-data, absent entries read 0
+logiscope.flash.rs_none=pick entries to track first
+logiscope.flash.rs_replaced=RS targets updated: %s total
+logiscope.flash.rs_need_anchor=RS tracking needs a block anchor - this screen has no coordinates (portable/wireless grid or a hotkey-opened GUI). Right-click a network block, then pick entries again
+logiscope.flash.rs_anchor_not_grid=the anchored block (%s) is not an RS network block - RS tracking needs a block you right-clicked; a portable/wireless grid opened from the hand has no readable anchor
+logiscope.flash.ae_anchor_not_device=the anchored block (%s) has no block entity, so it is not an AE device - right-click an ME terminal block, then pick items again

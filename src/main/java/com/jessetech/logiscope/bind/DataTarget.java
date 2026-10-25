@@ -1,6 +1,7 @@
 package com.jessetech.logiscope.bind;
 
 import com.jessetech.logiscope.analysis.AeKeyText;
+import com.jessetech.logiscope.analysis.RsKeyText;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.text.TextComponentTranslation;
 import com.jessetech.logiscope.compat.Dim;
@@ -146,9 +147,40 @@ public final class DataTarget {
         return new DataTarget(AE_NETWORK_PATH, null, itemId, blockLabel, dimension, pos, -1, null, false);
     }
 
+    /**
+     * 精致存储（RS）网络目标的 {@code valuePath} 固定值 —— 同样是**标记不是路径**。
+     * 与 {@link #AE_NETWORK_PATH} 分开两个标记：两家的读值链完全不同，
+     * 共用一个会让"这台设备到底是哪家的"在数据层丢失，而采样分派必须知道调哪个读值器。
+     */
+    public static final String RS_NETWORK_PATH = "rs:network";
+
+    /**
+     * **RS 网络目标**：监测 {@code keyId}（见 {@code RsKeyText}）在探针所对准的那台
+     * RS 设备所在网络里的数量。读值 = 服务端拿网络 → 存储缓存 → 按 RS 自己的比较器
+     * 在汇总表里找那一条；不在网内 = 0（网络在跑），设备不可用 = no_data。
+     */
+    public static DataTarget rsNetwork(String keyId, String blockLabel,
+                                       Dim dimension, BlockPos pos) {
+        return new DataTarget(RS_NETWORK_PATH, null, keyId, blockLabel, dimension, pos, -1, null, false);
+    }
+
     /** 是不是 AE 网络目标 */
     public boolean isAeNetwork() {
         return AE_NETWORK_PATH.equals(valuePath);
+    }
+
+    /** 是不是 RS 网络目标 */
+    public boolean isRsNetwork() {
+        return RS_NETWORK_PATH.equals(valuePath);
+    }
+
+    /**
+     * 是不是**网络类**目标（AE 或 RS）。
+     * 两类共用：采样分派入口、去重规则、"没有容器格"这个前提。
+     * 要区分是哪一家时用 {@link #isAeNetwork()} / {@link #isRsNetwork()}。
+     */
+    public boolean isNetwork() {
+        return isAeNetwork() || isRsNetwork();
     }
 
     /**
@@ -200,13 +232,13 @@ public final class DataTarget {
     public static boolean isDuplicate(List<DataTarget> list, DataTarget t) {
         for (DataTarget d : list) {
             boolean dup;
-            if (t.isAeNetwork() && d.isAeNetwork()) {
-                dup = d.literalName().equals(t.literalName());
+            if (t.isNetwork() && d.isNetwork()) {
+                dup = d.valuePath().equals(t.valuePath()) && d.literalName().equals(t.literalName());
             } else if (d.isSlotAnchor() && t.isSlotAnchor()) {
                 dup = d.nbtSlot() == t.nbtSlot() && d.valuePath().equals(t.valuePath());
             } else {
                 dup = !d.isSlotAnchor() && !t.isSlotAnchor()
-                        && !d.isAeNetwork() && !t.isAeNetwork()
+                        && !d.isNetwork() && !t.isNetwork()
                         && d.valuePath().equals(t.valuePath());
             }
             if (dup) {
