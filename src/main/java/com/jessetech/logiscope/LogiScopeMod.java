@@ -43,7 +43,7 @@ public final class LogiScopeMod {
      * 所以只能手写一份 —— 改 {@code gradle.properties} 的 {@code mod_version} 时
      * 必须同步这里（`dev-check/check-version.py` 会核对两者一致）。
      */
-    public static final String VERSION = "0.1.4-a-1.12.2";
+    public static final String VERSION = "1.0.0-1.12.2";
 
     /**
      * 1.12.2 的运行时 classpath 里 log4j2 是标配（MC 自己也用它），
