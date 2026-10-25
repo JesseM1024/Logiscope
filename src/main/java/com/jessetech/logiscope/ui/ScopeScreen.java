@@ -19,6 +19,7 @@ import com.jessetech.logiscope.collect.AeNetworkReader;
 import com.jessetech.logiscope.bind.ContainerAnchor;
 import com.jessetech.logiscope.bind.DataCommand;
 import com.jessetech.logiscope.bind.DataTarget;
+import com.jessetech.logiscope.bind.NameText;
 import com.jessetech.logiscope.bind.ProbeContext;
 import com.jessetech.logiscope.bind.ProbeTarget;
 import com.jessetech.logiscope.collect.ContainerAccess;
@@ -1042,6 +1043,8 @@ public final class ScopeScreen extends Screen {
                 ProbeInstance doneProbe = pickerProbe();
                 out.add(new Item("done", tr("logiscope.btn.done"),
                         selectionCount() > 0 || (doneProbe != null && doneProbe.isDataProbe())));
+                // 名称写法：选格页 / 图表页 / 计算页都有这一个按钮（三处同源，见 NameText）
+                out.add(new Item("name_style", nameStyleLabel(), true));
                 out.add(new Item("to_root", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1061,6 +1064,7 @@ public final class ScopeScreen extends Screen {
                         p != null && p.store().size() > 0));
                 out.add(new Item("follow", followLabel(), true));
                 out.add(new Item("pick", tr("logiscope.btn.pick_cells"), true));
+                out.add(new Item("name_style", nameStyleLabel(), true));
                 out.add(new Item("list", tr("logiscope.btn.to_list"), true));
             }
             case REPLAY -> {
@@ -1069,6 +1073,7 @@ public final class ScopeScreen extends Screen {
                 // 根目录下全是日期文件夹，从那儿再找一次太费劲
                 out.add(new Item("open_archive_folder", tr("logiscope.btn.open_archive_folder"),
                         replayArchive != null && !replayDir.isBlank()));
+                out.add(new Item("name_style", nameStyleLabel(), true));
                 out.add(new Item("replay_back", tr("logiscope.btn.to_list"), true));
                 out.add(new Item("close", tr("logiscope.btn.close"), true));
             }
@@ -1132,6 +1137,17 @@ public final class ScopeScreen extends Screen {
         return LogiScopeMod.probes().followAfterClose()
                 ? tr("logiscope.btn.follow_on")
                 : tr("logiscope.btn.follow_off");
+    }
+
+    /**
+     * 「名称」按钮的文字（{@code 名称: 实际名} / {@code 名称: 注册名}）。
+     *
+     * 三页共用这一份 —— 文案与状态永远同源（{@link NameText#showDisplay()}），
+     * 不在三个地方各拼一次串。按钮点下去调 {@code NameText.toggle()}，会立刻写回 config。
+     */
+    private String nameStyleLabel() {
+        return tr("logiscope.btn.name_style",
+                tr(NameText.showDisplay() ? "logiscope.name.display" : "logiscope.name.registry"));
     }
 
     // ------------------------------------------------------------------
@@ -1252,6 +1268,10 @@ public final class ScopeScreen extends Screen {
         }
         if ("archive".equals(id)) {
             return COLOR_CALC_GLOW;    // 「Stop & archive」淡紫（与计算页光效同色系）
+        }
+        if ("name_style".equals(id)) {
+            // 与 info 行同色：实际名（默认）时淡青，注册名时回到按钮本色
+            return NameText.showDisplay() ? 0xFF9BE1CB : 0;
         }
         return 0;
     }
@@ -1937,8 +1957,12 @@ public final class ScopeScreen extends Screen {
                 continue;
             }
             // ② 参与匹配的就是这一行**显示出来的**那几段：序号 / 物品 id / 短名（AE 行是显示名）
+            //    + 当前「名称」开关下真正画出来的那个名字 —— 保证"看到什么就能筛什么"，
+            //    两种写法（铁锭 / iron_ingot）都命中，切换开关不会让已有的筛选词失效。
+            String shownName = NameText.of(v.itemId(), v.label());
             boolean hit = !byText || PickerFilter.matches(pickerFilter, v.containerSlotIndex(),
-                    v.itemId(), v.shortName(), v.displayName(), v.empty() ? emptyLabel : null);
+                    v.itemId(), v.shortName(), v.displayName(), shownName,
+                    v.empty() ? emptyLabel : null);
             if (hit) {
                 out.add(v);
             }
@@ -2016,7 +2040,8 @@ public final class ScopeScreen extends Screen {
             g.drawString(this.font, selected ? "[x]" : "[ ]", x + 8, ry,
                     selected ? 0xFF3FE0A0 : 0xFF6A6A78, false);
             String label = "#" + v.containerSlotIndex()
-                    + "  " + (v.empty() ? tr("logiscope.slot.empty") : v.displayName() + " x" + v.count());
+                    + "  " + (v.empty() ? tr("logiscope.slot.empty")
+                    : NameText.of(v.itemId(), v.label()) + " x" + v.count());
             g.drawString(this.font, label, x + 30, ry,
                     v.empty() ? (selected ? 0xFFA8C8B8 : 0xFF707070) : 0xFFE0E0E0, false);
         }
@@ -3675,6 +3700,16 @@ public final class ScopeScreen extends Screen {
                     say(tr("logiscope.flash.nbt_mode_off"));
                 }
                 syncContainerSelection();
+            }
+            case "name_style" -> {
+                // 一个开关同时管选格页 / 图例 / 计算页；写回 config，下次启动保持。
+                // 不碰任何已记录的名字（身份串不变），见 NameText 的类注释。
+                NameText.toggle();
+                // 计算页把「名字 + 运算」拼好缓存在 analyzeTitle 里（键是 区间×曲线×对象×运算），
+                // 换风格不在这四个键里 —— 不主动作废的话标题会一直停在旧写法。
+                aLo = Long.MIN_VALUE;
+                say(tr("logiscope.flash.name_style",
+                        tr(NameText.showDisplay() ? "logiscope.name.display" : "logiscope.name.registry")));
             }
             case "rename" -> {
                 // 点一下弹输入框（不占常规布局，也就不干扰图表交互 —— 需求原文）

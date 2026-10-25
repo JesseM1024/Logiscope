@@ -16,6 +16,7 @@ import net.minecraftforge.common.ForgeConfigSpec;
  * | `maxProbes` | 16 | 1 ~ 64 | 同时运行的探针实例上限（每个实例一份缓冲 + 每世界 tick 一次方块实体读取） |
  * | `maxItemKinds` | 256 | 1 ~ 4096 | 一个实例最多画多少种物品的数据线；超出的种类仍然记账（进统计），但**不画线**，面板上显示 `+N 未显示` |
  * | `dataRefreshTicks` | 20 | 0 ~ 40 | Probe data 页自动重发 `data get block` 的间隔（客户端 tick）；**0 = 不刷新**（只用页面的「刷新」按钮） |
+ * | `nameDisplay` | **true** | true / false | 界面上的名字写法：true = 游戏内实际名（水 / 铁锭），false = 注册名（water / iron_ingot）。**只影响显示**，采样名与存档永远是键身份 |
  *
  * 为什么缓冲按"样本条数"而不是"时长" *   采样节拍 = 世界流速（`/tick rate` 可改），按时长算的话容量会随流速漂移，
  *   而且环形缓冲的容量必须在创建时就定死。按条数最诚实：写满就覆盖最旧的。
@@ -36,6 +37,7 @@ public final class LogiScopeConfig {
     public static final ForgeConfigSpec.IntValue MAX_PROBES;
     public static final ForgeConfigSpec.IntValue MAX_ITEM_KINDS;
     public static final ForgeConfigSpec.IntValue DATA_REFRESH_TICKS;
+    public static final ForgeConfigSpec.BooleanValue NAME_DISPLAY;
 
     static {
         ForgeConfigSpec.Builder b = new ForgeConfigSpec.Builder();
@@ -62,6 +64,15 @@ public final class LogiScopeConfig {
                         "1~40：每 N tick 抓一次；0 = 不刷新（只用页面上的「刷新」按钮手动抓）。",
                         "默认 20（约 1 秒一次）。页面上的滑条与本项是同一个值，滑条改完会存到本文件。")
                 .defineInRange("dataRefreshTicks", 20, 0, 40);
+        b.pop();
+        b.comment("名称显示（只影响界面，不影响采样名）").push("display");
+        NAME_DISPLAY = b
+                .comment("true = 游戏内的实际名（水 / 铁锭 / Iron Ingot），false = 注册名（water / iron_ingot）。",
+                        "选格页 / 图表页 / 计算页上都有「名称: …」按钮，点一下就切换，并立即写回本文件。",
+                        "**只影响显示**：探针记录、存档、导出里的名字永远是键身份",
+                        "（物品 = registry id；AE 的非物品键 = ae: + 键的 SNBT）——",
+                        "换这个开关不会让旧存档对不上新曲线。")
+                .define("nameDisplay", true);
         b.pop();
         SPEC = b.build();
     }
@@ -118,6 +129,34 @@ public final class LogiScopeConfig {
                 return false;
             }
             DATA_REFRESH_TICKS.set(c);
+            SPEC.save();
+            return true;
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** 界面上的名字用「实际名」还是「注册名」。读不到（离线断言 / 配置没建好）按 true。 */
+    public static boolean nameDisplay() {
+        try {
+            return NAME_DISPLAY.get();
+        } catch (Throwable ignored) {
+            return true;
+        }
+    }
+
+    /**
+     * 「名称」按钮写回：改内存值并**落盘**（下次启动保持同一个档位）。
+     * 只影响显示，不碰任何已记录的名字（见 {@link com.jessetech.logiscope.bind.NameText}）。
+     *
+     * @return 值是否真的变了
+     */
+    public static boolean setNameDisplay(boolean v) {
+        try {
+            if (NAME_DISPLAY.get() == v) {
+                return false;
+            }
+            NAME_DISPLAY.set(v);
             SPEC.save();
             return true;
         } catch (Throwable ignored) {
